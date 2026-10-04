@@ -3,7 +3,7 @@
 Alembic и тесты схемы импортируют этот модуль, чтобы видеть схему целиком.
 """
 
-from remnabay import journal, queue
+from remnabay import journal, queue, texts
 from remnabay.db import Base
 from remnabay.domain import (
     bonus,
@@ -37,5 +37,6 @@ __all__ = [
     "subscriptions",
     "tariffs",
     "team",
+    "texts",
     "trials",
 ]
