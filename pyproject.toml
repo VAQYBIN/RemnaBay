@@ -32,6 +32,11 @@ dev = [
     "ruff>=0.16.10",
 ]
 
+[tool.alembic]
+# Для `uv run alembic revision --autogenerate`; в работе миграции применяет `remnabay migrate`
+script_location = "%(here)s/src/remnabay/migrations"
+file_template = "%%(year)d%%(month).2d%%(day).2d_%%(rev)s_%%(slug)s"
+
 [tool.ruff]
 target-version = "py314"
 line-length = 100
