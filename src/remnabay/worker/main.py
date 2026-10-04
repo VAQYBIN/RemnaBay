@@ -1,4 +1,4 @@
-"""Цикл воркера. Пока без задач: очередь появится на этапе 2.
+"""Роль «воркер»: очередь фоновых задач (0024) и файл-пульс.
 
 Воркер не отвечает по HTTP, поэтому о том, что он жив, говорит файл-пульс:
 цикл обновляет его время изменения, проверка здоровья смотрит, свежее ли оно.
@@ -10,12 +10,22 @@ import logging
 import signal
 import tempfile
 import time
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
+
+from remnabay.config import Settings
+from remnabay.db import create_engine
+from remnabay.queue import TaskDefinition, Worker, WorkerConfig
 
 DEFAULT_HEARTBEAT_PATH = Path(tempfile.gettempdir()) / "remnabay-worker.heartbeat"
 HEARTBEAT_INTERVAL_SECONDS = 10.0
 # Несколько пропущенных пульсов подряд — воркер считается зависшим
 HEARTBEAT_MAX_AGE_SECONDS = 60.0
+
+# Виды задач магазина. Добавляются блоками, которые их вводят; очистка очереди
+# встроена в сам воркер
+TASKS: Sequence[TaskDefinition[Any]] = ()
 
 logger = logging.getLogger(__name__)
 
@@ -40,24 +50,35 @@ def is_heartbeat_fresh(
     return current - modified_at <= max_age
 
 
+async def _beat(stop: asyncio.Event, heartbeat_path: Path, interval: float) -> None:
+    while not stop.is_set():
+        write_heartbeat(heartbeat_path)
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+
+
 async def run_worker(
     stop: asyncio.Event,
     heartbeat_path: Path = DEFAULT_HEARTBEAT_PATH,
     interval: float = HEARTBEAT_INTERVAL_SECONDS,
+    queue: Worker | None = None,
 ) -> None:
-    """Работает, пока не выставлен `stop`; при выходе убирает файл-пульс."""
+    """Работает, пока не выставлен `stop`; при выходе убирает файл-пульс.
+
+    Начатые задачи очереди доделываются до выхода.
+    """
     logger.info("Воркер запущен")
     try:
-        while not stop.is_set():
-            write_heartbeat(heartbeat_path)
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(stop.wait(), timeout=interval)
+        async with asyncio.TaskGroup() as group:
+            group.create_task(_beat(stop, heartbeat_path, interval))
+            if queue is not None:
+                group.create_task(queue.run(stop))
     finally:
         remove_heartbeat(heartbeat_path)
         logger.info("Воркер остановлен")
 
 
-def run() -> None:
+def run(settings: Settings) -> None:
     """Запускает воркер до SIGTERM или SIGINT."""
 
     async def main() -> None:
@@ -65,6 +86,11 @@ def run() -> None:
         loop = asyncio.get_running_loop()
         for signal_number in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(signal_number, stop.set)
-        await run_worker(stop)
+        config = WorkerConfig()
+        engine = create_engine(settings, pool_size=config.pool_size)
+        try:
+            await run_worker(stop, queue=Worker(engine, TASKS, config=config))
+        finally:
+            await engine.dispose()
 
     asyncio.run(main())

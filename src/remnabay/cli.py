@@ -66,7 +66,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.command == "worker":
         from remnabay.worker.main import run
 
-        run()
+        run(settings)
     else:
         from remnabay.migrations import upgrade_to_head
 
