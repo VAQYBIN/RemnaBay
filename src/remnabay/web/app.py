@@ -21,6 +21,11 @@ HEALTH_DB_TIMEOUT_SECONDS = 3.0
 logger = logging.getLogger(__name__)
 
 
+def _describe_error(exc: BaseException) -> str:
+    message = str(exc).strip()
+    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
+
+
 class HealthStatus(BaseModel):
     status: Literal["ok", "unavailable"]
 
@@ -44,8 +49,10 @@ def create_app(settings: Settings) -> FastAPI:
         try:
             async with asyncio.timeout(HEALTH_DB_TIMEOUT_SECONDS), engine.connect() as connection:
                 await connection.execute(text("SELECT 1"))
-        except SQLAlchemyError, OSError, TimeoutError:
-            logger.warning("Проверка здоровья: база недоступна", exc_info=True)
+        except (SQLAlchemyError, OSError, TimeoutError) as exc:
+            # Одна строка без трассировки: проверка идёт каждые 15 секунд,
+            # и при недоступной базе трассировки заполнили бы весь лог
+            logger.warning("Проверка здоровья: база недоступна (%s)", _describe_error(exc))
             response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
             return HealthStatus(status="unavailable")
         return HealthStatus(status="ok")
