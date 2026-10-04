@@ -92,6 +92,7 @@
 | `summary.active` | {subscription_name} — до {end_date} |
 | `summary.expired` | {subscription_name} — истекла {end_date} |
 | `summary.disabled` | {subscription_name} — отключена |
+| `summary.limited` | {subscription_name} — трафик исчерпан |
 
 `menu.stale_data` — панель недоступна (4.12)
 ```
@@ -115,6 +116,8 @@
 | `card.status.active` | Активна |
 | `card.status.expired` | Истекла |
 | `card.status.disabled` | Отключена |
+| `card.status.limited` | Трафик исчерпан |
+| `card.tariff.none` | Не выбран |
 
 `card.note.archived`
 ```
@@ -223,6 +226,10 @@
 ```
 К какой подписке добавить {days_text}?
 ```
+`promo.days_queued` — добавление дней ушло в очередь
+```
+Промокод принят. Дни будут добавлены к подписке «{subscription_name}» в ближайшие минуты — мы пришлём подтверждение.
+```
 `promo.days_applied`
 ```
 Готово! К подписке «{subscription_name}» добавлено {days_text}. Теперь она действует до {end_date}.
@@ -281,7 +288,7 @@
 ### С4. Оплата получена, подписка создаётся
 `event.payment_processing`
 ```
-Оплата получена. Применяем её к подписке — это займёт немного времени. Мы пришлём сообщение, как только всё будет готово.
+Оплата получена. Применяем её к подписке — это может занять немного времени. Мы пришлём сообщение, как только всё будет готово.
 ```
 
 ### С5. Оплата не прошла
@@ -337,7 +344,7 @@
 ```
 Возврат по платежу от {payment_date} выполнен. Подписка «{subscription_name}» теперь действует до {end_date}.
 ```
-`event.refunded.ended` — при полном возврате
+`event.refunded.ended` — если после возврата подписка заканчивается сейчас
 ```
 Возврат по платежу от {payment_date} выполнен. Подписка «{subscription_name}» завершена.
 ```
@@ -349,6 +356,12 @@
 | `event.payment_resolved.renewed` | Мы разобрались с вашим платежом: подписка «{subscription_name}» продлена до {end_date}. |
 | `event.payment_resolved.refunded` | Мы разобрались с вашим платежом: деньги возвращены. |
 | `event.payment_resolved.manual` | Мы разобрались с вашим платежом. Если остались вопросы — напишите в поддержку. |
+
+### С17. Не удалось выполнить действие
+`event.action_failed` — команда отменила проваленную операцию (4.32)
+```
+Не удалось выполнить действие. Напишите в поддержку — разберёмся.
+```
 
 ### С16. Трафик триала закончился
 `event.trial_traffic_exhausted`
