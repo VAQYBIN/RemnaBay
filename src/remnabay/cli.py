@@ -4,6 +4,7 @@ import argparse
 import logging
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 from remnabay import healthcheck
 from remnabay.config import ConfigError, load_settings
@@ -59,6 +60,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             host=args.host,
             port=args.port,
             reload=args.reload,
+            # Следить только за кодом пакета, а не за всем окружением
+            reload_dirs=[str(Path(__file__).parent)] if args.reload else None,
         )
     elif args.command == "worker":
         from remnabay.worker.main import run

@@ -1,0 +1,73 @@
+# Окружение разработки: PostgreSQL, миграции, веб и воркер.
+# Не для продакшена: пароли базы — только для локальной разработки.
+#   cp .env.example .env   # и заполнить
+#   docker compose -f compose.dev.yaml up --build
+name: remnabay-dev
+
+x-app: &app
+  build: .
+  image: remnabay:dev
+  # Без .env магазин сам сообщит, каких параметров не хватает (1.1)
+  env_file:
+    - path: .env
+      required: false
+  volumes:
+    - ./src:/app/src
+
+services:
+  db:
+    image: postgres:18.6
+    environment:
+      POSTGRES_USER: remnabay
+      POSTGRES_PASSWORD: remnabay
+      POSTGRES_DB: remnabay
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      # С PostgreSQL 18 данные монтируются на уровень выше PGDATA
+      - db-data:/var/lib/postgresql
+      - ./deploy/dev/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "remnabay", "-d", "remnabay"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Миграции — отдельный короткий шаг перед стартом веба и воркера (0026)
+  migrate:
+    <<: *app
+    command: ["migrate"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    <<: *app
+    command: ["web", "--reload"]
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "remnabay", "healthcheck", "web"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  worker:
+    <<: *app
+    command: ["worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "remnabay", "healthcheck", "worker"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  db-data:
