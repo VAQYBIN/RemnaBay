@@ -84,6 +84,8 @@ class Payment(Base):
     is_unknown: Mapped[bool] = mapped_column(Boolean, server_default=false())
 
     tariff_id: Mapped[int | None] = mapped_column(ForeignKey("tariffs.id"))
+    # К одному платежу — не больше одного промокода (8.5)
+    promo_code_id: Mapped[int | None] = mapped_column(ForeignKey("promo_codes.id"))
     # Параметры тарифа и цена на момент создания платежа (3.7, 3.37)
     # none_as_null: Python None — это SQL NULL, а не JSON-значение null
     tariff_snapshot: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB(none_as_null=True))

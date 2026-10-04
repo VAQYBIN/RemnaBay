@@ -5,16 +5,37 @@ Alembic и тесты схемы импортируют этот модуль, �
 
 from remnabay import journal, queue
 from remnabay.db import Base
-from remnabay.domain import bonus, clients, payments, subscriptions, tariffs, team
+from remnabay.domain import (
+    bonus,
+    broadcasts,
+    clients,
+    migration_runs,
+    panel_events,
+    payments,
+    promo,
+    referrals,
+    reminders,
+    subscriptions,
+    tariffs,
+    team,
+    trials,
+)
 
 __all__ = [
     "Base",
     "bonus",
+    "broadcasts",
     "clients",
     "journal",
+    "migration_runs",
+    "panel_events",
     "payments",
+    "promo",
     "queue",
+    "referrals",
+    "reminders",
     "subscriptions",
     "tariffs",
     "team",
+    "trials",
 ]
