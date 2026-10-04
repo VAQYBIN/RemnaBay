@@ -6,7 +6,7 @@
 
 import asyncio
 import itertools
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import func, select, text, update
@@ -17,6 +17,7 @@ from remnabay.queue import (
     AttemptResult,
     Periodic,
     RetryPolicy,
+    TaskContext,
     TaskNotFailedError,
     TaskStatus,
     WorkerConfig,
@@ -26,7 +27,8 @@ from remnabay.queue import (
     task_subject,
     waiting_behind,
 )
-from remnabay.queue._models import QueueTask
+from remnabay.queue._models import QueuePeriodicSlot, QueueTask
+from remnabay.queue._worker import cleanup
 from tests.queue_support import (
     FAILING,
     FAST_CONFIG,
@@ -34,8 +36,10 @@ from tests.queue_support import (
     PANEL,
     FlakyArgs,
     LabelArgs,
+    PanelDownError,
     RecordArgs,
     SpawnArgs,
+    SqlSleepArgs,
     all_finished,
     enqueue,
     events,
@@ -45,6 +49,7 @@ from tests.queue_support import (
     record_event,
     run_workers,
     spawn,
+    sql_sleep,
     status_of,
     switch,
 )
@@ -173,7 +178,7 @@ async def test_4_14_retries_with_growing_intervals_until_attempt_limit(
     """4.14: повторы с нарастающими интервалами; после лимита попыток — «провалена»."""
     FAILING.add("x")
     policy = RetryPolicy(
-        first_delay=timedelta(milliseconds=300),
+        first_delay=timedelta(milliseconds=500),
         max_delay=timedelta(seconds=5),
         max_attempts=4,
         max_age=timedelta(seconds=60),
@@ -195,8 +200,8 @@ async def test_4_14_retries_with_growing_intervals_until_attempt_limit(
     ]
     # Попытка не начинается раньше срока; опоздание — на опрос и задержки окружения.
     # Запас меньше шага, поэтому проверка заодно подтверждает, что интервалы растут
-    for gap, expected in zip(gaps, (0.3, 0.6, 1.2), strict=True):
-        assert expected <= gap < expected + 0.3
+    for gap, expected in zip(gaps, (0.5, 1.0, 2.0), strict=True):
+        assert expected <= gap < expected + 0.45
 
 
 async def test_4_14_retries_stop_when_time_window_ends(queue_engine: AsyncEngine) -> None:
@@ -268,6 +273,60 @@ async def test_task_timeout_fails_the_attempt_and_is_counted(queue_engine: Async
         attempts = await attempts_of(session, task_id)
     assert [a.error for a in attempts] == ["Превышено время выполнения задачи (0.2 с)"] * 2
     assert await status_of(queue_engine, task_id) == TaskStatus.FAILED
+
+
+_SHORT_TIMEOUT = WorkerConfig(
+    concurrency=1,
+    poll_interval=timedelta(milliseconds=20),
+    task_timeout=timedelta(milliseconds=300),
+    idle_in_transaction_timeout=timedelta(seconds=2),
+)
+
+
+async def test_4_14_timeout_inside_sql_query_keeps_retry_pause(queue_engine: AsyncEngine) -> None:
+    """4.14: таймаут, прервавший SQL-запрос задачи, ломает транзакцию воркера — пауза
+    перед повтором всё равно назначается, а не теряется."""
+    policy = RetryPolicy(first_delay=timedelta(seconds=30), max_delay=timedelta(seconds=60))
+    task_id = await enqueue(queue_engine, sql_sleep, SqlSleepArgs(seconds=3))
+    worker = make_worker(queue_engine, policy=policy, config=_SHORT_TIMEOUT)
+
+    assert await worker.run_one() is True
+
+    async with AsyncSession(queue_engine) as session:
+        attempts = await attempts_of(session, task_id)
+        pause = await session.scalar(
+            select(QueueTask.run_at - func.now()).where(QueueTask.id == task_id)
+        )
+    assert [(a.result, a.error) for a in attempts] == [
+        (AttemptResult.ERROR, "Превышено время выполнения задачи (0.3 с)")
+    ]
+    assert await status_of(queue_engine, task_id) == TaskStatus.PENDING
+    assert pause is not None
+    assert pause > timedelta(seconds=25)
+    assert await worker.run_one() is False
+
+
+async def test_4_18_own_timeout_is_not_panel_unavailability(queue_engine: AsyncEngine) -> None:
+    """4.18, 4.30: даже если таймауты запросов считаются «панель недоступна», таймаут
+    самой задачи — обычная ошибка с подсчётом попыток, а не бесконечное ожидание."""
+    task_id = await enqueue(queue_engine, record_event, RecordArgs(label="slow", sleep=5))
+    worker = make_worker(
+        queue_engine, config=_SHORT_TIMEOUT, unavailable=(PanelDownError, TimeoutError)
+    )
+
+    await worker.run_one()
+
+    async with AsyncSession(queue_engine) as session:
+        attempts = await attempts_of(session, task_id)
+    assert [a.result for a in attempts] == [AttemptResult.ERROR]
+
+
+def test_4_14_retry_pause_is_capped_for_any_attempt_count() -> None:
+    """4.14: пауза растёт до предела и не переполняется при большом лимите попыток."""
+    policy = RetryPolicy(first_delay=timedelta(seconds=10), max_delay=timedelta(minutes=5))
+
+    assert [policy.delay_after(n).total_seconds() for n in (1, 2, 3)] == [10, 20, 40]
+    assert policy.delay_after(1000) == timedelta(minutes=5)
 
 
 def test_task_timeout_must_be_shorter_than_idle_transaction_timeout() -> None:
@@ -498,6 +557,27 @@ async def test_cleanup_removes_old_finished_tasks_only(queue_engine: AsyncEngine
             await session.scalars(select(QueueTask.id).where(QueueTask.name == "test.record"))
         )
     assert remaining == {ids["fresh_done"], ids["old_failed"], ids["pending"]}
+
+
+async def test_cleanup_keeps_latest_slot_of_each_periodic_task(queue_engine: AsyncEngine) -> None:
+    """Очистка не удаляет последний слот задачи: задача с периодом больше суток не
+    ставится повторно в том же периоде."""
+    async with AsyncSession(queue_engine) as session, session.begin():
+        for name, days in (("weekly", 10), ("weekly", 3), ("hourly", 3), ("hourly", 0)):
+            session.add(
+                QueuePeriodicSlot(
+                    name=name,
+                    slot_start=datetime.now(UTC) - timedelta(days=days, minutes=1),
+                )
+            )
+        await cleanup.run(TaskContext(session=session, task_id=0, attempt_number=1), {})
+
+    async with AsyncSession(queue_engine) as session:
+        remaining = sorted(
+            (slot.name, (datetime.now(UTC) - slot.slot_start).days)
+            for slot in await session.scalars(select(QueuePeriodicSlot))
+        )
+    assert remaining == [("hourly", 0), ("weekly", 3)]
 
 
 async def _no_cleanup_pending(engine: AsyncEngine) -> bool:

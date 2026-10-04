@@ -27,6 +27,7 @@ from typing import Protocol
 from pydantic import BaseModel
 from sqlalchemy import delete, exists, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import aliased
 
@@ -122,14 +123,49 @@ async def cleanup(context: TaskContext, _args: CleanupArgs) -> None:
             QueueTask.finished_at < now - FINISHED_RETENTION,
         )
     )
+    # Последний слот задачи не удаляется: иначе задача с периодом больше суток
+    # поставилась бы ещё раз в том же периоде
+    later = aliased(QueuePeriodicSlot)
     await context.session.execute(
-        delete(QueuePeriodicSlot).where(QueuePeriodicSlot.slot_start < now - SLOT_RETENTION)
+        delete(QueuePeriodicSlot).where(
+            QueuePeriodicSlot.slot_start < now - SLOT_RETENTION,
+            exists().where(
+                later.name == QueuePeriodicSlot.name,
+                later.slot_start > QueuePeriodicSlot.slot_start,
+            ),
+        )
     )
 
 
-def _describe(error: BaseException, timeout: timedelta) -> str:
-    if isinstance(error, TimeoutError):
-        return f"Превышено время выполнения задачи ({timeout.total_seconds():g} с)"
+class TaskTimeoutError(Exception):
+    """Задача не уложилась в свой таймаут.
+
+    Отдельный класс, а не `TimeoutError`: таймаут запроса к панели означает «панель
+    недоступна» (4.30), а таймаут самой задачи — обычная ошибка с подсчётом попыток.
+    """
+
+    def __init__(self, timeout: timedelta) -> None:
+        super().__init__(f"Превышено время выполнения задачи ({timeout.total_seconds():g} с)")
+
+
+class _BrokenTransactionError(Exception):
+    """Транзакция воркера сломалась после ошибки задачи — повтор назначается заново.
+
+    Так бывает, когда таймаут задачи прервал её SQL-запрос: SQLAlchemy считает
+    соединение испорченным и не даёт продолжить транзакцию.
+    """
+
+    def __init__(self, task_id: int, retry_round: int, number: int, *, unavailable: bool) -> None:
+        super().__init__(f"Транзакция воркера сломалась после ошибки задачи {task_id}")
+        self.task_id = task_id
+        self.retry_round = retry_round
+        self.number = number
+        self.unavailable = unavailable
+
+
+def _describe(error: BaseException) -> str:
+    if isinstance(error, TaskTimeoutError):
+        return str(error)
     return f"{type(error).__name__}: {error}"[:ERROR_TEXT_LIMIT]
 
 
@@ -207,6 +243,13 @@ class Worker:
 
     async def run_one(self) -> bool:
         """Берёт и выполняет одну задачу. `False` — брать сейчас нечего."""
+        try:
+            return await self._take_and_run()
+        except _BrokenTransactionError as broken:
+            await self._reschedule_after_broken(broken)
+            return True
+
+    async def _take_and_run(self) -> bool:
         async with self._sessions() as session, self._sessions() as side, session.begin():
             idle_ms = int(self._config.idle_in_transaction_timeout.total_seconds() * 1000)
             await session.execute(
@@ -257,22 +300,13 @@ class Worker:
         context = TaskContext(session=session, task_id=task_id, attempt_number=number)
         try:
             async with session.begin_nested():
-                async with asyncio.timeout(self._config.task_timeout.total_seconds()):
-                    definition = self._tasks.get(name)
-                    if definition is None:
-                        raise LookupError(f"Неизвестный вид задачи {name}")
-                    await definition.run(context, args)
+                await self._run_with_timeout(context, name, args)
         except self._unavailable as error:
             await self._finish_attempt(side, task_id, number, AttemptResult.UNAVAILABLE, error)
-            await self._set_status(
-                session,
-                task_id,
-                TaskStatus.WAITING_PANEL,
-                run_at=func.clock_timestamp() + self._policy.unavailable_recheck,
-            )
+            await self._after_failure(session, task_id, retry_round, number, unavailable=True)
         except Exception as error:
             await self._finish_attempt(side, task_id, number, AttemptResult.ERROR, error)
-            await self._retry_or_fail(session, task_id, retry_round)
+            await self._after_failure(session, task_id, retry_round, number, unavailable=False)
         else:
             await session.execute(
                 update(QueueAttempt)
@@ -289,6 +323,73 @@ class Worker:
                 subject=task_subject(task_id),
                 outcome=Outcome.SUCCESS,
                 details={"attempt": number, "task": name},
+            )
+
+    async def _run_with_timeout(
+        self, context: TaskContext, name: str, args: dict[str, JsonValue]
+    ) -> None:
+        timer = asyncio.timeout(self._config.task_timeout.total_seconds())
+        try:
+            async with timer:
+                definition = self._tasks.get(name)
+                if definition is None:
+                    raise LookupError(f"Неизвестный вид задачи {name}")
+                await definition.run(context, args)
+        except TimeoutError as error:
+            if timer.expired():
+                raise TaskTimeoutError(self._config.task_timeout) from error
+            raise
+
+    async def _after_failure(
+        self,
+        session: AsyncSession,
+        task_id: int,
+        retry_round: int,
+        number: int,
+        *,
+        unavailable: bool,
+    ) -> None:
+        try:
+            await self._reschedule(session, task_id, retry_round, unavailable=unavailable)
+        except SQLAlchemyError as error:
+            raise _BrokenTransactionError(
+                task_id, retry_round, number, unavailable=unavailable
+            ) from error
+
+    async def _reschedule(
+        self, session: AsyncSession, task_id: int, retry_round: int, *, unavailable: bool
+    ) -> None:
+        """После неудачной попытки: «ждёт панель», повтор с паузой или провал."""
+        if unavailable:
+            await self._set_status(
+                session,
+                task_id,
+                TaskStatus.WAITING_PANEL,
+                run_at=func.clock_timestamp() + self._policy.unavailable_recheck,
+            )
+        else:
+            await self._retry_or_fail(session, task_id, retry_round)
+
+    async def _reschedule_after_broken(self, broken: _BrokenTransactionError) -> None:
+        """Назначает повтор в новой транзакции, если задачу ещё никто не взял заново."""
+        async with self._sessions() as session, session.begin():
+            locked = await session.scalar(
+                select(QueueTask.id)
+                .where(
+                    QueueTask.id == broken.task_id,
+                    QueueTask.status.in_(RUNNABLE),
+                    QueueTask.retry_round == broken.retry_round,
+                    ~exists().where(
+                        QueueAttempt.task_id == QueueTask.id,
+                        QueueAttempt.number > broken.number,
+                    ),
+                )
+                .with_for_update(skip_locked=True, key_share=True, of=QueueTask)
+            )
+            if locked is None:
+                return
+            await self._reschedule(
+                session, broken.task_id, broken.retry_round, unavailable=broken.unavailable
             )
 
     async def _start_attempt(self, side: AsyncSession, task_id: int, retry_round: int) -> int:
@@ -313,7 +414,7 @@ class Worker:
     ) -> None:
         """Записывает ошибку попытки сразу и отдельно: текст не потеряется, даже если
         транзакция воркера уже неработоспособна (например, после таймаута)."""
-        error_text = _describe(error, self._config.task_timeout)
+        error_text = _describe(error)
         logger.warning("Задача %s, попытка %s: %s", task_id, number, error_text)
         async with side.begin():
             await side.execute(

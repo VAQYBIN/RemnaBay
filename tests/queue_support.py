@@ -122,6 +122,16 @@ async def needs_panel(context: TaskContext, args: LabelArgs) -> None:
     await _write_event(context, args.label, datetime.now(UTC))
 
 
+class SqlSleepArgs(BaseModel):
+    seconds: float
+
+
+@task("test.sql_sleep", SqlSleepArgs)
+async def sql_sleep(context: TaskContext, args: SqlSleepArgs) -> None:
+    """Долгий SQL-запрос: таймаут задачи прерывает его посреди выполнения."""
+    await context.session.execute(text("SELECT pg_sleep(:seconds)"), {"seconds": args.seconds})
+
+
 class NoArgs(BaseModel):
     pass
 
@@ -146,7 +156,7 @@ async def spawn(context: TaskContext, args: SpawnArgs) -> None:
         raise RuntimeError("сбой после постановки подзадач")
 
 
-ALL_TASKS = (record_event, flaky, switch, needs_panel, crash, spawn)
+ALL_TASKS = (record_event, flaky, switch, needs_panel, crash, spawn, sql_sleep)
 
 FAST_POLICY = RetryPolicy(
     first_delay=timedelta(milliseconds=50),
@@ -169,6 +179,7 @@ def make_worker(
     policy: RetryPolicy = FAST_POLICY,
     config: WorkerConfig = FAST_CONFIG,
     periodic: Sequence[Periodic[RecordArgs]] = (),
+    unavailable: tuple[type[Exception], ...] = (PanelDownError,),
 ) -> Worker:
     return Worker(
         engine,
@@ -176,7 +187,7 @@ def make_worker(
         periodic=periodic,
         policy=policy,
         config=config,
-        unavailable=(PanelDownError,),
+        unavailable=unavailable,
     )
 
 

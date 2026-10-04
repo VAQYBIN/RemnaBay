@@ -129,7 +129,9 @@ class RetryPolicy:
 
     def delay_after(self, counted_attempts: int) -> timedelta:
         """Пауза перед следующей попыткой: удваивается с каждой неудачей."""
-        return min(self.first_delay * 2 ** (counted_attempts - 1), self.max_delay)
+        # Степень ограничена: при большом лимите попыток timedelta переполнилась бы
+        doublings = min(counted_attempts - 1, 32)
+        return min(self.first_delay * 2**doublings, self.max_delay)
 
 
 class TaskNotFailedError(Exception):

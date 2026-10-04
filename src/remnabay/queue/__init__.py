@@ -24,7 +24,7 @@ from remnabay.queue._core import (
     waiting_behind,
 )
 from remnabay.queue._models import AttemptResult, TaskStatus
-from remnabay.queue._worker import Periodic, Worker, WorkerConfig
+from remnabay.queue._worker import Periodic, TaskTimeoutError, Worker, WorkerConfig
 
 __all__ = [
     "AttemptResult",
@@ -34,6 +34,7 @@ __all__ = [
     "TaskDefinition",
     "TaskNotFailedError",
     "TaskStatus",
+    "TaskTimeoutError",
     "Worker",
     "WorkerConfig",
     "attempts_of",
