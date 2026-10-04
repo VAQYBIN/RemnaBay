@@ -36,7 +36,7 @@ jobs:
       TEST_DATABASE_URL: postgresql://remnabay:remnabay@localhost:5432/remnabay_test
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.2.0  # у setup-uv нет плавающего тега основной версии
         with:
           version: "0.12.23"
           enable-cache: true
