@@ -23,7 +23,7 @@ NAMING_CONVENTION = {
 
 
 class Base(DeclarativeBase):
-    """Базовый класс моделей. Модели предметной области появятся на этапе 2."""
+    """Базовый класс моделей. Все модули с моделями перечислены в `remnabay.schema`."""
 
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
 
