@@ -17,7 +17,6 @@ from sqlalchemy import (
     BigInteger,
     CheckConstraint,
     DateTime,
-    Enum,
     Identity,
     Index,
     String,
@@ -28,7 +27,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
-from remnabay.db import Base
+from remnabay.db import Base, str_enum_type
 
 # Значение в JSON: подробности события хранятся как есть
 type JsonValue = str | int | float | bool | list[JsonValue] | dict[str, JsonValue] | None
@@ -104,22 +103,6 @@ class Subject:
         object.__setattr__(self, "id", str(id))
 
 
-def _enum_values(members: type[StrEnum]) -> list[str]:
-    return [member.value for member in members]
-
-
-def _enum_type[E: StrEnum](enum_class: type[E], name: str) -> Enum:
-    # Строка с CHECK вместо типа ENUM в PostgreSQL: новое значение — без ALTER TYPE
-    return Enum(
-        enum_class,
-        name=name,
-        native_enum=False,
-        create_constraint=True,
-        length=32,
-        values_callable=_enum_values,
-    )
-
-
 class JournalEntry(Base):
     """Запись журнала. Только чтение после вставки (4.26)."""
 
@@ -139,12 +122,12 @@ class JournalEntry(Base):
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.clock_timestamp()
     )
-    actor_type: Mapped[ActorType] = mapped_column(_enum_type(ActorType, "actor_type"))
+    actor_type: Mapped[ActorType] = mapped_column(str_enum_type(ActorType, "actor_type"))
     actor_ref: Mapped[str | None] = mapped_column(String(64))
     action: Mapped[str] = mapped_column(String(100))
     subject_type: Mapped[str | None] = mapped_column(String(50))
     subject_id: Mapped[str | None] = mapped_column(String(64))
-    outcome: Mapped[Outcome] = mapped_column(_enum_type(Outcome, "outcome"))
+    outcome: Mapped[Outcome] = mapped_column(str_enum_type(Outcome, "outcome"))
     details: Mapped[dict[str, JsonValue]] = mapped_column(JSONB, server_default="{}")
 
     @property
