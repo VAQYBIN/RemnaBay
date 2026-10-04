@@ -16,6 +16,7 @@ from typing import Any
 
 from remnabay.config import Settings
 from remnabay.db import create_engine
+from remnabay.panel import PanelUnavailableError
 from remnabay.queue import TaskDefinition, Worker, WorkerConfig
 
 DEFAULT_HEARTBEAT_PATH = Path(tempfile.gettempdir()) / "remnabay-worker.heartbeat"
@@ -26,6 +27,8 @@ HEARTBEAT_MAX_AGE_SECONDS = 60.0
 # Виды задач магазина. Добавляются блоками, которые их вводят; очистка очереди
 # встроена в сам воркер
 TASKS: Sequence[TaskDefinition[Any]] = ()
+# Ошибки «внешний сервис недоступен»: задача ждёт, а не проваливается (4.30)
+UNAVAILABLE: tuple[type[Exception], ...] = (PanelUnavailableError,)
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +92,8 @@ def run(settings: Settings) -> None:
         config = WorkerConfig()
         engine = create_engine(settings, pool_size=config.pool_size)
         try:
-            await run_worker(stop, queue=Worker(engine, TASKS, config=config))
+            queue = Worker(engine, TASKS, config=config, unavailable=UNAVAILABLE)
+            await run_worker(stop, queue=queue)
         finally:
             await engine.dispose()
 

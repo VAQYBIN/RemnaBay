@@ -5,8 +5,9 @@ from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from remnabay.panel import PanelUnavailableError
 from remnabay.queue import TaskStatus, attempts_of
-from remnabay.worker.main import is_heartbeat_fresh, run_worker, write_heartbeat
+from remnabay.worker.main import UNAVAILABLE, is_heartbeat_fresh, run_worker, write_heartbeat
 from tests.queue_support import (
     RecordArgs,
     enqueue,
@@ -67,3 +68,8 @@ async def test_worker_runs_queue_and_finishes_started_task_on_stop(
 async def _attempt_started(engine: AsyncEngine, task_id: int) -> bool:
     async with AsyncSession(engine) as session:
         return bool(await attempts_of(session, task_id))
+
+
+def test_4_30_panel_unavailability_makes_task_wait() -> None:
+    """4.30: воркер считает недоступность панели ожиданием, а не провалом."""
+    assert PanelUnavailableError in UNAVAILABLE
