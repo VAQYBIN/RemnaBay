@@ -33,8 +33,8 @@
 ## Закрытые
 - [x] ~~Ограничения rich-сообщений для инструкции~~ → хватает с запасом: инструкция по 12.3 — 88 блоков из 500, ~4,3 тыс. символов из 32 768, [research/spike-telegram.md](research/spike-telegram.md), вопрос 1
 - [x] ~~Правка обычного сообщения в rich и обратно в живом меню~~ → можно в обе стороны, [research/spike-telegram.md](research/spike-telegram.md), вопрос 2
-- [x] ~~Показывается ли date_time в часовом поясе клиента~~ → да; но Android внутри rich показывает текст-подложку, [research/spike-telegram.md](research/spike-telegram.md), вопрос 3
-- [x] ~~Как rich-сообщения выглядят в старых клиентах, на десктопе и в вебе~~ → Desktop, Android, Web A — полностью; Web K и старые клиенты показывают заглушку вместо rich с кнопками и сообщений с неактивной кнопкой, [research/spike-telegram.md](research/spike-telegram.md), вопрос 4
+- [x] ~~Показывается ли date_time в часовом поясе клиента~~ → да; Android внутри rich показывает запасной текст — время магазина с подписью «МСК», [решение 0044](decisions/0044-rich-messages-refinements.md); разбор — [research/spike-telegram.md](research/spike-telegram.md), вопрос 3
+- [x] ~~Как rich-сообщения выглядят в старых клиентах, на десктопе и в вебе~~ → Desktop, Android, Web A — полностью; Web K и старые клиенты показывают заглушку вместо rich с кнопками и сообщений с неактивной кнопкой; на Web K магазин не ориентируется, кнопки внутри rich и неактивные кнопки остаются, [решение 0044](decisions/0044-rich-messages-refinements.md); разбор — [research/spike-telegram.md](research/spike-telegram.md), вопрос 4
 - [x] ~~Кнопка «Открыть в браузере» до первого ответа панели~~ → как раньше: кнопка показывается, текст — `guide.unavailable` (12.16)
 - [x] ~~Клиент панели: SDK или свой~~ → свой тонкий клиент на httpx2, без SDK, [решение 0042](decisions/0042-own-panel-client.md)
 - [x] ~~Доступно ли через API-токен разрешение «пользователь → конфиг Subscription Page»~~ → доступно (`subpage-config` по `shortUuid`), но `null` не отличает «по умолчанию» от «не найден»; конфиг по умолчанию магазин подставляет сам, [research/spike-panel.md](research/spike-panel.md), вопрос 1
