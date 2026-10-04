@@ -1,0 +1,8 @@
+{
+  "enabledPlugins": {
+    "pyright-lsp@claude-plugins-official": true,
+    "typescript-native-lsp@anthropic-plugin-directory": false,
+    "pr-review-toolkit@anthropic-plugin-directory": true,
+    "playwright@claude-plugins-official": true
+  }
+}
