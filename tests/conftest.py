@@ -22,7 +22,8 @@ REQUIRED_ENV = {
     ),
     "OWNER_TELEGRAM_ID": "100500",
     "PUBLIC_URL": "https://shop.example.com",
-    "ENCRYPTION_KEY": "test-encryption-key",
+    # Ключ только для тестов, в формате remnabay generate-key
+    "ENCRYPTION_KEY": "dGVzdC1rZXktdGVzdC1rZXktdGVzdC1rZXktdGVzdC0=",
 }
 
 

@@ -3,6 +3,7 @@
 import pytest
 
 from remnabay.cli import EXIT_CONFIG_ERROR, main
+from remnabay.crypto import is_valid_key
 from tests.conftest import REQUIRED_ENV
 
 
@@ -23,3 +24,12 @@ def test_1_1_role_does_not_start_without_env(role: str, capsys: pytest.CaptureFi
 def test_migrate_role_applies_migrations() -> None:
     """`remnabay migrate` с верными параметрами применяет миграции и завершается успешно."""
     assert main(["migrate"]) == 0
+
+
+@pytest.mark.usefixtures("clean_env")
+def test_generate_key_works_before_env_is_filled(capsys: pytest.CaptureFixture[str]) -> None:
+    """Ключ шифрования создаётся до заполнения .env и проходит проверку формата (1.1)."""
+    assert main(["generate-key"]) == 0
+
+    key = capsys.readouterr().out.strip()
+    assert is_valid_key(key)

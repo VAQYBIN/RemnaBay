@@ -18,6 +18,8 @@ from pydantic import (
 from pydantic_core import ErrorDetails, PydanticCustomError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from remnabay.crypto import is_valid_key
+
 DEFAULT_ENV_FILE = Path(".env")
 
 # Драйвер psycopg 3 нужен очереди задач (решение 0024, эксперимент с очередью)
@@ -40,7 +42,16 @@ def _require_psycopg(dsn: PostgresDsn) -> PostgresDsn:
     return dsn
 
 
+def _require_encryption_key(key: SecretStr) -> SecretStr:
+    if not is_valid_key(key.get_secret_value()):
+        raise PydanticCustomError(
+            "encryption_key", "неверный формат ключа — создайте ключ командой remnabay generate-key"
+        )
+    return key
+
+
 type HttpsUrl = Annotated[HttpUrl, AfterValidator(_require_https)]
+type EncryptionKey = Annotated[SecretStr, AfterValidator(_require_encryption_key)]
 type PsycopgDsn = Annotated[PostgresDsn, AfterValidator(_require_psycopg)]
 
 
@@ -61,7 +72,7 @@ class Settings(BaseSettings):
     database_url: PsycopgDsn
     owner_telegram_id: PositiveInt
     public_url: HttpsUrl
-    encryption_key: SecretStr
+    encryption_key: EncryptionKey
 
     @property
     def sqlalchemy_database_url(self) -> str:
