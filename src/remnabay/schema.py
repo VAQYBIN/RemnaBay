@@ -3,7 +3,7 @@
 Alembic и тесты схемы импортируют этот модуль, чтобы видеть схему целиком.
 """
 
-from remnabay import journal
+from remnabay import journal, queue
 from remnabay.db import Base
 
-__all__ = ["Base", "journal"]
+__all__ = ["Base", "journal", "queue"]

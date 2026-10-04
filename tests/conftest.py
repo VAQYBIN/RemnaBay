@@ -6,10 +6,11 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import pool
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
 from remnabay.config import load_settings
 from remnabay.migrations import upgrade_to_head
+from tests import queue_support
 
 REQUIRED_ENV = {
     "BOT_TOKEN": "123456:test-bot-token",
@@ -71,3 +72,21 @@ async def db_session(database_url: str) -> AsyncIterator[AsyncSession]:
             await session.close()
             await transaction.rollback()
     await engine.dispose()
+
+
+@pytest.fixture
+async def queue_engine(database_url: str) -> AsyncIterator[AsyncEngine]:
+    """Движок для тестов очереди: данные фиксируются по-настоящему, как у воркера.
+
+    Таблицы очереди очищаются до и после теста. Номера задач не сбрасываются:
+    записи журнала о прошлых задачах остаются (4.26) и не должны совпасть с новыми.
+    """
+    engine = create_async_engine(database_url, pool_size=10)
+    queue_support.PANEL["up"] = True
+    queue_support.FAILING.clear()
+    await queue_support.prepare(engine)
+    try:
+        yield engine
+    finally:
+        await queue_support.prepare(engine)
+        await engine.dispose()
