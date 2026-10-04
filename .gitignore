@@ -1,0 +1,52 @@
+# Секреты и локальное окружение
+# Все параметры — в .env.example (он в репозитории)
+.env
+.env.*
+!.env.example
+
+# Python (uv, ruff, pyright, pytest)
+# uv.lock в репозитории (решение 0027)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.ruff_cache/
+.pytest_cache/
+.pyright/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Node и админка (npm, Vite, TypeScript)
+# package-lock.json в репозитории (решение 0027)
+node_modules/
+*.tsbuildinfo
+.vite/
+npm-debug.log*
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+.playwright-mcp/
+
+# Claude Code и скиллы: локальные настройки, общие (.claude/settings.json, .mcp.json, скиллы) — в репозитории
+.claude/settings.local.json
+.impeccable/config.local.json
+.agents/skills/*/scripts/bin/
+
+# Логи
+*.log
+
+# Редакторы и ОС
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+.DS_Store
+Thumbs.db
