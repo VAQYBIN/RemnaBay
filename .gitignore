@@ -40,6 +40,9 @@ blob-report/
 .impeccable/config.local.json
 .agents/skills/*/scripts/bin/
 
+# Чужие референсы дизайна: права не наши, хранятся только локально
+docs/design/reference-glass.png
+
 # Логи
 *.log
 
