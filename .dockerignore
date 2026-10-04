@@ -1,0 +1,23 @@
+# В образ попадает только то, что нужно для сборки и запуска
+.git
+.github
+.venv
+.env
+.env.*
+!.env.example
+**/__pycache__
+**/*.py[cod]
+.ruff_cache
+.pytest_cache
+.pyright
+admin/node_modules
+admin/dist
+docs
+tests
+deploy
+.claude
+.agents
+.mcp.json
+skills-lock.json
+third-party-licenses
+*.log
