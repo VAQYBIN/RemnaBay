@@ -80,6 +80,10 @@ type PositiveDuration = Annotated[timedelta, Field(gt=timedelta(0))]
 _ATTEMPTS = TypeAdapter[int](PositiveInt)
 _DURATION = TypeAdapter[timedelta](PositiveDuration)
 
+# «Магазин»: язык бота по умолчанию (0018); тексты по умолчанию — пока только русские
+SHOP_LANGUAGE = ShopSetting(
+    "shop.default_language", TypeAdapter[str](Annotated[str, Field(pattern=r"^[a-z]{2}$")]), "ru"
+)
 # «Оплата» → «Повтор операций»: прекращение через 1 час или после 20 попыток (4.14)
 RETRY_MAX_ATTEMPTS = ShopSetting("retry.max_attempts", _ATTEMPTS, 20)
 RETRY_WINDOW = ShopSetting("retry.window", _DURATION, timedelta(hours=1))

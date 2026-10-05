@@ -14,8 +14,10 @@ from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from remnabay import runtime
 from remnabay.config import Settings
 from remnabay.db import create_engine
+from remnabay.messaging import TelegramSender, notify_team, send_message
 from remnabay.panel import PanelUnavailableError
 from remnabay.queue import RetryPolicy, TaskRegistry, Worker, WorkerConfig
 from remnabay.shop_settings import RETRY_MAX_ATTEMPTS, RETRY_WINDOW, get_setting
@@ -27,11 +29,16 @@ HEARTBEAT_MAX_AGE_SECONDS = 60.0
 
 # Виды задач магазина — общие для воркера и действий команды над проваленными.
 # Добавляются блоками, которые их вводят; очистка очереди встроена в сам воркер
-TASKS = TaskRegistry(())
+TASKS = TaskRegistry((send_message,))
 # Ошибки «внешний сервис недоступен»: задача ждёт, а не проваливается (4.30)
 UNAVAILABLE: tuple[type[Exception], ...] = (PanelUnavailableError,)
 
 logger = logging.getLogger(__name__)
+
+
+async def notify_operation_failed(session: AsyncSession, _task_id: int, _name: str) -> None:
+    """Операция без своих последствий провала — команда получает уведомление (4.31)."""
+    await notify_team(session, "team.operation_failed")
 
 
 async def retry_policy(session: AsyncSession) -> RetryPolicy:
@@ -100,12 +107,20 @@ def run(settings: Settings) -> None:
             loop.add_signal_handler(signal_number, stop.set)
         config = WorkerConfig()
         engine = create_engine(settings, pool_size=config.pool_size)
+        sender = TelegramSender(settings.bot_token.get_secret_value())
         try:
             queue = Worker(
-                engine, TASKS, policy=retry_policy, config=config, unavailable=UNAVAILABLE
+                engine,
+                TASKS,
+                policy=retry_policy,
+                config=config,
+                unavailable=UNAVAILABLE,
+                on_failed=notify_operation_failed,
             )
-            await run_worker(stop, queue=queue)
+            with runtime.use(runtime.Runtime(sender=sender)):
+                await run_worker(stop, queue=queue)
         finally:
+            await sender.close()
             await engine.dispose()
 
     asyncio.run(main())
