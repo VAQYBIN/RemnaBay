@@ -1,6 +1,8 @@
 """API веб-админки: `/api/admin/…` (решение 0051)."""
 
-from fastapi import APIRouter, Depends
+from typing import Any
+
+from fastapi import APIRouter, Depends, FastAPI
 
 from remnabay.web.admin import _auth
 from remnabay.web.admin._auth import ADMIN_PATH, LOGIN_COOKIE, TELEGRAM_LOGIN_PATH
@@ -17,6 +19,13 @@ def build_router() -> APIRouter:
     return router
 
 
+def openapi_schema() -> dict[str, Any]:
+    """Схема API админки для генерации клиента (0050, 0051) — без настроек и базы."""
+    app = FastAPI(title="RemnaBay Admin API")
+    app.include_router(build_router())
+    return app.openapi()
+
+
 __all__ = [
     "ADMIN_LOGIN_URL_PATH",
     "ADMIN_PATH",
@@ -24,4 +33,5 @@ __all__ = [
     "LOGIN_COOKIE",
     "SESSION_COOKIE",
     "build_router",
+    "openapi_schema",
 ]
