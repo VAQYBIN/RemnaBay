@@ -28,6 +28,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+class _TooLargeError(Exception):
+    pass
+
+
+async def _read_body(request: Request) -> bytes:
+    """Тело запроса не больше предела. Слишком большое не читается целиком: заголовок
+    проверяется сразу, а поток обрывается на превышении."""
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > MAX_BODY_BYTES:
+        raise _TooLargeError
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > MAX_BODY_BYTES:
+            raise _TooLargeError
+    return bytes(body)
+
+
 async def _reject(session: AsyncSession, reason: str, status_code: int) -> Response:
     await record(
         session,
@@ -46,8 +64,9 @@ async def panel_webhook(
     session: Annotated[AsyncSession, Depends(get_session)],
     box: Annotated[SecretBox, Depends(get_box)],
 ) -> Response:
-    body = await request.body()
-    if len(body) > MAX_BODY_BYTES:
+    try:
+        body = await _read_body(request)
+    except _TooLargeError:
         return await _reject(session, "too_large", status.HTTP_413_CONTENT_TOO_LARGE)
     try:
         secret = await webhook_secret(session, box)

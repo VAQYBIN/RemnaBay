@@ -20,7 +20,7 @@ from remnabay.queue._models import QueueTask
 from remnabay.shop_settings import PANEL_WEBHOOK_SECRET, ShopSettingValue, webhook_secret
 from remnabay.web.app import create_app
 from remnabay.web.deps import get_session
-from remnabay.web.panel_webhook import PANEL_WEBHOOK_PATH
+from remnabay.web.panel_webhook import MAX_BODY_BYTES, PANEL_WEBHOOK_PATH
 from tests.conftest import REQUIRED_ENV, journaled_in_test
 from tests.domain_support import add, make_client, make_subscription
 from tests.panel_support import user_json
@@ -221,3 +221,23 @@ async def test_secret_unreadable_after_key_change_rejects_events(
 
     assert response.status_code == 503
     assert await _journal_actions(db_session) == [("panel.webhook_rejected", "secret_unreadable")]
+
+
+async def test_too_large_body_is_rejected_without_reading_it(
+    shop: httpx2.AsyncClient, db_session: AsyncSession
+) -> None:
+    """Тело больше предела отклоняется: и по заголовку длины, и при чтении потоком (если
+    длина не указана) — память не забивается."""
+
+    async def chunks() -> AsyncIterator[bytes]:
+        for _ in range(3):
+            yield b"x" * (MAX_BODY_BYTES // 2)
+
+    declared = await shop.post(PANEL_WEBHOOK_PATH, content=b"x" * (MAX_BODY_BYTES + 1))
+    streamed = await shop.post(PANEL_WEBHOOK_PATH, content=chunks())
+
+    assert (declared.status_code, streamed.status_code) == (413, 413)
+    assert await _journal_actions(db_session) == [
+        ("panel.webhook_rejected", "too_large"),
+        ("panel.webhook_rejected", "too_large"),
+    ]
