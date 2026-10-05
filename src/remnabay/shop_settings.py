@@ -17,7 +17,7 @@ from typing import Annotated
 from zoneinfo import ZoneInfo, available_timezones
 
 from pydantic import AfterValidator, Field, PositiveInt, TypeAdapter, ValidationError
-from sqlalchemy import DateTime, ForeignKey, String, func, select
+from sqlalchemy import DateTime, ForeignKey, String, func, literal_column, select
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -199,3 +199,27 @@ async def generated_secret(session: AsyncSession, box: SecretBox, setting: Secre
     if stored is None or not isinstance(stored[0], str):
         raise SettingError(f"Секрет {key} не сохранён")
     return box.decrypt(stored[0])
+
+
+async def claim_interval(
+    session: AsyncSession, key: str, *, now: datetime, every: timedelta
+) -> bool:
+    """Отметка «не чаще раза в `every`»: `True` — если прошлая была раньше окна
+    (или её не было), и тогда отметка ставится на `now`. Атомарно: из двух
+    одновременных вызовов отметку получает один."""
+    stamp: JsonValue = now.isoformat()
+    claimed = await session.scalar(
+        insert(ShopSettingValue)
+        .values(key=key, value=stamp)
+        .on_conflict_do_update(
+            index_elements=[ShopSettingValue.key],
+            set_={"value": stamp, "updated_at": func.now()},
+            # Значение — строка JSON: #>> '{}' достаёт её как текст
+            where=ShopSettingValue.value.op("#>>")(literal_column("'{}'::text[]")).cast(
+                DateTime(timezone=True)
+            )
+            <= now - every,
+        )
+        .returning(ShopSettingValue.key)
+    )
+    return claimed is not None
