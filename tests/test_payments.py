@@ -334,7 +334,7 @@ async def test_4_22_apply_as_new_subscription(db_session: AsyncSession) -> None:
     """4.22, 4.24: «Применить иначе» — создать новую подписку (например, пользователя
     удалили в панели); после — «Мы разобрались: подписка создана»."""
     payment = await _setup(db_session, PaymentState.PAID_NOT_APPLIED)
-    await _failed_apply_task(db_session, payment)
+    old_task = await _failed_apply_task(db_session, payment)
     old_subscription = payment.subscription_id
     client = await db_session.get(Client, payment.client_id)
     assert client is not None
@@ -343,6 +343,11 @@ async def test_4_22_apply_as_new_subscription(db_session: AsyncSession) -> None:
 
     await apply_as_new_subscription(db_session, payment.id, member_id=await _member(db_session))
     assert (payment.purpose, payment.subscription_id) == (PaymentPurpose.PURCHASE, None)
+    # Прежняя задача закрыта и не держит очередь прежней подписки (4.27); новая — среди
+    # покупок клиента (3.11)
+    await db_session.refresh(old_task)
+    assert old_task.status == TaskStatus.RESOLVED
+    assert ("payments.apply", f"client:{payment.client_id}:purchase") in await _tasks(db_session)
 
     await _run(db_session, FakeApplier(subscription_id=new_subscription.id, created=True), payment)
 

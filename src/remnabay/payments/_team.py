@@ -85,9 +85,16 @@ async def apply_as_new_subscription(
     actor = Actor.team_member(member_id)
     payment = await _not_applied(session, payment_id, bound=True)
     details: dict[str, JsonValue] = {"previous_subscription_id": payment.subscription_id}
+    # Проваленная задача держит очередь прежней подписки (4.27), а платёж её больше не
+    # касается: задача закрывается, применение ставится заново — среди покупок клиента
+    task_id = await _failed_apply_task(session, payment.id)
+    if task_id is not None:
+        comment = "Платёж применяется созданием новой подписки"
+        await resolve_failed(session, _TASKS, task_id, actor=actor, comment=comment)
     payment.purpose = PaymentPurpose.PURCHASE
     payment.subscription_id = None
-    await _apply_again(session, payment, actor)
+    payment.state = PaymentState.PAID
+    await enqueue_apply(session, payment)
     await journal_payment(session, payment, actor, "payment.applying_as_new", details=details)
 
 
