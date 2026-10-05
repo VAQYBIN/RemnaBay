@@ -19,6 +19,7 @@ from remnabay.web.admin import SESSION_COOKIE
 from remnabay.web.app import create_app
 from remnabay.web.deps import get_session
 from tests.bot_support import FakeTelegram, same_session
+from tests.panel_support import FakePanel
 
 # Запросы админки идут со страницы магазина (проверка Origin, 0051)
 SHOP_ORIGIN = "https://shop.example.com"
@@ -33,6 +34,7 @@ class Shop:
     http: httpx2.AsyncClient
     telegram: FakeTelegram
     session: AsyncSession
+    panel: FakePanel
     updates: count[int] = field(default_factory=lambda: count(1))
 
     @property
@@ -85,6 +87,8 @@ async def running_shop(session: AsyncSession) -> AsyncGenerator[Shop]:
     telegram = FakeTelegram()
     app.state.bot.session = telegram
     app.state.dispatcher.workflow_data["sessions"] = same_session(session)
+    panel = FakePanel()
+    app.state.panel = panel.client()
 
     async def test_session() -> AsyncGenerator[AsyncSession]:
         yield session
@@ -94,4 +98,4 @@ async def running_shop(session: AsyncSession) -> AsyncGenerator[Shop]:
     async with httpx2.AsyncClient(
         transport=transport, base_url=SHOP_ORIGIN, headers={"Origin": SHOP_ORIGIN}
     ) as http:
-        yield Shop(app=app, http=http, telegram=telegram, session=session)
+        yield Shop(app=app, http=http, telegram=telegram, session=session, panel=panel)

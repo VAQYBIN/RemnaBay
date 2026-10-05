@@ -35,6 +35,9 @@ SHOP_SUPPORT_CONTACT = ShopSetting(
     "shop.support_contact", TypeAdapter[str](Annotated[str, Field(max_length=256)]), ""
 )
 
+# Триал включён (блок 5): в чек-листе — информационный пункт (1.7)
+TRIAL_ENABLED = ShopSetting("trial.enabled", TypeAdapter(bool), False)
+
 
 async def shop_state(session: AsyncSession) -> ShopState:
     return await get_setting(session, SHOP_STATE)
