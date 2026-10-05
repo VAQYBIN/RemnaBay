@@ -13,13 +13,14 @@ from remnabay.bot import TELEGRAM_WEBHOOK_PATH
 from remnabay.config import load_settings
 from remnabay.crypto import SecretBox
 from remnabay.domain.clients import Client, TelegramAccount
+from remnabay.shop import SHOP_STATE, ShopState
 from remnabay.shop_settings import TELEGRAM_WEBHOOK_SECRET, generated_secret
 from remnabay.web.app import create_app
 from remnabay.web.deps import get_session
 from remnabay.web.telegram_webhook import SECRET_HEADER
 from tests.bot_support import FakeTelegram, bot_harness, same_session, telegram_user
 from tests.conftest import REQUIRED_ENV
-from tests.domain_support import add
+from tests.domain_support import add, put_setting
 
 BOX = SecretBox(REQUIRED_ENV["ENCRYPTION_KEY"])
 UNKNOWN = "Не совсем понял. Откройте главное меню — там всё самое нужное."
@@ -89,6 +90,7 @@ async def test_11_9_opening_bot_clears_blocked_mark(db_session: AsyncSession) ->
 
 async def test_unknown_message_gets_fallback(db_session: AsyncSession) -> None:
     """Непонятное сообщение — `fallback.unknown` (03-bot-texts.md)."""
+    await put_setting(db_session, SHOP_STATE, ShopState.OPEN)
     async with bot_harness(db_session) as harness:
         await harness.send_text(telegram_user(100), "что-то непонятное")
 
@@ -150,6 +152,7 @@ async def test_0051_webhook_with_secret_is_handled(
 ) -> None:
     """0051: обновление с верным секретом обрабатывается."""
     client, telegram = shop
+    await put_setting(db_session, SHOP_STATE, ShopState.OPEN)
     secret = await generated_secret(db_session, BOX, TELEGRAM_WEBHOOK_SECRET)
 
     response = await client.post(

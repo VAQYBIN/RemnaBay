@@ -19,6 +19,8 @@ ENTRY_POINTS = (
     "remnabay.access",
     "remnabay.bot",
     "remnabay.clients",
+    "remnabay.shop",
+    "remnabay.brand",
     "remnabay.web.app",
     "remnabay.worker.main",
 )
