@@ -57,6 +57,7 @@ from tests.queue_support import (
     make_worker,
     needs_panel,
     panel_switch,
+    quiet,
     record_event,
     rejecting,
     run_workers,
@@ -945,3 +946,35 @@ async def test_4_31_operations_without_own_consequences_use_common_failure_handl
 
     assert calls == [(plain, "test.switch")]
     assert [e[1] for e in await events(queue_engine)] == ["failed:g2"]
+
+
+async def test_rule_4_service_task_without_team_is_dropped_not_failed(
+    queue_engine: AsyncEngine,
+) -> None:
+    """Сквозное правило 4, 4.27, 4.31: задача, которой не нужна команда (сообщение,
+    служебная сверка), исчерпав попытки, снимается: не попадает в «Требуют внимания», не
+    уведомляет команду, не держит очередь ключа; свои последствия (запись о недоставке)
+    выполняет."""
+    calls: list[str] = []
+
+    async def on_failed(_session: AsyncSession, _task_id: int, name: str) -> None:
+        calls.append(name)
+
+    FAILING.add("q1")
+    dropped = await enqueue(queue_engine, quiet, LabelArgs(label="q1"), key="sub:q")
+    behind = await enqueue(queue_engine, record_event, RecordArgs(label="q2"), key="sub:q")
+
+    await run_workers(
+        [make_worker(queue_engine, on_failed=on_failed)],
+        lambda: all_finished(queue_engine, [dropped, behind]),
+    )
+
+    assert await status_of(queue_engine, dropped) == TaskStatus.CANCELLED
+    assert await status_of(queue_engine, behind) == TaskStatus.DONE
+    assert calls == []
+    assert [e[1] for e in await events(queue_engine)] == ["dropped:q1", "q2"]
+    async with AsyncSession(queue_engine) as session:
+        assert await failed_tasks(session, REGISTRY) == []
+        actions = [e.action for e in await entries_for(session, task_subject(dropped))]
+    assert "queue.dropped" in actions
+    assert "queue.failed" not in actions

@@ -27,7 +27,7 @@ class SyncPageArgs(BaseModel):
     page_size: int = PAGE_SIZE
 
 
-@task("panel.sync_page", SyncPageArgs)
+@task("panel.sync_page", SyncPageArgs, needs_attention=False)
 async def sync_page(context: TaskContext, args: SyncPageArgs) -> None:
     """Ставит сверку подписок страницы и следующую страницу.
 

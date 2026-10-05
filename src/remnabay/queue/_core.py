@@ -83,6 +83,9 @@ class RunnableTask(Protocol):
     @property
     def cancellable(self) -> bool: ...
 
+    @property
+    def needs_attention(self) -> bool: ...
+
     async def run(self, context: TaskContext, raw_args: dict[str, JsonValue]) -> None: ...
 
     def handles(self, ending: Ending) -> bool: ...
@@ -100,12 +103,19 @@ class TaskDefinition[A: BaseModel]:
     """
 
     def __init__(
-        self, name: str, args_model: type[A], handler: Handler[A], *, cancellable: bool = True
+        self,
+        name: str,
+        args_model: type[A],
+        handler: Handler[A],
+        *,
+        cancellable: bool = True,
+        needs_attention: bool = True,
     ) -> None:
         self._name = name
         self._args_model = args_model
         self._handler = handler
         self._cancellable = cancellable
+        self._needs_attention = needs_attention
         self._hooks: dict[Ending, EndingHook[A]] = {}
 
     @property
@@ -117,6 +127,13 @@ class TaskDefinition[A: BaseModel]:
         """Можно ли отменить проваленную задачу. Нельзя, если действие уже необратимо
         с другой стороны — например, смена даты при возврате: деньги уже вернули (4.31)."""
         return self._cancellable
+
+    @property
+    def needs_attention(self) -> bool:
+        """Нужна ли команда, когда попытки исчерпаны. Нет — задача снимается: например,
+        недоставленное сообщение — не ошибка (сквозное правило 4), а служебную сверку
+        повторит следующий обход."""
+        return self._needs_attention
 
     async def enqueue(
         self,
@@ -181,12 +198,14 @@ class TaskDefinition[A: BaseModel]:
 
 
 def task[A: BaseModel](
-    name: str, args_model: type[A], *, cancellable: bool = True
+    name: str, args_model: type[A], *, cancellable: bool = True, needs_attention: bool = True
 ) -> Callable[[Handler[A]], TaskDefinition[A]]:
     """Декоратор: превращает обработчик в вид задачи."""
 
     def decorate(handler: Handler[A]) -> TaskDefinition[A]:
-        return TaskDefinition(name, args_model, handler, cancellable=cancellable)
+        return TaskDefinition(
+            name, args_model, handler, cancellable=cancellable, needs_attention=needs_attention
+        )
 
     return decorate
 

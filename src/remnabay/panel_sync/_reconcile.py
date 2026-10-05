@@ -209,7 +209,7 @@ async def reconcile(session: AsyncSession, subscription: Subscription, args: Rec
         await _journal(session, subscription, "subscription.changed_in_panel", args, changes)
 
 
-@task("panel.reconcile_subscription", ReconcileArgs)
+@task("panel.reconcile_subscription", ReconcileArgs, needs_attention=False)
 async def reconcile_subscription(context: TaskContext, args: ReconcileArgs) -> None:
     subscription = await context.session.get(Subscription, args.subscription_id)
     if subscription is not None:

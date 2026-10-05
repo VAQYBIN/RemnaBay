@@ -158,7 +158,7 @@ async def _apply_failed(session: AsyncSession, _task_id: int, args: PaymentArgs)
     )
 
 
-@task("payments.processing_notice", PaymentArgs)
+@task("payments.processing_notice", PaymentArgs, needs_attention=False)
 async def processing_notice(context: TaskContext, args: PaymentArgs) -> None:
     """4.19: платёж оплачен, но не применён сразу — «Оплата получена, подписка создаётся»."""
     payment = await context.session.get(Payment, args.payment_id)

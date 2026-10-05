@@ -148,6 +148,19 @@ async def _hooked_resolved(session: AsyncSession, task_id: int, args: LabelArgs)
     await _insert_event(session, task_id, f"resolved:{args.label}", 0, datetime.now(UTC))
 
 
+@task("test.quiet", LabelArgs, needs_attention=False)
+async def quiet(context: TaskContext, args: LabelArgs) -> None:
+    """Как сообщение или служебная сверка: исчерпав попытки, снимается без команды."""
+    if args.label in FAILING:
+        raise RuntimeError(f"{args.label}: сбой")
+    await _write_event(context, args.label, datetime.now(UTC))
+
+
+@quiet.on_failed
+async def _quiet_failed(session: AsyncSession, task_id: int, args: LabelArgs) -> None:
+    await _insert_event(session, task_id, f"dropped:{args.label}", 0, datetime.now(UTC))
+
+
 @task("test.irreversible", LabelArgs, cancellable=False)
 async def irreversible(context: TaskContext, args: LabelArgs) -> None:
     """Как смена даты при возврате: отменить нельзя (4.31)."""
@@ -231,6 +244,7 @@ ALL_TASKS = (
     flaky,
     switch,
     hooked,
+    quiet,
     irreversible,
     bad_hook,
     panel_switch,

@@ -110,7 +110,7 @@ async def _mark_blocked(session: AsyncSession, client_id: int) -> None:
     )
 
 
-@task("messages.send", SendArgs)
+@task("messages.send", SendArgs, needs_attention=False)
 async def send_message(context: TaskContext, args: SendArgs) -> None:
     session = context.session
     try:
@@ -139,6 +139,7 @@ async def send_message(context: TaskContext, args: SendArgs) -> None:
 
 @send_message.on_failed
 async def _send_failed(session: AsyncSession, _task_id: int, args: SendArgs) -> None:
-    # Telegram так и не принял сообщение: недоставка, а не уведомление команды —
-    # иначе сбой Telegram порождал бы новые сообщения
+    # Telegram так и не принял сообщение: недоставка — не ошибка (правило 4). Операция
+    # снимается без «Требуют внимания» и без уведомления команды — иначе сбой Telegram
+    # порождал бы новые сообщения
     await not_delivered(session, args, "not_accepted")

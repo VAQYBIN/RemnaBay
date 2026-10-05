@@ -97,7 +97,7 @@ class HealthCheckArgs(BaseModel):
     pass
 
 
-@task("panel.health_check", HealthCheckArgs)
+@task("panel.health_check", HealthCheckArgs, needs_attention=False)
 async def health_check(context: TaskContext, _args: HealthCheckArgs) -> None:
     session = context.session
     await session.execute(select(func.pg_advisory_xact_lock(_HEALTH_CHECK_LOCK)))

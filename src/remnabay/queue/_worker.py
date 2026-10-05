@@ -565,35 +565,46 @@ class Worker:
             )
 
     async def _fail(self, session: AsyncSession, task_id: int) -> None:
-        """Окончательный провал: задача ждёт команду, следующие задачи ключа — её (4.27).
+        """Попытки исчерпаны: задача проваливается и ждёт команду, следующие задачи
+        ключа ждут её (4.27).
 
-        Обработчик `on_failed` вида задачи (или общий, если своего нет) выполняется
-        в точке сохранения: его сбой пишется в лог
-        и журнал, но не мешает задаче стать проваленной — иначе она перезапускалась
-        бы бесконечно.
+        Задача вида, которому не нужно внимание команды (сообщение, служебная сверка),
+        не проваливается, а снимается: она не держит очередь ключа и не попадает в
+        «Требуют внимания».
+
+        Обработчик `on_failed` вида задачи (или общий, если своего нет и нужно внимание
+        команды) выполняется в точке сохранения: его сбой пишется в лог и журнал, но не
+        мешает задаче завершиться — иначе она перезапускалась бы бесконечно.
         """
-        task = await session.scalar(
-            update(QueueTask)
-            .where(QueueTask.id == task_id)
-            .values(status=TaskStatus.FAILED)
-            .returning(QueueTask)
-        )
+        row = (
+            await session.execute(
+                select(QueueTask.name, QueueTask.args).where(QueueTask.id == task_id)
+            )
+        ).first()
+        if row is None:
+            return
+        name, args = row
+        definition = self._tasks.get(name)
+        attention = definition is None or definition.needs_attention
+        if attention:
+            await self._set_status(session, task_id, TaskStatus.FAILED)
+        else:
+            await self._set_status(
+                session, task_id, TaskStatus.CANCELLED, finished_at=func.clock_timestamp()
+            )
         await record(
             session,
             actor=Actor.SYSTEM,
-            action="queue.failed",
+            action="queue.failed" if attention else "queue.dropped",
             subject=task_subject(task_id),
             outcome=Outcome.FAILURE,
         )
-        if task is None:
-            return
-        definition = self._tasks.get(task.name)
         try:
             async with session.begin_nested():
                 if definition is not None and definition.handles(Ending.FAILED):
-                    await definition.ended(Ending.FAILED, session, task_id, task.args)
-                elif self._on_failed is not None:
-                    await self._on_failed(session, task_id, task.name)
+                    await definition.ended(Ending.FAILED, session, task_id, args)
+                elif attention and self._on_failed is not None:
+                    await self._on_failed(session, task_id, name)
         except Exception as error:
             logger.exception("Задача %s: сбой обработчика провала", task_id)
             await record(
