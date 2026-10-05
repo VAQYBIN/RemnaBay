@@ -431,6 +431,19 @@ async def failed_tasks(session: AsyncSession, tasks: TaskRegistry) -> list[Faile
     ]
 
 
+async def unfinished_keys(session: AsyncSession, name: str, keys: Iterable[str]) -> set[str]:
+    """Ключи, у которых задача вида `name` уже ждёт выполнения — чтобы не ставить её
+    второй раз, пока первая не выполнена (например, сверку подписки)."""
+    found = await session.scalars(
+        select(QueueTask.key).where(
+            QueueTask.name == name,
+            QueueTask.key.in_(list(keys)),
+            QueueTask.status.in_(UNFINISHED),
+        )
+    )
+    return {key for key in found if key is not None}
+
+
 async def waiting_panel_count(session: AsyncSession) -> int:
     """Сколько задач «ждут панель» — отдельная строка на главной, не в счётчике
     «Требуют внимания» (4.30)."""

@@ -30,12 +30,14 @@ from remnabay.queue._core import (
     task,
     task_status,
     task_subject,
+    unfinished_keys,
     waiting_behind,
     waiting_panel_count,
 )
 from remnabay.queue._models import AttemptResult, TaskStatus
 from remnabay.queue._worker import (
     FailedFallback,
+    IntervalSource,
     Periodic,
     PolicySource,
     TaskTimeoutError,
@@ -48,6 +50,7 @@ __all__ = [
     "Ending",
     "FailedFallback",
     "FailedTask",
+    "IntervalSource",
     "Periodic",
     "PolicySource",
     "RejectedError",
@@ -69,6 +72,7 @@ __all__ = [
     "task",
     "task_status",
     "task_subject",
+    "unfinished_keys",
     "waiting_behind",
     "waiting_panel_count",
 ]

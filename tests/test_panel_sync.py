@@ -1,6 +1,6 @@
 """Сверка подписки с панелью: панель всегда права (4.3–4.10, 4.29)."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -19,9 +19,25 @@ from remnabay.domain.tariffs import TrafficResetStrategy
 from remnabay.journal import Actor, Subject, entries_for
 from remnabay.messaging import SendArgs
 from remnabay.panel import PanelUnavailableError
-from remnabay.panel_sync import ReconcileArgs, Source, enqueue_reconcile, reconcile
+from remnabay.panel_sync import (
+    ReconcileArgs,
+    Source,
+    SyncPageArgs,
+    enqueue_reconcile,
+    reconcile,
+    sync_interval,
+    sync_page,
+)
+from remnabay.queue import TaskContext
 from remnabay.queue._models import QueueTask
-from tests.domain_support import add, make_client, make_payment, make_subscription
+from remnabay.shop_settings import PANEL_SYNC_INTERVAL, set_setting
+from tests.domain_support import (
+    add,
+    make_client,
+    make_payment,
+    make_subscription,
+    make_team_member,
+)
 from tests.panel_support import FakePanel, fake_runtime, user_json
 
 T0 = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
@@ -293,3 +309,61 @@ async def test_4_17_reconcile_runs_after_operations_of_subscription(
 
     keys = (await db_session.scalars(select(QueueTask.key))).all()
     assert keys == [f"subscription:{subscription.id}"]
+
+
+# --- Периодическая сверка всех подписок (4.8) ---
+
+
+async def _run_page(session: AsyncSession, args: SyncPageArgs) -> None:
+    await sync_page.run(
+        TaskContext(session=session, task_id=1, attempt_number=1), args.model_dump(mode="json")
+    )
+
+
+async def _queued(session: AsyncSession) -> list[tuple[str, dict[str, object]]]:
+    rows = await session.execute(select(QueueTask.name, QueueTask.args).order_by(QueueTask.id))
+    return [(name, dict(args)) for name, args in rows]
+
+
+async def test_4_8_sync_reconciles_every_live_subscription_page_by_page(
+    db_session: AsyncSession,
+) -> None:
+    """4.8, 4.28: периодическая сверка ставит сверку каждой не удалённой подписки —
+    страницами, небольшими операциями; подписке, у которой сверка уже ждёт, вторая не
+    ставится."""
+    client = await make_client(db_session)
+    live = [make_subscription(client, None, panel_user_id=n) for n in (1, 2, 3)]
+    deleted = make_subscription(client, None, panel_user_id=4)
+    deleted.deleted_at = T1
+    await add(db_session, *live, deleted)
+    first, second, third = (s.id for s in live)
+    await enqueue_reconcile(db_session, third, Source.WEBHOOK, "user.modified")
+
+    await _run_page(db_session, SyncPageArgs(page_size=2))
+    await _run_page(db_session, SyncPageArgs(after_id=second, page_size=2))
+
+    assert await _queued(db_session) == [
+        (
+            "panel.reconcile_subscription",
+            {"subscription_id": third, "source": "webhook", "event": "user.modified"},
+        ),
+        (
+            "panel.reconcile_subscription",
+            {"subscription_id": first, "source": "sync", "event": None},
+        ),
+        (
+            "panel.reconcile_subscription",
+            {"subscription_id": second, "source": "sync", "event": None},
+        ),
+        ("panel.sync_page", {"after_id": second, "page_size": 2}),
+    ]
+
+
+async def test_4_8_sync_interval_comes_from_settings(db_session: AsyncSession) -> None:
+    """4.8: интервал сверки — из настроек (по умолчанию 15 минут), меняется без перезапуска."""
+    member = make_team_member()
+    await add(db_session, member)
+
+    assert await sync_interval(db_session) == timedelta(minutes=15)
+    await set_setting(db_session, PANEL_SYNC_INTERVAL, timedelta(minutes=5), member_id=member.id)
+    assert await sync_interval(db_session) == timedelta(minutes=5)

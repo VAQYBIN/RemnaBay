@@ -563,6 +563,32 @@ async def test_periodic_task_runs_once_per_period_with_two_workers(
     assert ticks == slots
 
 
+async def test_4_8_periodic_interval_is_read_at_each_planning(queue_engine: AsyncEngine) -> None:
+    """4.8: период задачи может читаться из настроек при каждом планировании — смена
+    интервала сверки действует без перезапуска воркера."""
+    asked: list[timedelta] = []
+
+    async def hourly(_session: AsyncSession) -> timedelta:
+        asked.append(timedelta(hours=1))
+        return timedelta(hours=1)
+
+    worker = make_worker(
+        queue_engine, periodic=[Periodic(record_event, RecordArgs(label="tick"), hourly)]
+    )
+    await worker.schedule_periodic()
+    await worker.schedule_periodic()
+
+    async with AsyncSession(queue_engine) as session:
+        slots = list(
+            await session.scalars(
+                select(QueuePeriodicSlot.slot_start).where(QueuePeriodicSlot.name == "test.record")
+            )
+        )
+    assert len(asked) == 2
+    assert len(slots) == 1
+    assert (slots[0].minute, slots[0].second) == (0, 0)
+
+
 async def test_cleanup_removes_old_finished_tasks_only(queue_engine: AsyncEngine) -> None:
     """Очистка удаляет завершённые задачи (выполненные, отменённые, решённые вручную)
     старше 30 дней; проваленные, свежие и ждущие остаются; журнал не трогается."""

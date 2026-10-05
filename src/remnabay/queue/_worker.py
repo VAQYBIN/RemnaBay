@@ -96,27 +96,39 @@ type FailedFallback = Callable[[AsyncSession, int, str], Awaitable[None]]
 type PolicySource = Callable[[AsyncSession], Awaitable[RetryPolicy]]
 
 
+# Период, который читается при каждом планировании: например, интервал сверки
+# с панелью из настроек оператора (4.8)
+type IntervalSource = Callable[[AsyncSession], Awaitable[timedelta]]
+
+
 class Scheduled(Protocol):
     @property
     def name(self) -> str: ...
 
-    @property
-    def every(self) -> timedelta: ...
+    async def interval(self, session: AsyncSession) -> timedelta: ...
 
     async def enqueue(self, session: AsyncSession) -> int: ...
 
 
 @dataclass(frozen=True)
 class Periodic[A: BaseModel]:
-    """Периодическая задача: ставится раз в `every`, даже если воркеров несколько."""
+    """Периодическая задача: ставится раз в `every`, даже если воркеров несколько.
+
+    `every` — постоянный период или функция, которая читает его из базы.
+    """
 
     task: TaskDefinition[A]
     args: A
-    every: timedelta
+    every: timedelta | IntervalSource
 
     @property
     def name(self) -> str:
         return self.task.name
+
+    async def interval(self, session: AsyncSession) -> timedelta:
+        if isinstance(self.every, timedelta):
+            return self.every
+        return await self.every(session)
 
     async def enqueue(self, session: AsyncSession) -> int:
         return await self.task.enqueue(session, self.args)
@@ -251,7 +263,10 @@ class Worker:
             for periodic in self._periodic:
                 inserted = await session.scalar(
                     insert(QueuePeriodicSlot)
-                    .values(name=periodic.name, slot_start=_slot_start(now, periodic.every))
+                    .values(
+                        name=periodic.name,
+                        slot_start=_slot_start(now, await periodic.interval(session)),
+                    )
                     .on_conflict_do_nothing()
                     .returning(QueuePeriodicSlot.name)
                 )
