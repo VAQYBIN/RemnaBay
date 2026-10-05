@@ -431,6 +431,21 @@ async def failed_tasks(session: AsyncSession, tasks: TaskRegistry) -> list[Faile
     ]
 
 
+async def tasks_for(
+    session: AsyncSession,
+    name: str,
+    args: dict[str, JsonValue],
+    *,
+    status: TaskStatus | None = None,
+) -> list[int]:
+    """Задачи вида `name`, в аргументах которых есть `args` (например, задачи применения
+    одного платежа), от ранних к поздним."""
+    query = select(QueueTask.id).where(QueueTask.name == name, QueueTask.args.contains(args))
+    if status is not None:
+        query = query.where(QueueTask.status == status)
+    return list(await session.scalars(query.order_by(QueueTask.id)))
+
+
 async def unfinished_keys(session: AsyncSession, name: str, keys: Iterable[str]) -> set[str]:
     """Ключи, у которых задача вида `name` уже ждёт выполнения — чтобы не ставить её
     второй раз, пока первая не выполнена (например, сверку подписки)."""

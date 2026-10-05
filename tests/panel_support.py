@@ -11,6 +11,7 @@ import httpx2
 from remnabay import runtime
 from remnabay.messaging import DeliveryError, OutgoingMessage
 from remnabay.panel import PanelClient
+from remnabay.payments import NotReadyApplier, PaymentApplier
 
 PANEL_URL = "https://panel.example.com"
 _USER_PATH = re.compile(r"^/api/users/(\d+)$")
@@ -100,10 +101,16 @@ class FakeSender:
 
 @contextmanager
 def fake_runtime(
-    sender: FakeSender | None = None, panel: FakePanel | None = None
+    sender: FakeSender | None = None,
+    panel: FakePanel | None = None,
+    payments: PaymentApplier | None = None,
 ) -> Generator[runtime.Runtime]:
-    """Окружение воркера с подставными отправителем и панелью."""
+    """Окружение воркера с подставными отправителем, панелью и шагом применения платежа."""
     with runtime.use(
-        runtime.Runtime(sender=sender or FakeSender(), panel=(panel or FakePanel()).client())
+        runtime.Runtime(
+            sender=sender or FakeSender(),
+            panel=(panel or FakePanel()).client(),
+            payments=payments or NotReadyApplier(),
+        )
     ) as current:
         yield current
