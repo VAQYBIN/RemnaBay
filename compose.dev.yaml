@@ -59,6 +59,8 @@ services:
   worker:
     <<: *app
     command: ["worker"]
+    # По SIGTERM воркер доделывает начатые задачи: даём больше таймаута задачи (30 с)
+    stop_grace_period: 45s
     depends_on:
       migrate:
         condition: service_completed_successfully

@@ -1,6 +1,8 @@
 """Подключение к PostgreSQL магазина: async SQLAlchemy 2 и драйвер psycopg 3 (решение 0023)."""
 
-from sqlalchemy import MetaData
+from enum import StrEnum
+
+from sqlalchemy import Enum, MetaData
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -23,13 +25,35 @@ NAMING_CONVENTION = {
 
 
 class Base(DeclarativeBase):
-    """Базовый класс моделей. Модели предметной области появятся на этапе 2."""
+    """Базовый класс моделей. Все модули с моделями перечислены в `remnabay.schema`."""
 
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
 
 
-def create_engine(settings: Settings) -> AsyncEngine:
-    return create_async_engine(settings.sqlalchemy_database_url, pool_pre_ping=True)
+def _enum_values(members: type[StrEnum]) -> list[str]:
+    return [member.value for member in members]
+
+
+def str_enum_type[E: StrEnum](enum_class: type[E], name: str) -> Enum:
+    """Колонка-перечисление: строка с CHECK, а не тип ENUM в PostgreSQL.
+
+    В базе хранятся значения (`"team_member"`), а не имена членов; новое значение
+    добавляется миграцией без ALTER TYPE.
+    """
+    return Enum(
+        enum_class,
+        name=name,
+        native_enum=False,
+        create_constraint=True,
+        length=32,
+        values_callable=_enum_values,
+    )
+
+
+def create_engine(settings: Settings, *, pool_size: int = 5) -> AsyncEngine:
+    return create_async_engine(
+        settings.sqlalchemy_database_url, pool_pre_ping=True, pool_size=pool_size
+    )
 
 
 def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:

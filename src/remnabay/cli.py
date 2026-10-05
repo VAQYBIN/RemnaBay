@@ -8,6 +8,7 @@ from pathlib import Path
 
 from remnabay import healthcheck
 from remnabay.config import ConfigError, load_settings
+from remnabay.crypto import generate_key
 
 # Код выхода при неверных параметрах .env (1.1)
 EXIT_CONFIG_ERROR = 2
@@ -32,6 +33,8 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     check = roles.add_parser("healthcheck", help="проверка здоровья для Docker")
     check.add_argument("role", choices=["web", "worker"])
 
+    roles.add_parser("generate-key", help="создать ключ шифрования для ENCRYPTION_KEY в .env")
+
     return parser.parse_args(argv)
 
 
@@ -44,6 +47,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "healthcheck":
         healthy = healthcheck.check_web() if args.role == "web" else healthcheck.check_worker()
         return 0 if healthy else 1
+
+    if args.command == "generate-key":
+        # Ключ нужен до заполнения .env, поэтому команда не читает настройки
+        print(generate_key())
+        return 0
 
     try:
         settings = load_settings()
@@ -66,7 +74,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.command == "worker":
         from remnabay.worker.main import run
 
-        run()
+        run(settings)
     else:
         from remnabay.migrations import upgrade_to_head
 

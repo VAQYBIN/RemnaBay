@@ -8,7 +8,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from remnabay.config import load_settings
-from remnabay.db import Base
+from remnabay.schema import Base
 
 config = context.config
 target_metadata = Base.metadata

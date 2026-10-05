@@ -21,3 +21,5 @@ deploy
 skills-lock.json
 third-party-licenses
 *.log
+.cache
+scripts

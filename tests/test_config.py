@@ -108,3 +108,17 @@ def test_database_url_uses_psycopg_driver(
     monkeypatch.setenv("DATABASE_URL", database_url)
 
     assert load_settings(env_file=None).sqlalchemy_database_url == expected
+
+
+@pytest.mark.usefixtures("valid_env")
+def test_1_1_encryption_key_must_have_valid_format(monkeypatch: pytest.MonkeyPatch) -> None:
+    """1.1: ключ шифрования неверного формата — магазин не запускается и подсказывает,
+    как создать ключ."""
+    monkeypatch.setenv("ENCRYPTION_KEY", "my-secret-password")
+
+    with pytest.raises(ConfigError) as exc_info:
+        load_settings(env_file=None)
+
+    [problem] = exc_info.value.problems
+    assert problem.startswith("ENCRYPTION_KEY: неверный формат ключа")
+    assert "remnabay generate-key" in problem
