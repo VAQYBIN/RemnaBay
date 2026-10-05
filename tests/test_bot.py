@@ -3,24 +3,21 @@
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
-import httpx2
 import pytest
 from aiogram.types import Chat, Message, Update
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from remnabay.bot import TELEGRAM_WEBHOOK_PATH
-from remnabay.config import load_settings
 from remnabay.crypto import SecretBox
 from remnabay.domain.clients import Client, TelegramAccount
 from remnabay.shop import SHOP_STATE, ShopState
 from remnabay.shop_settings import TELEGRAM_WEBHOOK_SECRET, generated_secret
-from remnabay.web.app import create_app
-from remnabay.web.deps import get_session
 from remnabay.web.telegram_webhook import SECRET_HEADER
-from tests.bot_support import FakeTelegram, bot_harness, same_session, telegram_user
+from tests.bot_support import bot_harness, telegram_user
 from tests.conftest import REQUIRED_ENV
 from tests.domain_support import add, put_setting
+from tests.web_support import Shop, running_shop
 
 BOX = SecretBox(REQUIRED_ENV["ENCRYPTION_KEY"])
 UNKNOWN = "Не совсем понял. Откройте главное меню — там всё самое нужное."
@@ -115,23 +112,10 @@ async def test_group_messages_are_ignored(db_session: AsyncSession) -> None:
 
 
 @pytest.fixture
-async def shop(
-    valid_env: dict[str, str], db_session: AsyncSession
-) -> AsyncIterator[tuple[httpx2.AsyncClient, FakeTelegram]]:
-    """Веб магазина с поддельным Bot API; запросы — в транзакции теста."""
+async def shop(valid_env: dict[str, str], db_session: AsyncSession) -> AsyncIterator[Shop]:
     del valid_env
-    app = create_app(load_settings(env_file=None))
-    telegram = FakeTelegram()
-    app.state.bot.session = telegram
-
-    async def test_session() -> AsyncIterator[AsyncSession]:
-        yield db_session
-
-    app.dependency_overrides[get_session] = test_session
-    app.state.dispatcher.workflow_data["sessions"] = same_session(db_session)
-    transport = httpx2.ASGITransport(app=app)
-    async with httpx2.AsyncClient(transport=transport, base_url="http://shop") as client:
-        yield client, telegram
+    async with running_shop(db_session) as shop:
+        yield shop
 
 
 def _update(text: str = "привет") -> dict[str, object]:
@@ -147,11 +131,9 @@ def _update(text: str = "привет") -> dict[str, object]:
     }
 
 
-async def test_0051_webhook_with_secret_is_handled(
-    shop: tuple[httpx2.AsyncClient, FakeTelegram], db_session: AsyncSession
-) -> None:
+async def test_0051_webhook_with_secret_is_handled(shop: Shop, db_session: AsyncSession) -> None:
     """0051: обновление с верным секретом обрабатывается."""
-    client, telegram = shop
+    client, telegram = shop.http, shop.telegram
     await put_setting(db_session, SHOP_STATE, ShopState.OPEN)
     secret = await generated_secret(db_session, BOX, TELEGRAM_WEBHOOK_SECRET)
 
@@ -164,11 +146,9 @@ async def test_0051_webhook_with_secret_is_handled(
 
 
 @pytest.mark.parametrize("header", [None, "wrong"])
-async def test_0051_webhook_without_secret_is_rejected(
-    shop: tuple[httpx2.AsyncClient, FakeTelegram], header: str | None
-) -> None:
+async def test_0051_webhook_without_secret_is_rejected(shop: Shop, header: str | None) -> None:
     """0051: без верного секрета обновление отклоняется и не обрабатывается."""
-    client, telegram = shop
+    client, telegram = shop.http, shop.telegram
     headers = {SECRET_HEADER: header} if header else {}
 
     response = await client.post(TELEGRAM_WEBHOOK_PATH, json=_update(), headers=headers)

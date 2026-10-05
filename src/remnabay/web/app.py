@@ -23,7 +23,8 @@ from remnabay.config import Settings, load_settings
 from remnabay.crypto import SecretBox
 from remnabay.db import create_engine, create_session_factory
 from remnabay.shop_settings import TELEGRAM_WEBHOOK_SECRET, generated_secret
-from remnabay.web import panel_webhook, telegram_webhook
+from remnabay.web import admin, panel_webhook, telegram_webhook
+from remnabay.web.admin import ADMIN_LOGIN_URL_PATH
 
 HEALTH_PATH = "/health"
 # Меньше интервала проверки здоровья в Docker, чтобы ответ успевал прийти
@@ -52,7 +53,9 @@ def create_app(settings: Settings, *, startup: bool = False) -> FastAPI:
     sessions = create_session_factory(engine)
     box = SecretBox(settings.encryption_key.get_secret_value())
     bot = create_bot(settings.bot_token.get_secret_value())
-    dispatcher = create_dispatcher(sessions)
+    dispatcher = create_dispatcher(
+        sessions, admin_login_url=settings.public_link(ADMIN_LOGIN_URL_PATH)
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
@@ -90,6 +93,7 @@ def create_app(settings: Settings, *, startup: bool = False) -> FastAPI:
     app.state.dispatcher = dispatcher
     app.include_router(panel_webhook.router)
     app.include_router(telegram_webhook.router)
+    app.include_router(admin.build_router())
 
     @app.get(
         HEALTH_PATH,

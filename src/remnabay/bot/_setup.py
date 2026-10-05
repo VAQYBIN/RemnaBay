@@ -10,7 +10,7 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.session.base import BaseSession
 from aiogram.exceptions import AiogramError
 
-from remnabay.bot import _fallback
+from remnabay.bot import _fallback, _login
 from remnabay.bot._context import SESSIONS_KEY, SessionFactory, context_middleware
 
 TELEGRAM_WEBHOOK_PATH = "/webhooks/telegram"
@@ -24,11 +24,16 @@ def create_bot(token: str, *, session: BaseSession | None = None) -> Bot:
     return Bot(token, session=session or AiohttpSession(timeout=REQUEST_TIMEOUT.total_seconds()))
 
 
-def create_dispatcher(sessions: SessionFactory) -> Dispatcher:
-    """Диспетчер со всеми роутерами; непонятное сообщение — последним."""
+def create_dispatcher(sessions: SessionFactory, *, admin_login_url: str) -> Dispatcher:
+    """Диспетчер со всеми роутерами; непонятное сообщение — последним.
+
+    `admin_login_url` — адрес входа в админку для кнопки `login_url` на /admin.
+    """
     dispatcher = Dispatcher()
     dispatcher.workflow_data[SESSIONS_KEY] = sessions
+    dispatcher.workflow_data[_login.ADMIN_LOGIN_URL_KEY] = admin_login_url
     dispatcher.update.outer_middleware(context_middleware)
+    dispatcher.include_router(_login.build_router())
     dispatcher.include_router(_fallback.build_router())
     return dispatcher
 

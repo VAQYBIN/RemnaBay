@@ -8,9 +8,9 @@ from typing import Any
 
 from aiogram import Bot
 from aiogram.types import CallbackQuery, Chat, Message, TelegramObject, Update, User
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from remnabay.access import active_member, is_login_link
 from remnabay.brand import brand_name
 from remnabay.clients import TelegramUser, register_telegram_user
 from remnabay.domain.clients import Client
@@ -46,14 +46,6 @@ class BotContext:
         return await brand_name(self.session) or (await self.bot.me()).first_name
 
 
-async def active_member(session: AsyncSession, telegram_id: int) -> TeamMember | None:
-    return await session.scalar(
-        select(TeamMember).where(
-            TeamMember.telegram_id == telegram_id, TeamMember.revoked_at.is_(None)
-        )
-    )
-
-
 async def context_middleware(handler: Handler, event: TelegramObject, data: dict[str, Any]) -> Any:
     """Каждое обновление из личного чата — в своей транзакции; клиент учитывается сразу.
 
@@ -84,7 +76,7 @@ async def context_middleware(handler: Handler, event: TelegramObject, data: dict
             member=await active_member(session, user.id),
             texts=await load_texts(session),
         )
-        if await _shop_hidden_from(ctx, user.id):
+        if await _shop_hidden_from(ctx, event, user.id):
             await _answer_shop_not_opened(event, ctx)
             await session.commit()
             return None
@@ -94,9 +86,15 @@ async def context_middleware(handler: Handler, event: TelegramObject, data: dict
         return result
 
 
-async def _shop_hidden_from(ctx: BotContext, telegram_id: int) -> bool:
-    """Пока магазин не открыт, бот работает только для команды и тестировщиков (1.13, 1.21)."""
+async def _shop_hidden_from(ctx: BotContext, event: TelegramObject, telegram_id: int) -> bool:
+    """Пока магазин не открыт, бот работает только для команды и тестировщиков (1.13, 1.21).
+
+    Ссылку входа в админку бот разбирает всегда: попытку входа чужого аккаунта
+    нужно отклонить и показать отказ на странице входа (1.6).
+    """
     if ctx.member is not None or await shop_state(ctx.session) != ShopState.NOT_OPENED:
+        return False
+    if isinstance(event, Update) and event.message and is_login_link(event.message.text):
         return False
     return not await is_tester(ctx.session, telegram_id)
 
