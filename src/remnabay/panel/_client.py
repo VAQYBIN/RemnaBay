@@ -40,8 +40,17 @@ from remnabay.panel._models import (
 DEFAULT_TIMEOUT = timedelta(seconds=10)
 # Ошибки шлюза — тоже недоступность панели (4.30)
 GATEWAY_ERRORS = frozenset({502, 503, 504})
-# «Пользователь не найден» (код ошибки панели A063)
+# «Пользователь не найден»: ответ 404 с кодом ошибки панели A063. Голый 404 (например,
+# от обратного прокси после смены пути) — не «пользователя нет», а ошибка: иначе
+# сверка сочла бы удалёнными все подписки (4.6)
 NOT_FOUND = 404
+USER_NOT_FOUND_CODE = "A063"
+
+
+def _user_not_found(error: PanelRequestError) -> bool:
+    return error.status_code == NOT_FOUND and error.error_code == USER_NOT_FOUND_CODE
+
+
 # Панель рвёт соединение без этих заголовков, если запрос пришёл не через
 # обратный прокси с HTTPS — так бывает при адресе во внутренней Docker-сети
 PROXY_HEADERS = {"X-Forwarded-Proto": "https", "X-Forwarded-For": "127.0.0.1"}
@@ -214,7 +223,7 @@ class PanelClient:
         try:
             return await self._call(endpoint, path=path)
         except PanelRequestError as error:
-            if error.status_code == NOT_FOUND:
+            if _user_not_found(error):
                 return None
             raise
 
@@ -253,7 +262,7 @@ class PanelClient:
         try:
             return await self._call(RESOLVE_USER, body=request)
         except PanelRequestError as error:
-            if error.status_code == NOT_FOUND:
+            if _user_not_found(error):
                 return None
             raise
 

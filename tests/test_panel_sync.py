@@ -19,7 +19,7 @@ from remnabay.domain.tariffs import TrafficResetStrategy
 from remnabay.domain.team import TeamMember, TeamRole
 from remnabay.journal import Actor, JournalEntry, Subject, entries_for
 from remnabay.messaging import SendArgs
-from remnabay.panel import PanelUnavailableError
+from remnabay.panel import PanelRequestError, PanelUnavailableError
 from remnabay.panel_sync import (
     ReconcileArgs,
     Source,
@@ -197,6 +197,18 @@ async def test_4_6_user_deleted_in_panel_marks_subscription_deleted(
     assert [action for action, _ in await _journal(db_session, subscription)] == [
         "subscription.deleted_in_panel"
     ]
+
+
+async def test_4_6_bare_404_does_not_delete_subscription(db_session: AsyncSession) -> None:
+    """4.6: удалённой подписка считается, только если панель сказала «пользователь не
+    найден». Голый 404 (например, сменили путь в обратном прокси) — ошибка с повторами,
+    подписка остаётся."""
+    _client, subscription, _payment = await _subscription(db_session)
+
+    with pytest.raises(PanelRequestError):
+        await _reconcile(db_session, subscription, FakePanel(error_status=404))
+
+    assert subscription.deleted_at is None
 
 
 async def test_deleted_subscription_is_not_reconciled_again(db_session: AsyncSession) -> None:

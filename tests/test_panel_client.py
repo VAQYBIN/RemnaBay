@@ -160,6 +160,12 @@ async def test_missing_user_is_none_other_errors_raise() -> None:
         assert await panel.get_user(7) is None
         assert await panel.get_user_by_username("rb_7") is None
 
+    # 404 без кода панели — например, обратный прокси после смены пути: это ошибка,
+    # а не «пользователя нет» (иначе сверка удалила бы все подписки, 4.6)
+    async with client_with(lambda _r: httpx2.Response(404, text="<html>Not Found</html>")) as panel:
+        with pytest.raises(PanelRequestError):
+            await panel.get_user(7)
+
     forbidden = {"message": "Forbidden", "errorCode": "A004"}
     async with client_with(lambda _r: httpx2.Response(403, json=forbidden)) as panel:
         with pytest.raises(PanelRequestError) as raised:
