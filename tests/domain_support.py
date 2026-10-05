@@ -13,6 +13,7 @@ from remnabay.domain.clients import Client, TelegramAccount
 from remnabay.domain.payments import Payment, PaymentPurpose, PaymentState
 from remnabay.domain.subscriptions import Subscription
 from remnabay.domain.tariffs import Tariff, TariffType
+from remnabay.domain.team import TeamMember, TeamRole
 
 NOW = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
 GB = 1024**3
@@ -83,3 +84,7 @@ def make_payment(client: Client | None, tariff: Tariff | None, **overrides: obje
     }
     values.update(overrides)
     return Payment(**values)
+
+
+def make_team_member(telegram_id: int = 500, role: TeamRole = TeamRole.OWNER) -> TeamMember:
+    return TeamMember(telegram_id=telegram_id, role=role)
