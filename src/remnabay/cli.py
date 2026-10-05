@@ -13,8 +13,17 @@ from remnabay.crypto import generate_key
 # Код выхода при неверных параметрах .env (1.1)
 EXIT_CONFIG_ERROR = 2
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+# Библиотеки, которые пишут строку на каждый запрос (клиент панели — раз в минуту
+# только от проверки связи): в логе — только их предупреждения и ошибки
+QUIET_LOGGERS = ("httpx2",)
 
 logger = logging.getLogger(__name__)
+
+
+def configure_logging() -> None:
+    logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
+    for name in QUIET_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
 
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
@@ -39,9 +48,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
-    )
+    configure_logging()
     args = _parse_args(argv)
 
     if args.command == "healthcheck":
