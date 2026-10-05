@@ -4,7 +4,8 @@
 Раз в минуту магазин спрашивает у панели её версию. Нет ответа (соединение не
 устанавливается, таймаут, ошибки шлюза) — простой начался; ответ есть — простой
 закончился. Если простой длится дольше настройки (по умолчанию 5 минут), команда
-получает одно уведомление. Операции тем временем «ждут панель» и продолжаются
+получает одно уведомление, а когда связь вернётся — уведомление о конце простоя
+(0048). Операции тем временем «ждут панель» и продолжаются
 сами (очередь), оплаты принимаются и применяются после восстановления (4.11).
 """
 
@@ -83,14 +84,39 @@ async def _alert_if_long(session: AsyncSession, outage: PanelOutage) -> None:
     now = datetime.now(UTC)
     if now - outage.started_at < await get_setting(session, PANEL_OUTAGE_ALERT_AFTER):
         return
-    texts = await load_texts(session)
-    since = texts.date_fallback(
-        outage.started_at,
-        await get_setting(session, SHOP_LANGUAGE),
-        await shop_time_zone(session),
-    )
+    since = await _shop_time(session, outage.started_at)
     await notify_team(session, "team.panel_unavailable", variables={"since": since})
     outage.notified_at = now
+
+
+async def _shop_time(session: AsyncSession, moment: datetime) -> str:
+    """Момент для текста уведомления: во времени магазина, месяц словом (0044)."""
+    texts = await load_texts(session)
+    return texts.date_fallback(
+        moment, await get_setting(session, SHOP_LANGUAGE), await shop_time_zone(session)
+    )
+
+
+async def _ended(session: AsyncSession, outage: PanelOutage) -> None:
+    """Простой закончился. Если о нём уведомляли — уведомление о конце (0048)."""
+    ended_at = datetime.now(UTC)
+    outage.ended_at = ended_at
+    await record(
+        session,
+        actor=Actor.SYSTEM,
+        action="panel.available_again",
+        outcome=Outcome.SUCCESS,
+        details={"since": outage.started_at.isoformat()},
+    )
+    if outage.notified_at is not None:
+        await notify_team(
+            session,
+            "team.panel_available_again",
+            variables={
+                "since": await _shop_time(session, outage.started_at),
+                "until": await _shop_time(session, ended_at),
+            },
+        )
 
 
 class HealthCheckArgs(BaseModel):
@@ -113,14 +139,7 @@ async def health_check(context: TaskContext, _args: HealthCheckArgs) -> None:
         logger.warning("Проверка связи с панелью: %s", error)
         return
     if outage is not None:
-        outage.ended_at = datetime.now(UTC)
-        await record(
-            session,
-            actor=Actor.SYSTEM,
-            action="panel.available_again",
-            outcome=Outcome.SUCCESS,
-            details={"since": outage.started_at.isoformat()},
-        )
+        await _ended(session, outage)
 
 
 HEALTH_CHECK = Periodic(health_check, HealthCheckArgs(), HEALTH_CHECK_EVERY)

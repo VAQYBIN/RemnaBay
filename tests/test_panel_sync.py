@@ -430,9 +430,32 @@ async def test_4_13_long_outage_notifies_team_once(db_session: AsyncSession) -> 
     assert notification.variables == {"since": "1 октября 2026, 23:00 (МСК)"}
 
 
+async def test_0048_team_learns_when_panel_is_back_after_notified_outage(
+    db_session: AsyncSession,
+) -> None:
+    """0048: о простое уведомляли — когда связь вернулась, команда получает уведомление
+    о конце простоя с его началом и концом."""
+    await _owner(db_session)
+    panel = FakePanel(down=True)
+    await _check(db_session, panel)
+    outage = await current_outage(db_session)
+    assert outage is not None
+    outage.started_at = datetime(2026, 10, 1, 20, 0, tzinfo=UTC)
+    await _check(db_session, panel)
+
+    panel.down = False
+    await _check(db_session, panel)
+
+    keys = [n.text_key for n in await _notifications(db_session)]
+    assert keys == ["team.panel_unavailable", "team.panel_available_again"]
+    back = (await _notifications(db_session))[-1]
+    assert back.variables["since"] == "1 октября 2026, 23:00 (МСК)"
+    assert back.variables["until"].endswith("(МСК)")
+
+
 async def test_4_13_short_outage_ends_without_notification(db_session: AsyncSession) -> None:
-    """4.13: панель вернулась раньше 5 минут — уведомления нет; простой закрыт, данные снова
-    актуальны; следующий простой — новый, со своим уведомлением."""
+    """4.13, 0048: панель вернулась раньше 5 минут — уведомлений нет ни о простое, ни о его
+    конце; простой закрыт, данные снова актуальны."""
     await _owner(db_session)
     panel = FakePanel(down=True)
 
