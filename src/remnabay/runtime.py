@@ -9,10 +9,14 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from remnabay.messaging._sender import Sender
-from remnabay.panel import PanelClient
-from remnabay.payments._applier import PaymentApplier
+# Только для проверки типов: модули задач сами импортируют это окружение, и прямой
+# импорт замкнул бы круг (аннотации в Python 3.14 вычисляются лениво)
+if TYPE_CHECKING:
+    from remnabay.messaging import Sender
+    from remnabay.panel import PanelClient
+    from remnabay.payments import PaymentApplier
 
 
 @dataclass(frozen=True)
