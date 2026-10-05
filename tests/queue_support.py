@@ -20,6 +20,7 @@ from remnabay.queue import (
     RetryPolicy,
     TaskContext,
     TaskDefinition,
+    TaskRegistry,
     TaskStatus,
     Worker,
     WorkerConfig,
@@ -59,15 +60,21 @@ class PanelDownError(Exception):
 
 
 async def _write_event(context: TaskContext, label: str, started_at: datetime) -> None:
-    await context.session.execute(
+    await _insert_event(context.session, context.task_id, label, context.attempt_number, started_at)
+
+
+async def _insert_event(
+    session: AsyncSession, task_id: int, label: str, attempt: int, started_at: datetime
+) -> None:
+    await session.execute(
         text(
             "INSERT INTO queue_test.events (task_id, label, attempt, started_at, finished_at, pid)"
             " VALUES (:task_id, :label, :attempt, :started_at, clock_timestamp(), :pid)"
         ),
         {
-            "task_id": context.task_id,
+            "task_id": task_id,
             "label": label,
-            "attempt": context.attempt_number,
+            "attempt": attempt,
             "started_at": started_at,
             "pid": os.getpid(),
         },
@@ -116,6 +123,57 @@ async def switch(context: TaskContext, args: LabelArgs) -> None:
     await _write_event(context, args.label, datetime.now(UTC))
 
 
+@task("test.hooked", LabelArgs)
+async def hooked(context: TaskContext, args: LabelArgs) -> None:
+    """Как `switch`, но исходы оставляют событие `failed:`, `cancelled:`, `resolved:`."""
+    if args.label in FAILING:
+        raise RuntimeError(f"{args.label}: сбой")
+    await _write_event(context, args.label, datetime.now(UTC))
+
+
+@hooked.on_failed
+async def _hooked_failed(session: AsyncSession, task_id: int, args: LabelArgs) -> None:
+    await _insert_event(session, task_id, f"failed:{args.label}", 0, datetime.now(UTC))
+
+
+@hooked.on_cancelled
+async def _hooked_cancelled(session: AsyncSession, task_id: int, args: LabelArgs) -> None:
+    await _insert_event(session, task_id, f"cancelled:{args.label}", 0, datetime.now(UTC))
+
+
+@hooked.on_resolved
+async def _hooked_resolved(session: AsyncSession, task_id: int, args: LabelArgs) -> None:
+    await _insert_event(session, task_id, f"resolved:{args.label}", 0, datetime.now(UTC))
+
+
+@task("test.irreversible", LabelArgs, cancellable=False)
+async def irreversible(context: TaskContext, args: LabelArgs) -> None:
+    """Как смена даты при возврате: отменить нельзя (4.31)."""
+    if args.label in FAILING:
+        raise RuntimeError(f"{args.label}: сбой")
+    await _write_event(context, args.label, datetime.now(UTC))
+
+
+@task("test.bad_hook", LabelArgs)
+async def bad_hook(_context: TaskContext, args: LabelArgs) -> None:
+    raise RuntimeError(f"{args.label}: сбой")
+
+
+@bad_hook.on_failed
+async def _bad_hook_failed(_session: AsyncSession, _task_id: int, _args: LabelArgs) -> None:
+    raise RuntimeError("обработчик провала сломан")
+
+
+@task("test.panel_switch", LabelArgs)
+async def panel_switch(context: TaskContext, args: LabelArgs) -> None:
+    """Панель недоступна — «ждёт панель»; иначе падает, пока метка в `FAILING`."""
+    if not PANEL["up"]:
+        raise PanelDownError("панель недоступна")
+    if args.label in FAILING:
+        raise RuntimeError(f"{args.label}: сбой")
+    await _write_event(context, args.label, datetime.now(UTC))
+
+
 @task("test.panel", LabelArgs)
 async def needs_panel(context: TaskContext, args: LabelArgs) -> None:
     if not PANEL["up"]:
@@ -157,7 +215,20 @@ async def spawn(context: TaskContext, args: SpawnArgs) -> None:
         raise RuntimeError("сбой после постановки подзадач")
 
 
-ALL_TASKS = (record_event, flaky, switch, needs_panel, crash, spawn, sql_sleep)
+ALL_TASKS = (
+    record_event,
+    flaky,
+    switch,
+    hooked,
+    irreversible,
+    bad_hook,
+    panel_switch,
+    needs_panel,
+    crash,
+    spawn,
+    sql_sleep,
+)
+REGISTRY = TaskRegistry(ALL_TASKS)
 
 FAST_POLICY = RetryPolicy(
     first_delay=timedelta(milliseconds=50),

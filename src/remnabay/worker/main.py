@@ -10,16 +10,14 @@ import logging
 import signal
 import tempfile
 import time
-from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from remnabay.config import Settings
 from remnabay.db import create_engine
 from remnabay.panel import PanelUnavailableError
-from remnabay.queue import RetryPolicy, TaskDefinition, Worker, WorkerConfig
+from remnabay.queue import RetryPolicy, TaskRegistry, Worker, WorkerConfig
 from remnabay.shop_settings import RETRY_MAX_ATTEMPTS, RETRY_WINDOW, get_setting
 
 DEFAULT_HEARTBEAT_PATH = Path(tempfile.gettempdir()) / "remnabay-worker.heartbeat"
@@ -27,9 +25,9 @@ HEARTBEAT_INTERVAL_SECONDS = 10.0
 # Несколько пропущенных пульсов подряд — воркер считается зависшим
 HEARTBEAT_MAX_AGE_SECONDS = 60.0
 
-# Виды задач магазина. Добавляются блоками, которые их вводят; очистка очереди
-# встроена в сам воркер
-TASKS: Sequence[TaskDefinition[Any]] = ()
+# Виды задач магазина — общие для воркера и действий команды над проваленными.
+# Добавляются блоками, которые их вводят; очистка очереди встроена в сам воркер
+TASKS = TaskRegistry(())
 # Ошибки «внешний сервис недоступен»: задача ждёт, а не проваливается (4.30)
 UNAVAILABLE: tuple[type[Exception], ...] = (PanelUnavailableError,)
 

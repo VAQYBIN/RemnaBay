@@ -19,7 +19,7 @@
 import asyncio
 import contextlib
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
@@ -33,14 +33,17 @@ from sqlalchemy.orm import aliased
 
 from remnabay.journal import Actor, JsonValue, Outcome, record
 from remnabay.queue._core import (
+    Ending,
     RetryPolicy,
     RunnableTask,
     TaskContext,
     TaskDefinition,
+    TaskRegistry,
     task,
     task_subject,
 )
 from remnabay.queue._models import (
+    FINISHED,
     RUNNABLE,
     UNFINISHED,
     AttemptResult,
@@ -52,8 +55,8 @@ from remnabay.queue._models import (
 
 logger = logging.getLogger(__name__)
 
-# Выполненные и отменённые задачи хранятся 30 дней; проваленные и ждущие — пока
-# их не разберут. Попытки остаются в журнале и после очистки.
+# Завершённые задачи (выполненные, отменённые, решённые вручную) хранятся 30 дней;
+# проваленные и ждущие — пока их не разберут. Попытки остаются в журнале и после очистки.
 FINISHED_RETENTION = timedelta(days=30)
 SLOT_RETENTION = timedelta(days=1)
 CLEANUP_EVERY = timedelta(hours=1)
@@ -120,11 +123,11 @@ class CleanupArgs(BaseModel):
 
 @task("queue.cleanup", CleanupArgs)
 async def cleanup(context: TaskContext, _args: CleanupArgs) -> None:
-    """Удаляет старые выполненные и отменённые задачи и старые слоты расписания."""
+    """Удаляет старые завершённые задачи и старые слоты расписания."""
     now = func.clock_timestamp()
     await context.session.execute(
         delete(QueueTask).where(
-            QueueTask.status.in_((TaskStatus.DONE, TaskStatus.CANCELLED)),
+            QueueTask.status.in_(FINISHED),
             QueueTask.finished_at < now - FINISHED_RETENTION,
         )
     )
@@ -188,7 +191,7 @@ class Worker:
     def __init__(
         self,
         engine: AsyncEngine,
-        tasks: Sequence[RunnableTask],
+        tasks: Iterable[RunnableTask],
         *,
         periodic: Sequence[Scheduled] = (),
         policy: RetryPolicy | PolicySource | None = None,
@@ -202,11 +205,7 @@ class Worker:
         ждёт («ждёт панель», 4.30), а не проваливается, и попытка не считается в лимит.
         """
         self._sessions = async_sessionmaker(engine, expire_on_commit=False)
-        self._tasks: dict[str, RunnableTask] = {}
-        for definition in (*tasks, cleanup):
-            if definition.name in self._tasks:
-                raise ValueError(f"Вид задачи {definition.name} зарегистрирован дважды")
-            self._tasks[definition.name] = definition
+        self._tasks = TaskRegistry((*tasks, cleanup))
         self._periodic = (*periodic, Periodic(cleanup, CleanupArgs(), CLEANUP_EVERY))
         self._policy = policy or RetryPolicy()
         self._config = config or WorkerConfig()
@@ -478,15 +477,26 @@ class Worker:
     async def _round_stats(
         self, session: AsyncSession, task_id: int, retry_round: int
     ) -> tuple[int, datetime | None, datetime]:
-        """Сколько попыток круга засчитано, когда была первая и сколько сейчас времени."""
+        """Сколько попыток круга засчитано, откуда отсчитывается окно и сколько сейчас времени.
+
+        Окно — от первой засчитанной попытки круга, а если панель была недоступна —
+        от первой засчитанной попытки после её возвращения (0047). Число попыток
+        считается за весь круг.
+        """
+        unavailable = QueueAttempt.result == AttemptResult.UNAVAILABLE
         counted = QueueAttempt.result.is_distinct_from(AttemptResult.UNAVAILABLE)
+        of_round = (QueueAttempt.task_id == task_id, QueueAttempt.retry_round == retry_round)
+        last_outage = (
+            select(func.max(QueueAttempt.number)).where(*of_round, unavailable).scalar_subquery()
+        )
+        after_outage = QueueAttempt.number > func.coalesce(last_outage, 0)
         row = (
             await session.execute(
                 select(
                     func.count().filter(counted),
-                    func.min(QueueAttempt.started_at).filter(counted),
+                    func.min(QueueAttempt.started_at).filter(counted, after_outage),
                     func.clock_timestamp(),
-                ).where(QueueAttempt.task_id == task_id, QueueAttempt.retry_round == retry_round)
+                ).where(*of_round)
             )
         ).one()
         return row[0], row[1], row[2]
@@ -513,8 +523,18 @@ class Worker:
             )
 
     async def _fail(self, session: AsyncSession, task_id: int) -> None:
-        """Окончательный провал: задача ждёт команду, следующие задачи ключа — её (4.27)."""
-        await self._set_status(session, task_id, TaskStatus.FAILED)
+        """Окончательный провал: задача ждёт команду, следующие задачи ключа — её (4.27).
+
+        Обработчик `on_failed` выполняется в точке сохранения: его сбой пишется в лог
+        и журнал, но не мешает задаче стать проваленной — иначе она перезапускалась
+        бы бесконечно.
+        """
+        task = await session.scalar(
+            update(QueueTask)
+            .where(QueueTask.id == task_id)
+            .values(status=TaskStatus.FAILED)
+            .returning(QueueTask)
+        )
         await record(
             session,
             actor=Actor.SYSTEM,
@@ -522,6 +542,22 @@ class Worker:
             subject=task_subject(task_id),
             outcome=Outcome.FAILURE,
         )
+        definition = self._tasks.get(task.name) if task is not None else None
+        if task is None or definition is None:
+            return
+        try:
+            async with session.begin_nested():
+                await definition.ended(Ending.FAILED, session, task_id, task.args)
+        except Exception as error:
+            logger.exception("Задача %s: сбой обработчика провала", task_id)
+            await record(
+                session,
+                actor=Actor.SYSTEM,
+                action="queue.failed_hook",
+                subject=task_subject(task_id),
+                outcome=Outcome.FAILURE,
+                details={"error": _describe(error)},
+            )
 
     @staticmethod
     async def _set_status(

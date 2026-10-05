@@ -33,10 +33,14 @@ class TaskStatus(StrEnum):
     DONE = "done"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    # Команда отметила решённой вручную (4.31)
+    RESOLVED = "resolved"
 
 
 # Незавершённые задачи держат очередь своего ключа (4.17, 4.27)
 UNFINISHED = (TaskStatus.PENDING, TaskStatus.WAITING_PANEL, TaskStatus.FAILED)
+# Завершённые задачи: удаляются очисткой через 30 дней (0045)
+FINISHED = (TaskStatus.DONE, TaskStatus.CANCELLED, TaskStatus.RESOLVED)
 # Задачи, которые воркер может взять, когда подойдёт их время
 RUNNABLE = (TaskStatus.PENDING, TaskStatus.WAITING_PANEL)
 

@@ -1,8 +1,10 @@
 """Очередь фоновых задач на PostgreSQL (решение 0024).
 
-Остальной код знает только этот интерфейс: описать задачу (`task`), поставить её
-в своей транзакции (`TaskDefinition.enqueue`), запустить воркер (`Worker`),
-повторить или отменить проваленную (`retry_failed`, `cancel_failed`).
+Остальной код знает только этот интерфейс: описать задачу (`task`) и её исходы
+(`on_failed`, `on_cancelled`, `on_resolved`), поставить её в своей транзакции
+(`TaskDefinition.enqueue`), запустить воркер (`Worker`), разобрать проваленную
+(`retry_failed`, `cancel_failed`, `resolve_failed`) и показать, что требует
+внимания (`failed_tasks`, `waiting_panel_count`).
 
 Правила для задач (0024):
 - задача сверяет состояние перед внешним действием (4.15): «оживший» после
@@ -11,17 +13,24 @@
 """
 
 from remnabay.queue._core import (
+    Ending,
+    FailedTask,
     RetryPolicy,
     TaskContext,
     TaskDefinition,
+    TaskNotCancellableError,
     TaskNotFailedError,
+    TaskRegistry,
     attempts_of,
     cancel_failed,
+    failed_tasks,
+    resolve_failed,
     retry_failed,
     task,
     task_status,
     task_subject,
     waiting_behind,
+    waiting_panel_count,
 )
 from remnabay.queue._models import AttemptResult, TaskStatus
 from remnabay.queue._worker import (
@@ -34,21 +43,28 @@ from remnabay.queue._worker import (
 
 __all__ = [
     "AttemptResult",
+    "Ending",
+    "FailedTask",
     "Periodic",
     "PolicySource",
     "RetryPolicy",
     "TaskContext",
     "TaskDefinition",
+    "TaskNotCancellableError",
     "TaskNotFailedError",
+    "TaskRegistry",
     "TaskStatus",
     "TaskTimeoutError",
     "Worker",
     "WorkerConfig",
     "attempts_of",
     "cancel_failed",
+    "failed_tasks",
+    "resolve_failed",
     "retry_failed",
     "task",
     "task_status",
     "task_subject",
     "waiting_behind",
+    "waiting_panel_count",
 ]
