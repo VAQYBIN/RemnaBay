@@ -23,7 +23,7 @@ from remnabay.shop_settings import (
     webhook_secret,
 )
 from remnabay.worker.main import retry_policy
-from tests.conftest import REQUIRED_ENV
+from tests.conftest import REQUIRED_ENV, journaled_in_test
 from tests.domain_support import add, make_team_member
 
 BOX = SecretBox(REQUIRED_ENV["ENCRYPTION_KEY"])
@@ -47,7 +47,9 @@ async def test_4_25_change_applies_at_once_and_is_journaled(db_session: AsyncSes
     assert await get_setting(db_session, RETRY_MAX_ATTEMPTS) == 5
     entry = (
         await db_session.scalars(
-            select(JournalEntry).where(JournalEntry.action == "setting.changed")
+            select(JournalEntry).where(
+                JournalEntry.action == "setting.changed", journaled_in_test()
+            )
         )
     ).one()
     assert entry.actor_type == ActorType.TEAM_MEMBER

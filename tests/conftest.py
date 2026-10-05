@@ -5,10 +5,11 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
-from sqlalchemy import pool
+from sqlalchemy import ColumnElement, func, pool
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
 from remnabay.config import load_settings
+from remnabay.journal import JournalEntry
 from remnabay.migrations import upgrade_to_head
 from tests import queue_support
 
@@ -91,3 +92,13 @@ async def queue_engine(database_url: str) -> AsyncIterator[AsyncEngine]:
     finally:
         await queue_support.prepare(engine)
         await engine.dispose()
+
+
+def journaled_in_test() -> ColumnElement[bool]:
+    """Записи журнала, сделанные в транзакции теста (`db_session`).
+
+    Журнал не очищается (4.26), а тесты с настоящими коммитами оставляют в нём записи.
+    Транзакция `db_session` начинается вместе с тестом, а `now()` в PostgreSQL — время
+    её начала: записи теста сделаны не раньше.
+    """
+    return JournalEntry.occurred_at >= func.now()

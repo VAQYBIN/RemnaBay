@@ -21,7 +21,7 @@ from remnabay.shop_settings import PANEL_WEBHOOK_SECRET, ShopSettingValue, webho
 from remnabay.web.app import create_app
 from remnabay.web.deps import get_session
 from remnabay.web.panel_webhook import PANEL_WEBHOOK_PATH
-from tests.conftest import REQUIRED_ENV
+from tests.conftest import REQUIRED_ENV, journaled_in_test
 from tests.domain_support import add, make_client, make_subscription
 from tests.panel_support import user_json
 
@@ -99,7 +99,9 @@ async def _reconciles(session: AsyncSession) -> list[tuple[str | None, Reconcile
 
 async def _journal_actions(session: AsyncSession) -> list[tuple[str, object]]:
     entries = await session.scalars(
-        select(JournalEntry).where(JournalEntry.action.like("panel.%")).order_by(JournalEntry.id)
+        select(JournalEntry)
+        .where(JournalEntry.action.like("panel.%"), journaled_in_test())
+        .order_by(JournalEntry.id)
     )
     return [(entry.action, entry.details.get("reason")) for entry in entries]
 

@@ -44,6 +44,7 @@ from remnabay.queue import (
 from remnabay.queue._models import QueueTask
 from remnabay.texts import BotTextOverride
 from remnabay.worker.main import notify_operation_failed
+from tests.conftest import journaled_in_test
 from tests.domain_support import add, make_client
 from tests.panel_support import FakeSender, fake_runtime
 from tests.queue_support import all_finished, run_workers, status_of
@@ -197,7 +198,9 @@ async def _queued(session: AsyncSession) -> list[SendArgs]:
 
 async def _not_delivered(session: AsyncSession) -> list[dict[str, object]]:
     entries = await session.scalars(
-        select(JournalEntry).where(JournalEntry.action == "message.not_delivered")
+        select(JournalEntry).where(
+            JournalEntry.action == "message.not_delivered", journaled_in_test()
+        )
     )
     return [dict(entry.details) for entry in entries]
 

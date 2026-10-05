@@ -37,6 +37,7 @@ from remnabay.panel_sync import (
 from remnabay.queue import TaskContext
 from remnabay.queue._models import QueueTask
 from remnabay.shop_settings import PANEL_OUTAGE_ALERT_AFTER, PANEL_SYNC_INTERVAL, set_setting
+from tests.conftest import journaled_in_test
 from tests.domain_support import (
     add,
     make_client,
@@ -443,7 +444,9 @@ async def test_4_13_short_outage_ends_without_notification(db_session: AsyncSess
     assert await _notifications(db_session) == []
     actions = (
         await db_session.scalars(
-            select(JournalEntry.action).where(JournalEntry.action.like("panel.%"))
+            select(JournalEntry.action).where(
+                JournalEntry.action.like("panel.%"), journaled_in_test()
+            )
         )
     ).all()
     assert actions == ["panel.unavailable", "panel.available_again"]
