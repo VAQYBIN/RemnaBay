@@ -13,6 +13,7 @@ from remnabay.brand._assets import (
     save_asset,
     validate_asset,
 )
+from remnabay.brand._css import default_brand_css
 from remnabay.brand._settings import (
     BRAND_NAME,
     BRAND_PRIMARY_COLOR,
@@ -50,6 +51,7 @@ __all__ = [
     "asset_versions",
     "brand_name",
     "build_palette",
+    "default_brand_css",
     "delete_asset",
     "get_asset",
     "save_asset",

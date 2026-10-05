@@ -23,6 +23,16 @@ updates:
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
 
+  # Генератор типов клиента админки: отдельный пакет с TypeScript 5 (решение 0051)
+  - package-ecosystem: npm
+    directory: /admin/tools/openapi-typescript
+    schedule:
+      interval: weekly
+    ignore:
+      # openapi-typescript работает через API компилятора TypeScript 5
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+
   - package-ecosystem: docker
     directory: /
     schedule:

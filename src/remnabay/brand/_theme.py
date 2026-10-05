@@ -257,17 +257,17 @@ def _theme_palette(
     accent_fill = _fill(accent, backgrounds, ink).to_rgb()
     accent_text = _text(accent, backgrounds).to_rgb()
 
-    glass = {
-        name: Oklch(layer.color.l, tint, hue)
-        .with_lightness(layer.color.l)
-        .to_rgb()
-        .css(layer.alpha)
-        for name, layer in (
-            ("glass-base", frame.base),
-            ("glass-module", frame.module),
-            ("glass-float", frame.floating),
-        )
-    }
+    glass: dict[str, str] = {}
+    for name, layer in (
+        ("glass-base", frame.base),
+        ("glass-module", frame.module),
+        ("glass-float", frame.floating),
+    ):
+        color = _glass_rgb(layer, hue, tint)
+        glass[name] = color.css(layer.alpha)
+        # Запасной выход: без прозрачности и размытия — непрозрачная поверхность того же
+        # тона (DESIGN.md, «Правило запасного выхода»)
+        glass[f"{name}-solid"] = composite(color, layer.alpha, background).to_hex()
     tokens = {
         "bg": background.to_hex(),
         "glow-1": glows[0].css(0.55 if theme == Theme.DARK else 0.70),

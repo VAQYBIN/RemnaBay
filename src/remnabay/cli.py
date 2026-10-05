@@ -45,6 +45,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 
     roles.add_parser("generate-key", help="создать ключ шифрования для ENCRYPTION_KEY в .env")
     roles.add_parser("openapi", help="вывести схему API админки (для клиента админки)")
+    roles.add_parser("default-brand-css", help="вывести токены бренда RemnaBay для админки")
 
     return parser.parse_args(argv)
 
@@ -67,6 +68,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         from remnabay.web.admin import openapi_schema
 
         print(json.dumps(openapi_schema(), ensure_ascii=False, indent=2))
+        return 0
+
+    if args.command == "default-brand-css":
+        from remnabay.brand import default_brand_css
+
+        print(default_brand_css(), end="")
         return 0
 
     try:

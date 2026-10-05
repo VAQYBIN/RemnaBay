@@ -53,3 +53,13 @@ def test_0051_openapi_without_env(capsys: pytest.CaptureFixture[str]) -> None:
     schema = json.loads(capsys.readouterr().out)
     assert "/api/admin/auth/me" in schema["paths"]
     assert not [path for path in schema["paths"] if path.startswith("/webhooks")]
+
+
+@pytest.mark.usefixtures("clean_env")
+def test_1_23_default_brand_css_without_env(capsys: pytest.CaptureFixture[str]) -> None:
+    """1.23: токены бренда RemnaBay для админки выгружаются без .env — при сборке."""
+    assert main(["default-brand-css"]) == 0
+
+    css = capsys.readouterr().out
+    assert ':root[data-theme="light"]' in css
+    assert "--rb-primary: #1fa4a0;" in css

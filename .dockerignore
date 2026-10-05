@@ -11,6 +11,7 @@
 .pytest_cache
 .pyright
 admin/node_modules
+admin/tools/*/node_modules
 admin/dist
 docs
 tests
