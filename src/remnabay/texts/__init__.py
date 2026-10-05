@@ -14,6 +14,7 @@ from remnabay.texts._catalog import (
     variables_of,
 )
 from remnabay.texts._models import BotTextOverride
+from remnabay.texts._overrides import get_override, reset_override, save_override
 
 
 async def load_overrides(session: AsyncSession) -> dict[tuple[str, str], str]:
@@ -31,8 +32,11 @@ __all__ = [
     "TextError",
     "Texts",
     "check_override",
+    "get_override",
     "load_default_catalogs",
     "load_overrides",
+    "reset_override",
+    "save_override",
     "substitute",
     "variables_of",
 ]

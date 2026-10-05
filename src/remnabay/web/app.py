@@ -23,7 +23,7 @@ from remnabay.config import Settings, load_settings
 from remnabay.crypto import SecretBox
 from remnabay.db import create_engine, create_session_factory
 from remnabay.shop_settings import TELEGRAM_WEBHOOK_SECRET, generated_secret
-from remnabay.web import admin, admin_static, panel_webhook, telegram_webhook
+from remnabay.web import admin, admin_static, brand_files, panel_webhook, telegram_webhook
 from remnabay.web.admin import ADMIN_LOGIN_URL_PATH
 
 HEALTH_PATH = "/health"
@@ -95,6 +95,7 @@ def create_app(settings: Settings, *, startup: bool = False) -> FastAPI:
     app.include_router(telegram_webhook.router)
     app.include_router(admin.build_router())
     app.include_router(admin_static.build_router())
+    app.include_router(brand_files.router)
 
     @app.get(
         HEALTH_PATH,
