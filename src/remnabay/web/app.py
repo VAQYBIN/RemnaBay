@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
+from remnabay.access import ensure_owner
 from remnabay.config import Settings, load_settings
 from remnabay.crypto import SecretBox
 from remnabay.db import create_engine, create_session_factory
@@ -32,16 +33,32 @@ class HealthStatus(BaseModel):
     status: Literal["ok", "unavailable"]
 
 
-def create_app(settings: Settings) -> FastAPI:
+def create_app(settings: Settings, *, startup: bool = False) -> FastAPI:
+    """Приложение веба. `startup` — действия при запуске магазина (владелец из `.env`);
+    в тестах они выключены, чтобы не менять общую тестовую базу."""
     engine = create_engine(settings)
+    sessions = create_session_factory(engine)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
+        if startup:
+            async with sessions() as session:
+                await ensure_owner(session, settings.owner_telegram_id)
+                await session.commit()
         yield
         await engine.dispose()
 
-    app = FastAPI(title="RemnaBay", lifespan=lifespan)
-    app.state.sessions = create_session_factory(engine)
+    # Документация API — только при разработке (0049)
+    docs = settings.dev_mode
+    app = FastAPI(
+        title="RemnaBay",
+        lifespan=lifespan,
+        docs_url="/docs" if docs else None,
+        redoc_url="/redoc" if docs else None,
+        openapi_url="/openapi.json" if docs else None,
+    )
+    app.state.settings = settings
+    app.state.sessions = sessions
     app.state.box = SecretBox(settings.encryption_key.get_secret_value())
     app.include_router(panel_webhook.router)
 
@@ -67,4 +84,4 @@ def create_app(settings: Settings) -> FastAPI:
 
 def create_app_from_env() -> FastAPI:
     """Фабрика для uvicorn: настройки читаются в процессе сервера (в том числе при --reload)."""
-    return create_app(load_settings())
+    return create_app(load_settings(), startup=True)

@@ -27,11 +27,14 @@ REQUIRED_ENV = {
     "ENCRYPTION_KEY": "dGVzdC1rZXktdGVzdC1rZXktdGVzdC1rZXktdGVzdC0=",
 }
 
+# Необязательные параметры: убираются из окружения теста, чтобы не влиял `.env` разработчика
+OPTIONAL_ENV = ("DEV_MODE",)
+
 
 @pytest.fixture
 def clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Окружение без параметров магазина и без чужого `.env` в рабочей папке."""
-    for name in REQUIRED_ENV:
+    for name in (*REQUIRED_ENV, *OPTIONAL_ENV):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.chdir(tmp_path)
 

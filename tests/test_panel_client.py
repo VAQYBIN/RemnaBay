@@ -24,6 +24,7 @@ from remnabay.panel import (
     UserEvent,
     UserEventType,
     UserStatus,
+    is_compatible_version,
     parse_event,
     verify_signature,
 )
@@ -305,3 +306,23 @@ def test_unneeded_and_unknown_events() -> None:
 
     with pytest.raises(PanelResponseError):
         parse_event(b"not json")
+
+
+@pytest.mark.parametrize(
+    ("version", "compatible"),
+    [
+        ("3.4.4", True),
+        ("3.4.9", True),
+        ("v3.4.5", True),
+        ("3.4.4-beta.1", True),
+        ("3.4.3", False),
+        ("3.5.0", False),
+        ("4.0.0", False),
+        ("2.9.9", False),
+        ("", False),
+        ("latest", False),
+    ],
+)
+def test_1_8_version_compatibility(version: str, compatible: bool) -> None:
+    """1.8 (0051): совместима та же мажорная и минорная версия, патч не ниже."""
+    assert is_compatible_version(version) is compatible

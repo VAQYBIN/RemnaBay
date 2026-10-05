@@ -56,7 +56,10 @@ type PsycopgDsn = Annotated[PostgresDsn, AfterValidator(_require_psycopg)]
 
 
 class Settings(BaseSettings):
-    """Обязательные параметры `.env`. Пустое значение считается незаданным."""
+    """Параметры `.env`: все обязательные, кроме режима разработки.
+
+    Пустое значение считается незаданным.
+    """
 
     model_config = SettingsConfigDict(
         env_file=DEFAULT_ENV_FILE,
@@ -73,6 +76,9 @@ class Settings(BaseSettings):
     owner_telegram_id: PositiveInt
     public_url: HttpsUrl
     encryption_key: EncryptionKey
+    # Режим разработки (0049, 0051): документация API, бот опросом, cookie без HTTPS.
+    # Оператор его не задаёт
+    dev_mode: bool = False
 
     @property
     def sqlalchemy_database_url(self) -> str:
@@ -104,6 +110,7 @@ _MESSAGES_BY_ERROR_TYPE = {
     "greater_than": "должен быть положительным числом",
     "url_parsing": "ожидается адрес, например https://example.com",
     "url_scheme": "неподдерживаемая схема адреса",
+    "bool_parsing": "ожидается true или false",
 }
 
 
