@@ -13,7 +13,6 @@ from aiohttp.test_utils import TestServer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from remnabay import runtime
 from remnabay.domain.clients import Client
 from remnabay.domain.team import TeamMember, TeamRole
 from remnabay.journal import JournalEntry
@@ -46,6 +45,7 @@ from remnabay.queue._models import QueueTask
 from remnabay.texts import BotTextOverride
 from remnabay.worker.main import notify_operation_failed
 from tests.domain_support import add, make_client
+from tests.panel_support import FakeSender, fake_runtime
 from tests.queue_support import all_finished, run_workers, status_of
 
 TOKEN = "123456:test-token"  # noqa: S105 — не настоящий токен
@@ -178,21 +178,6 @@ async def test_4_33_no_connection_means_not_accepted() -> None:
 # --- Операция «отправить сообщение» ---
 
 
-@dataclass
-class FakeSender:
-    """Отправитель для тестов: запоминает сообщения, отвечает заготовленными ошибками."""
-
-    errors: list[DeliveryError] = field(default_factory=list[DeliveryError])
-    sent: list[tuple[int, OutgoingMessage]] = field(
-        default_factory=list[tuple[int, OutgoingMessage]]
-    )
-
-    async def send(self, chat_id: int, message: OutgoingMessage) -> None:
-        if self.errors:
-            raise self.errors.pop(0)
-        self.sent.append((chat_id, message))
-
-
 async def _run_send(
     session: AsyncSession,
     sender: FakeSender,
@@ -200,7 +185,7 @@ async def _run_send(
     previous: AttemptResult | None = None,
 ) -> None:
     context = TaskContext(session=session, task_id=1, attempt_number=1, previous_result=previous)
-    with runtime.use(runtime.Runtime(sender=sender)):
+    with fake_runtime(sender):
         await send_message.run(context, args.model_dump(mode="json"))
 
 
@@ -375,7 +360,7 @@ async def test_4_33_message_is_sent_once_after_refusals(queue_engine: AsyncEngin
         config=WorkerConfig(concurrency=1, poll_interval=_MS * 10),
     )
 
-    with runtime.use(runtime.Runtime(sender=sender)):
+    with fake_runtime(sender):
         await run_workers([worker], lambda: all_finished(queue_engine, [task_id]))
 
     assert await status_of(queue_engine, task_id) == TaskStatus.DONE

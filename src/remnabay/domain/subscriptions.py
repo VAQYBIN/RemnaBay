@@ -76,6 +76,11 @@ class Subscription(Base):
     panel_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+def operations_key(subscription_id: int) -> str:
+    """Ключ порядка операций подписки в очереди: они выполняются строго по очереди (4.17)."""
+    return f"subscription:{subscription_id}"
+
+
 class SegmentKind(StrEnum):
     """Откуда отрезок. Стоимость есть только у оплаченного; остальные — подаренные (0012)."""
 

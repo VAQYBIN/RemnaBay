@@ -28,46 +28,12 @@ from remnabay.panel import (
     verify_signature,
 )
 from remnabay.panel._webhooks import sign
+from tests.panel_support import user_json
 
 type Handler = Callable[[httpx2.Request], httpx2.Response]
 
 PANEL_URL = "https://panel.example.com"
 EXPIRE_AT = datetime(2026, 11, 5, 12, 0, tzinfo=UTC)
-
-
-def user_json(**overrides: Any) -> dict[str, Any]:
-    user: dict[str, Any] = {
-        "id": 7,
-        "shortUuid": "abc123",
-        "username": "rb_7",
-        "status": "ACTIVE",
-        "trafficLimitBytes": 0,
-        "trafficLimitStrategy": "NO_RESET",
-        "expireAt": "2026-11-05T12:00:00.000Z",
-        "telegramId": 100500,
-        "email": None,
-        "description": None,
-        "tag": None,
-        "hwidDeviceLimit": 3,
-        "externalSquadUuid": None,
-        "subRevokedAt": None,
-        "lastTrafficResetAt": None,
-        "createdAt": "2026-10-05T12:00:00.000Z",
-        "updatedAt": "2026-10-05T12:00:00.000Z",
-        "subscriptionUrl": "https://sub.example.com/abc123",
-        "activeInternalSquads": [
-            {"uuid": "6f0b2c3e-1d2a-4b5c-8d9e-0f1a2b3c4d5e", "name": "Default"}
-        ],
-        "userTraffic": {
-            "usedTrafficBytes": 1024,
-            "lifetimeUsedTrafficBytes": 2048,
-            "onlineAt": None,
-            "firstConnectedAt": None,
-            "lastConnectedNodeUuid": None,
-        },
-    }
-    user.update(overrides)
-    return user
 
 
 def client_with(handler: Handler, base_url: str = PANEL_URL) -> PanelClient:
@@ -285,6 +251,8 @@ def test_4_1_signature_must_match_body() -> None:
     assert not verify_signature(body + b" ", signature, "webhook-secret")
     assert not verify_signature(body, None, "webhook-secret")
     assert not verify_signature(body, "", "webhook-secret")
+    # Заголовок присылает кто угодно: символы вне ASCII — отказ, а не исключение
+    assert not verify_signature(body, "éé", "webhook-secret")
 
 
 def _event_body(scope: str, event: str, data: Any) -> bytes:

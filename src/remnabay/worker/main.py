@@ -18,7 +18,8 @@ from remnabay import runtime
 from remnabay.config import Settings
 from remnabay.db import create_engine
 from remnabay.messaging import TelegramSender, notify_team, send_message
-from remnabay.panel import PanelUnavailableError
+from remnabay.panel import PanelClient, PanelUnavailableError
+from remnabay.panel_sync import reconcile_subscription
 from remnabay.queue import RetryPolicy, TaskRegistry, Worker, WorkerConfig
 from remnabay.shop_settings import RETRY_MAX_ATTEMPTS, RETRY_WINDOW, get_setting
 
@@ -29,7 +30,7 @@ HEARTBEAT_MAX_AGE_SECONDS = 60.0
 
 # Виды задач магазина — общие для воркера и действий команды над проваленными.
 # Добавляются блоками, которые их вводят; очистка очереди встроена в сам воркер
-TASKS = TaskRegistry((send_message,))
+TASKS = TaskRegistry((send_message, reconcile_subscription))
 # Ошибки «внешний сервис недоступен»: задача ждёт, а не проваливается (4.30)
 UNAVAILABLE: tuple[type[Exception], ...] = (PanelUnavailableError,)
 
@@ -108,6 +109,7 @@ def run(settings: Settings) -> None:
         config = WorkerConfig()
         engine = create_engine(settings, pool_size=config.pool_size)
         sender = TelegramSender(settings.bot_token.get_secret_value())
+        panel = PanelClient(str(settings.panel_url), settings.panel_token.get_secret_value())
         try:
             queue = Worker(
                 engine,
@@ -117,9 +119,10 @@ def run(settings: Settings) -> None:
                 unavailable=UNAVAILABLE,
                 on_failed=notify_operation_failed,
             )
-            with runtime.use(runtime.Runtime(sender=sender)):
+            with runtime.use(runtime.Runtime(sender=sender, panel=panel)):
                 await run_worker(stop, queue=queue)
         finally:
+            await panel.aclose()
             await sender.close()
             await engine.dispose()
 

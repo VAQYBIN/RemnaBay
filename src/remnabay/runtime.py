@@ -1,4 +1,4 @@
-"""Окружение воркера, которое нужно задачам очереди: отправитель сообщений и т. п.
+"""Окружение воркера, которое нужно задачам очереди: отправитель сообщений, клиент панели.
 
 Задача очереди получает только сессию и свои аргументы; внешние клиенты она берёт
 отсюда. Окружение задаёт запуск воркера, а тесты — своё, с подставными клиентами.
@@ -10,11 +10,13 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 
 from remnabay.messaging._sender import Sender
+from remnabay.panel import PanelClient
 
 
 @dataclass(frozen=True)
 class Runtime:
     sender: Sender
+    panel: PanelClient
 
 
 _current: ContextVar[Runtime] = ContextVar("remnabay_runtime")
