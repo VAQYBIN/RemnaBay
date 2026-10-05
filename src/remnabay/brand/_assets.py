@@ -28,6 +28,8 @@ MIN_MARK_PIXELS = 512
 # Квадрат с точностью до 1 %: у векторного знака размеры бывают дробными
 _SQUARE_TOLERANCE = 0.01
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+# Подпись, длина и тип чанка IHDR, 13 байт его данных, CRC
+_PNG_MIN_BYTES = 33
 # Цветовые типы PNG с альфа-каналом: оттенки серого + альфа, RGBA
 _PNG_ALPHA_TYPES = frozenset({4, 6})
 _NUMBER = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
@@ -74,7 +76,7 @@ class _Size:
 
 def _png_size(data: bytes) -> tuple[_Size, bool]:
     """Размер PNG и есть ли прозрачность: по заголовку IHDR и чанку tRNS."""
-    if not data.startswith(_PNG_SIGNATURE) or data[12:16] != b"IHDR":
+    if len(data) < _PNG_MIN_BYTES or not data.startswith(_PNG_SIGNATURE) or data[12:16] != b"IHDR":
         raise AssetError("Файл не похож на PNG")
     width, height, _depth, color_type = struct.unpack(">IIBB", data[16:26])
     transparent = color_type in _PNG_ALPHA_TYPES

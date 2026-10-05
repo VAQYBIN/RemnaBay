@@ -220,6 +220,7 @@ def test_1_11_accepted_logos(kind: AssetKind, content_type: str, data: bytes) ->
         (AssetKind.MARK, PNG, make_png(512, 512, alpha=False), "прозрачным фоном"),
         (AssetKind.LOGO, "image/jpeg", b"\xff\xd8\xff", "SVG или PNG"),
         (AssetKind.LOGO, PNG, b"not a png", "не похож на PNG"),
+        (AssetKind.LOGO, PNG, make_png(600, 160)[:20], "не похож на PNG"),
         (AssetKind.LOGO, SVG, b"<html></html>", "не похож на SVG"),
         (AssetKind.LOGO, SVG, b"<svg", "не похож на SVG"),
         (

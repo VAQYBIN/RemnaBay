@@ -15,19 +15,21 @@ import { router } from './router'
 // Тема — до первой отрисовки, чтобы экран не мигал (1.25)
 applyTheme()
 
-// Сессия закончилась или доступ отозван — на страницу входа
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true } },
+})
+
+// Сессия закончилась или доступ отозван — на страницу входа. Кэш сбрасывается:
+// иначе страница входа увидела бы прежнего участника и вернула на главную
 fetchClient.use({
   onResponse({ request, response }) {
     const auth = new URL(request.url, window.location.origin).pathname.startsWith('/api/admin/auth/')
     if (response.status === 401 && !auth) {
+      queryClient.clear()
       void router.navigate('/login', { replace: true })
     }
     return response
   },
-})
-
-const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true } },
 })
 
 const root = document.getElementById('root')

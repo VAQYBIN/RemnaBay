@@ -43,7 +43,7 @@ export function OverviewModule({ timeZone }: { timeZone: string }) {
             </dd>
           </div>
           <div className="flex justify-between gap-3">
-            <dt className="text-muted-foreground">Последняя сверка</dt>
+            <dt className="text-muted-foreground">Сверка запускалась</dt>
             <dd className="tabular">
               {data.last_sync_at ? formatDateTime(data.last_sync_at, timeZone) : 'ещё не было'}
             </dd>

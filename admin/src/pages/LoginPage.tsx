@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { ExternalLink, Send } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Navigate, useNavigate, useSearchParams } from 'react-router'
 
 import { $api, type Schemas } from '@/api/client'
@@ -82,8 +82,6 @@ export function LoginPage() {
   const [problem, setProblem] = useState<Problem | null>(problemFromQuery(params.get('error')))
   const [request, setRequest] = useState<Schemas['LoginRequestOut'] | null>(null)
 
-  if (me.data) return <Navigate to="/" replace />
-
   const begin = () => {
     setProblem(null)
     start.mutate(
@@ -98,14 +96,21 @@ export function LoginPage() {
     )
   }
 
-  const finish = (result: Problem | null) => {
-    setRequest(null)
-    if (result) {
-      setProblem(result)
-      return
-    }
-    void queryClient.invalidateQueries().then(() => navigate('/', { replace: true }))
-  }
+  // Стабильная ссылка: опрос в Waiting не перезапускает таймер на каждой отрисовке
+  const finish = useCallback(
+    (result: Problem | null) => {
+      setRequest(null)
+      if (result) {
+        setProblem(result)
+        return
+      }
+      void queryClient.invalidateQueries().then(() => navigate('/', { replace: true }))
+    },
+    [navigate, queryClient],
+  )
+
+  // Только действующая сессия: после ошибки обновления в кэше может остаться прежний участник
+  if (me.isSuccess && !me.isRefetchError) return <Navigate to="/" replace />
 
   return (
     <main className="flex min-h-dvh items-center justify-center px-4 py-10">

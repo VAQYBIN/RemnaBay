@@ -162,6 +162,14 @@ async def cleanup(context: TaskContext, _args: CleanupArgs) -> None:
     )
 
 
+async def last_periodic_start(session: AsyncSession, name: str) -> datetime | None:
+    """Когда периодическая задача последний раз ставилась в очередь — например, сверка
+    с панелью для главной админки (А1). Это момент запуска, а не окончания."""
+    return await session.scalar(
+        select(func.max(QueuePeriodicSlot.slot_start)).where(QueuePeriodicSlot.name == name)
+    )
+
+
 class TaskTimeoutError(Exception):
     """Задача не уложилась в свой таймаут.
 

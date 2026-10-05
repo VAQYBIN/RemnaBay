@@ -24,7 +24,7 @@ from remnabay.domain.panel_events import PanelEvent
 from remnabay.domain.team import TeamMember, TeamRole
 from remnabay.panel import PanelClient
 from remnabay.panel_sync import panel_available, sync_page
-from remnabay.queue._models import QueuePeriodicSlot
+from remnabay.queue import last_periodic_start
 from remnabay.shop import MAX_TESTERS, SHOP_SUPPORT_CONTACT, SHOP_TESTERS, ShopState, shop_state
 from remnabay.shop_settings import (
     SHOP_TIME_ZONE,
@@ -182,11 +182,7 @@ async def overview(session: DbSession, member: Member) -> OverviewOut:
         state=await shop_state(session),
         panel_available=await panel_available(session),
         last_panel_event_at=await session.scalar(select(func.max(PanelEvent.received_at))),
-        last_sync_at=await session.scalar(
-            select(func.max(QueuePeriodicSlot.slot_start)).where(
-                QueuePeriodicSlot.name == sync_page.name
-            )
-        ),
+        last_sync_at=await last_periodic_start(session, sync_page.name),
         attention=needs.count,
         waiting_panel=needs.waiting_panel,
     )

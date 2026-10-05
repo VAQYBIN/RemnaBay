@@ -11,6 +11,8 @@ from remnabay import checklist
 from remnabay.domain.panel_events import PanelEvent
 from remnabay.domain.tariffs import TariffState
 from remnabay.domain.team import TeamMember, TeamRole
+from remnabay.panel_sync import sync_page
+from remnabay.queue._models import QueuePeriodicSlot
 from remnabay.shop import SHOP_STATE, ShopState
 from tests.brand_support import make_svg
 from tests.domain_support import add, make_tariff, make_team_member, put_setting
@@ -373,3 +375,15 @@ async def test_overview_shows_links_and_attention(shop: Shop, owner: TeamMember)
     assert body["last_panel_event_at"] == "2026-10-06T09:00:00Z"
     assert body["attention"] == 0
     assert body["waiting_panel"] == 0
+    assert body["last_sync_at"] is None
+
+
+async def test_overview_shows_last_sync_start(shop: Shop, owner: TeamMember) -> None:
+    """А1: когда последний раз запускалась сверка с панелью (4.8)."""
+    del owner
+    started = datetime(2026, 10, 6, 8, 45, tzinfo=UTC)
+    await add(shop.session, QueuePeriodicSlot(name=sync_page.name, slot_start=started))
+
+    body = (await shop.http.get("/api/admin/overview")).json()
+
+    assert body["last_sync_at"] == "2026-10-06T08:45:00Z"
