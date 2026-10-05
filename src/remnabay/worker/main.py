@@ -14,10 +14,13 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from remnabay.config import Settings
 from remnabay.db import create_engine
 from remnabay.panel import PanelUnavailableError
-from remnabay.queue import TaskDefinition, Worker, WorkerConfig
+from remnabay.queue import RetryPolicy, TaskDefinition, Worker, WorkerConfig
+from remnabay.shop_settings import RETRY_MAX_ATTEMPTS, RETRY_WINDOW, get_setting
 
 DEFAULT_HEARTBEAT_PATH = Path(tempfile.gettempdir()) / "remnabay-worker.heartbeat"
 HEARTBEAT_INTERVAL_SECONDS = 10.0
@@ -31,6 +34,14 @@ TASKS: Sequence[TaskDefinition[Any]] = ()
 UNAVAILABLE: tuple[type[Exception], ...] = (PanelUnavailableError,)
 
 logger = logging.getLogger(__name__)
+
+
+async def retry_policy(session: AsyncSession) -> RetryPolicy:
+    """Политика повторов: лимит попыток и окно — из настроек оператора (4.14)."""
+    return RetryPolicy(
+        max_attempts=await get_setting(session, RETRY_MAX_ATTEMPTS),
+        max_age=await get_setting(session, RETRY_WINDOW),
+    )
 
 
 # Операции с маленьким локальным файлом не блокируют цикл заметно
@@ -92,7 +103,9 @@ def run(settings: Settings) -> None:
         config = WorkerConfig()
         engine = create_engine(settings, pool_size=config.pool_size)
         try:
-            queue = Worker(engine, TASKS, config=config, unavailable=UNAVAILABLE)
+            queue = Worker(
+                engine, TASKS, policy=retry_policy, config=config, unavailable=UNAVAILABLE
+            )
             await run_worker(stop, queue=queue)
         finally:
             await engine.dispose()

@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import dataclasses
 import itertools
 from datetime import UTC, datetime, timedelta
 
@@ -224,6 +225,28 @@ async def test_4_14_retries_stop_when_time_window_ends(queue_engine: AsyncEngine
         attempts = await attempts_of(session, task_id)
     # Попытки на 0; 0,1; 0,3 с — следующая была бы на 0,7 с, за окном 0,5 с
     assert len(attempts) == 3
+    assert await status_of(queue_engine, task_id) == TaskStatus.FAILED
+
+
+async def test_4_14_retry_limits_are_read_at_each_decision(queue_engine: AsyncEngine) -> None:
+    """4.14: лимиты повторов читаются при каждом решении — изменение настройки оператором
+    действует на уже идущие повторы, без перезапуска воркера."""
+    FAILING.add("x")
+    limits = {"max_attempts": 10}
+
+    async def policy(_session: AsyncSession) -> RetryPolicy:
+        return dataclasses.replace(FAST_POLICY, max_attempts=limits["max_attempts"])
+
+    task_id = await enqueue(queue_engine, switch, LabelArgs(label="x"))
+    worker = make_worker(queue_engine, policy=policy)
+
+    assert await worker.run_one() is True
+    limits["max_attempts"] = 2
+    await run_workers([worker], lambda: all_finished(queue_engine, [task_id]))
+
+    async with AsyncSession(queue_engine) as session:
+        attempts = await attempts_of(session, task_id)
+    assert len(attempts) == 2
     assert await status_of(queue_engine, task_id) == TaskStatus.FAILED
 
 

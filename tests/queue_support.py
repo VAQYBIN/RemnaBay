@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 
 from remnabay.queue import (
     Periodic,
+    PolicySource,
     RetryPolicy,
     TaskContext,
     TaskDefinition,
@@ -176,7 +177,7 @@ FAST_CONFIG = WorkerConfig(
 def make_worker(
     engine: AsyncEngine,
     *,
-    policy: RetryPolicy = FAST_POLICY,
+    policy: RetryPolicy | PolicySource = FAST_POLICY,
     config: WorkerConfig = FAST_CONFIG,
     periodic: Sequence[Periodic[RecordArgs]] = (),
     unavailable: tuple[type[Exception], ...] = (PanelDownError,),

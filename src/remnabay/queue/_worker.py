@@ -83,6 +83,11 @@ class WorkerConfig:
         return self.concurrency * 2 + 1
 
 
+# Политика повторов, которая читается при каждом решении: настройки оператора
+# меняются без перезапуска (04-operator-settings)
+type PolicySource = Callable[[AsyncSession], Awaitable[RetryPolicy]]
+
+
 class Scheduled(Protocol):
     @property
     def name(self) -> str: ...
@@ -186,11 +191,14 @@ class Worker:
         tasks: Sequence[RunnableTask],
         *,
         periodic: Sequence[Scheduled] = (),
-        policy: RetryPolicy | None = None,
+        policy: RetryPolicy | PolicySource | None = None,
         config: WorkerConfig | None = None,
         unavailable: tuple[type[Exception], ...] = (),
     ) -> None:
-        """`unavailable` — ошибки «внешний сервис недоступен»: задача с такой ошибкой
+        """`policy` — постоянная политика повторов или функция, которая читает её из
+        базы при каждом решении.
+
+        `unavailable` — ошибки «внешний сервис недоступен»: задача с такой ошибкой
         ждёт («ждёт панель», 4.30), а не проваливается, и попытка не считается в лимит.
         """
         self._sessions = async_sessionmaker(engine, expire_on_commit=False)
@@ -361,11 +369,12 @@ class Worker:
     ) -> None:
         """После неудачной попытки: «ждёт панель», повтор с паузой или провал."""
         if unavailable:
+            policy = await self._policy_for(session)
             await self._set_status(
                 session,
                 task_id,
                 TaskStatus.WAITING_PANEL,
-                run_at=func.clock_timestamp() + self._policy.unavailable_recheck,
+                run_at=func.clock_timestamp() + policy.unavailable_recheck,
             )
         else:
             await self._retry_or_fail(session, task_id, retry_round)
@@ -461,6 +470,11 @@ class Worker:
                 },
             )
 
+    async def _policy_for(self, session: AsyncSession) -> RetryPolicy:
+        if isinstance(self._policy, RetryPolicy):
+            return self._policy
+        return await self._policy(session)
+
     async def _round_stats(
         self, session: AsyncSession, task_id: int, retry_round: int
     ) -> tuple[int, datetime | None, datetime]:
@@ -480,18 +494,18 @@ class Worker:
     async def _exhausted_before_start(
         self, session: AsyncSession, task_id: int, retry_round: int
     ) -> bool:
+        policy = await self._policy_for(session)
         counted, first_started, now = await self._round_stats(session, task_id, retry_round)
-        if counted >= self._policy.max_attempts:
+        if counted >= policy.max_attempts:
             return True
-        return first_started is not None and now - first_started >= self._policy.max_age
+        return first_started is not None and now - first_started >= policy.max_age
 
     async def _retry_or_fail(self, session: AsyncSession, task_id: int, retry_round: int) -> None:
+        policy = await self._policy_for(session)
         counted, first_started, now = await self._round_stats(session, task_id, retry_round)
-        delay = self._policy.delay_after(counted)
-        out_of_window = (
-            first_started is not None and now + delay - first_started > self._policy.max_age
-        )
-        if counted >= self._policy.max_attempts or out_of_window:
+        delay = policy.delay_after(counted)
+        out_of_window = first_started is not None and now + delay - first_started > policy.max_age
+        if counted >= policy.max_attempts or out_of_window:
             await self._fail(session, task_id)
         else:
             await self._set_status(
