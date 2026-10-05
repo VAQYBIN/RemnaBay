@@ -106,6 +106,8 @@ RETRY_WINDOW = ShopSetting("retry.window", _DURATION, timedelta(hours=1))
 PANEL_SYNC_INTERVAL = ShopSetting("panel.sync_interval", _DURATION, timedelta(minutes=15))
 PANEL_OUTAGE_ALERT_AFTER = ShopSetting("panel.outage_alert_after", _DURATION, timedelta(minutes=5))
 PANEL_WEBHOOK_SECRET = SecretSetting("panel.webhook_secret")
+# Секрет вебхука Telegram: бот получает обновления только с ним (0051)
+TELEGRAM_WEBHOOK_SECRET = SecretSetting("telegram.webhook_secret")
 
 
 async def _stored(session: AsyncSession, key: str) -> tuple[JsonValue] | None:
@@ -167,12 +169,18 @@ async def set_setting[T](
 
 
 async def webhook_secret(session: AsyncSession, box: SecretBox) -> str:
-    """Секрет вебхука панели (1.9). При первом обращении магазин генерирует его сам.
+    """Секрет вебхука панели (1.9). При первом обращении магазин генерирует его сам."""
+    return await generated_secret(session, box, PANEL_WEBHOOK_SECRET)
+
+
+async def generated_secret(session: AsyncSession, box: SecretBox, setting: SecretSetting) -> str:
+    """Секрет, который магазин генерирует сам при первом обращении.
 
     Одновременные первые обращения получают один и тот же секрет: вставка без
     перезаписи. Не расшифровывается (сменили ENCRYPTION_KEY) — `SecretDecryptionError`.
+    Символы — только A–Z, a–z, 0–9, `_` и `-`: такой секрет принимает и Telegram.
     """
-    key = PANEL_WEBHOOK_SECRET.key
+    key = setting.key
     generated = await session.scalar(
         insert(ShopSettingValue)
         .values(key=key, value=box.encrypt(secrets.token_urlsafe(_WEBHOOK_SECRET_BYTES)))

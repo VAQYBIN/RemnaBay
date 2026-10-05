@@ -80,6 +80,10 @@ class Settings(BaseSettings):
     # Оператор его не задаёт
     dev_mode: bool = False
 
+    def public_link(self, path: str) -> str:
+        """Адрес страницы магазина по публичному адресу: `https://shop.example.com/<path>`."""
+        return f"{str(self.public_url).rstrip('/')}/{path.lstrip('/')}"
+
     @property
     def sqlalchemy_database_url(self) -> str:
         """Адрес базы для SQLAlchemy — всегда с драйвером psycopg 3."""

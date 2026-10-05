@@ -17,6 +17,8 @@ ENTRY_POINTS = (
     "remnabay.attention",
     "remnabay.queue",
     "remnabay.access",
+    "remnabay.bot",
+    "remnabay.clients",
     "remnabay.web.app",
     "remnabay.worker.main",
 )

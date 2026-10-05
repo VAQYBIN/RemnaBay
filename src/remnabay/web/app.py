@@ -12,10 +12,18 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from remnabay.access import ensure_owner
+from remnabay.bot import (
+    TELEGRAM_WEBHOOK_PATH,
+    Polling,
+    create_bot,
+    create_dispatcher,
+    register_webhook,
+)
 from remnabay.config import Settings, load_settings
 from remnabay.crypto import SecretBox
 from remnabay.db import create_engine, create_session_factory
-from remnabay.web import panel_webhook
+from remnabay.shop_settings import TELEGRAM_WEBHOOK_SECRET, generated_secret
+from remnabay.web import panel_webhook, telegram_webhook
 
 HEALTH_PATH = "/health"
 # Меньше интервала проверки здоровья в Docker, чтобы ответ успевал прийти
@@ -34,18 +42,36 @@ class HealthStatus(BaseModel):
 
 
 def create_app(settings: Settings, *, startup: bool = False) -> FastAPI:
-    """Приложение веба. `startup` — действия при запуске магазина (владелец из `.env`);
-    в тестах они выключены, чтобы не менять общую тестовую базу."""
+    """Приложение веба.
+
+    `startup` — действия при запуске магазина: владелец из `.env` (1.2), вебхук бота
+    или опрос при разработке. В тестах они выключены: не меняют общую тестовую базу
+    и не обращаются к Telegram.
+    """
     engine = create_engine(settings)
     sessions = create_session_factory(engine)
+    box = SecretBox(settings.encryption_key.get_secret_value())
+    bot = create_bot(settings.bot_token.get_secret_value())
+    dispatcher = create_dispatcher(sessions)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
+        polling: Polling | None = None
         if startup:
             async with sessions() as session:
                 await ensure_owner(session, settings.owner_telegram_id)
+                secret = await generated_secret(session, box, TELEGRAM_WEBHOOK_SECRET)
                 await session.commit()
+            if settings.dev_mode:
+                polling = Polling(bot, dispatcher)
+                await polling.start()
+            else:
+                url = settings.public_link(TELEGRAM_WEBHOOK_PATH)
+                await register_webhook(bot, dispatcher, url, secret)
         yield
+        if polling is not None:
+            await polling.stop()
+        await bot.session.close()
         await engine.dispose()
 
     # Документация API — только при разработке (0049)
@@ -59,8 +85,11 @@ def create_app(settings: Settings, *, startup: bool = False) -> FastAPI:
     )
     app.state.settings = settings
     app.state.sessions = sessions
-    app.state.box = SecretBox(settings.encryption_key.get_secret_value())
+    app.state.box = box
+    app.state.bot = bot
+    app.state.dispatcher = dispatcher
     app.include_router(panel_webhook.router)
+    app.include_router(telegram_webhook.router)
 
     @app.get(
         HEALTH_PATH,
@@ -84,4 +113,8 @@ def create_app(settings: Settings, *, startup: bool = False) -> FastAPI:
 
 def create_app_from_env() -> FastAPI:
     """Фабрика для uvicorn: настройки читаются в процессе сервера (в том числе при --reload)."""
+    # При --reload сервер работает в дочернем процессе, где лог ещё не настроен
+    from remnabay.cli import configure_logging
+
+    configure_logging()
     return create_app(load_settings(), startup=True)
