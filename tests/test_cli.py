@@ -1,8 +1,10 @@
 """Критерий 1.1 на уровне запуска: каждая роль без параметров .env не стартует."""
 
+import logging
+
 import pytest
 
-from remnabay.cli import EXIT_CONFIG_ERROR, main
+from remnabay.cli import EXIT_CONFIG_ERROR, configure_logging, main
 from remnabay.crypto import is_valid_key
 from tests.conftest import REQUIRED_ENV
 
@@ -33,3 +35,10 @@ def test_generate_key_works_before_env_is_filled(capsys: pytest.CaptureFixture[s
 
     key = capsys.readouterr().out.strip()
     assert is_valid_key(key)
+
+
+def test_request_per_line_libraries_log_only_warnings() -> None:
+    """Клиент панели не пишет в лог каждый запрос — только предупреждения и ошибки."""
+    configure_logging()
+
+    assert logging.getLogger("httpx2").level == logging.WARNING

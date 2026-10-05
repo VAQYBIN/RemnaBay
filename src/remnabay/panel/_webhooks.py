@@ -29,7 +29,10 @@ def verify_signature(body: bytes, signature: str | None, secret: str) -> bool:
     """Подпись верна — событие пришло от панели. Сравнение — за постоянное время."""
     if not signature:
         return False
-    return hmac.compare_digest(sign(body, secret), signature.strip().lower())
+    # Сравниваются байты: строку с символами вне ASCII compare_digest не принимает,
+    # а заголовок присылает кто угодно
+    expected = sign(body, secret).encode()
+    return hmac.compare_digest(expected, signature.strip().lower().encode())
 
 
 class UserEventType(StrEnum):

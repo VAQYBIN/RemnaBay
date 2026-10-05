@@ -33,10 +33,14 @@ class TaskStatus(StrEnum):
     DONE = "done"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    # Команда отметила решённой вручную (4.31)
+    RESOLVED = "resolved"
 
 
 # Незавершённые задачи держат очередь своего ключа (4.17, 4.27)
 UNFINISHED = (TaskStatus.PENDING, TaskStatus.WAITING_PANEL, TaskStatus.FAILED)
+# Завершённые задачи: удаляются очисткой через 30 дней (0045)
+FINISHED = (TaskStatus.DONE, TaskStatus.CANCELLED, TaskStatus.RESOLVED)
 # Задачи, которые воркер может взять, когда подойдёт их время
 RUNNABLE = (TaskStatus.PENDING, TaskStatus.WAITING_PANEL)
 
@@ -48,6 +52,9 @@ class AttemptResult(StrEnum):
     UNAVAILABLE = "unavailable"
     # Попытка оборвалась вместе с процессом воркера
     ABORTED = "aborted"
+    # Внешний сервис отказал так, что действие точно не выполнено: повтор безопасен
+    # (например, Telegram ответил «слишком много запросов», 4.33)
+    REJECTED = "rejected"
 
 
 def _in_statuses(*statuses: TaskStatus) -> str:

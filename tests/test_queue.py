@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import dataclasses
 import itertools
 from datetime import UTC, datetime, timedelta
 
@@ -18,14 +19,19 @@ from remnabay.queue import (
     Periodic,
     RetryPolicy,
     TaskContext,
+    TaskDefinition,
+    TaskNotCancellableError,
     TaskNotFailedError,
     TaskStatus,
     WorkerConfig,
     attempts_of,
     cancel_failed,
+    failed_tasks,
+    resolve_failed,
     retry_failed,
     task_subject,
     waiting_behind,
+    waiting_panel_count,
 )
 from remnabay.queue._models import QueuePeriodicSlot, QueueTask
 from remnabay.queue._worker import cleanup
@@ -34,6 +40,7 @@ from tests.queue_support import (
     FAST_CONFIG,
     FAST_POLICY,
     PANEL,
+    REGISTRY,
     FlakyArgs,
     LabelArgs,
     PanelDownError,
@@ -41,17 +48,24 @@ from tests.queue_support import (
     SpawnArgs,
     SqlSleepArgs,
     all_finished,
+    bad_hook,
     enqueue,
     events,
     flaky,
+    hooked,
+    irreversible,
     make_worker,
     needs_panel,
+    panel_switch,
+    quiet,
     record_event,
+    rejecting,
     run_workers,
     spawn,
     sql_sleep,
     status_of,
     switch,
+    wait_until,
 )
 
 
@@ -208,10 +222,10 @@ async def test_4_14_retries_stop_when_time_window_ends(queue_engine: AsyncEngine
     """4.14: повторы прекращаются, когда следующая попытка выпала бы за окно по времени."""
     FAILING.add("x")
     policy = RetryPolicy(
-        first_delay=timedelta(milliseconds=100),
-        max_delay=timedelta(seconds=1),
+        first_delay=timedelta(milliseconds=200),
+        max_delay=timedelta(seconds=2),
         max_attempts=100,
-        max_age=timedelta(milliseconds=500),
+        max_age=timedelta(seconds=1),
     )
     task_id = await enqueue(queue_engine, switch, LabelArgs(label="x"))
 
@@ -222,8 +236,31 @@ async def test_4_14_retries_stop_when_time_window_ends(queue_engine: AsyncEngine
 
     async with AsyncSession(queue_engine) as session:
         attempts = await attempts_of(session, task_id)
-    # Попытки на 0; 0,1; 0,3 с — следующая была бы на 0,7 с, за окном 0,5 с
+    # Попытки на 0; 0,2; 0,6 с — следующая была бы на 1,4 с, за окном 1 с.
+    # Запас на задержки окружения — 0,4 с: третья попытка успевает, даже если вторая опоздала
     assert len(attempts) == 3
+    assert await status_of(queue_engine, task_id) == TaskStatus.FAILED
+
+
+async def test_4_14_retry_limits_are_read_at_each_decision(queue_engine: AsyncEngine) -> None:
+    """4.14: лимиты повторов читаются при каждом решении — изменение настройки оператором
+    действует на уже идущие повторы, без перезапуска воркера."""
+    FAILING.add("x")
+    limits = {"max_attempts": 10}
+
+    async def policy(_session: AsyncSession) -> RetryPolicy:
+        return dataclasses.replace(FAST_POLICY, max_attempts=limits["max_attempts"])
+
+    task_id = await enqueue(queue_engine, switch, LabelArgs(label="x"))
+    worker = make_worker(queue_engine, policy=policy)
+
+    assert await worker.run_one() is True
+    limits["max_attempts"] = 2
+    await run_workers([worker], lambda: all_finished(queue_engine, [task_id]))
+
+    async with AsyncSession(queue_engine) as session:
+        attempts = await attempts_of(session, task_id)
+    assert len(attempts) == 2
     assert await status_of(queue_engine, task_id) == TaskStatus.FAILED
 
 
@@ -402,7 +439,9 @@ async def test_4_32_cancel_by_team_releases_following_operations(
     failed, behind, _other = await _fail_first_of_key(queue_engine)
 
     async with AsyncSession(queue_engine) as session, session.begin():
-        await cancel_failed(session, failed, actor=Actor.team_member(7), comment="клиент передумал")
+        await cancel_failed(
+            session, REGISTRY, failed, actor=Actor.team_member(7), comment="клиент передумал"
+        )
     await run_workers([make_worker(queue_engine)], lambda: all_finished(queue_engine, [behind]))
 
     assert await status_of(queue_engine, failed) == TaskStatus.CANCELLED
@@ -414,14 +453,18 @@ async def test_4_32_cancel_by_team_releases_following_operations(
 
 
 async def test_retry_and_cancel_only_for_failed_operation(queue_engine: AsyncEngine) -> None:
-    """Повторить или отменить можно только окончательно проваленную операцию."""
+    """Повторить, отменить или решить вручную можно только окончательно проваленную операцию."""
     task_id = await enqueue(queue_engine, record_event, RecordArgs(label="a"))
 
     async with AsyncSession(queue_engine) as session, session.begin():
         with pytest.raises(TaskNotFailedError):
             await retry_failed(session, task_id, actor=Actor.team_member(7))
         with pytest.raises(TaskNotFailedError):
-            await cancel_failed(session, task_id, actor=Actor.team_member(7), comment="—")
+            await cancel_failed(session, REGISTRY, task_id, actor=Actor.team_member(7), comment="—")
+        with pytest.raises(TaskNotFailedError):
+            await resolve_failed(
+                session, REGISTRY, task_id, actor=Actor.team_member(7), comment="—"
+            )
 
 
 # --- «Ждёт панель» (4.30) ---
@@ -521,10 +564,52 @@ async def test_periodic_task_runs_once_per_period_with_two_workers(
     assert ticks == slots
 
 
+async def test_4_30_task_due_earlier_runs_first(queue_engine: AsyncEngine) -> None:
+    """4.30: задача, чей срок наступил раньше, выполняется раньше, даже если поставлена
+    позже: новая работа не ждёт, пока воркеры переберут ранние перепроверки панели."""
+    later = await enqueue(queue_engine, record_event, RecordArgs(label="later"))
+    async with AsyncSession(queue_engine) as session, session.begin():
+        earlier = await record_event.enqueue(
+            session, RecordArgs(label="earlier"), delay=timedelta(minutes=-1)
+        )
+    worker = make_worker(queue_engine)
+
+    await worker.run_one()
+
+    assert later < earlier
+    assert [e[1] for e in await events(queue_engine)] == ["earlier"]
+
+
+async def test_4_8_periodic_interval_is_read_at_each_planning(queue_engine: AsyncEngine) -> None:
+    """4.8: период задачи может читаться из настроек при каждом планировании — смена
+    интервала сверки действует без перезапуска воркера."""
+    asked: list[timedelta] = []
+
+    async def hourly(_session: AsyncSession) -> timedelta:
+        asked.append(timedelta(hours=1))
+        return timedelta(hours=1)
+
+    worker = make_worker(
+        queue_engine, periodic=[Periodic(record_event, RecordArgs(label="tick"), hourly)]
+    )
+    await worker.schedule_periodic()
+    await worker.schedule_periodic()
+
+    async with AsyncSession(queue_engine) as session:
+        slots = list(
+            await session.scalars(
+                select(QueuePeriodicSlot.slot_start).where(QueuePeriodicSlot.name == "test.record")
+            )
+        )
+    assert len(asked) == 2
+    assert len(slots) == 1
+    assert (slots[0].minute, slots[0].second) == (0, 0)
+
+
 async def test_cleanup_removes_old_finished_tasks_only(queue_engine: AsyncEngine) -> None:
-    """Очистка удаляет выполненные и отменённые задачи старше 30 дней; проваленные,
-    свежие и ждущие остаются; журнал не трогается."""
-    labels = ["old_done", "fresh_done", "old_failed", "old_cancelled", "pending"]
+    """Очистка удаляет завершённые задачи (выполненные, отменённые, решённые вручную)
+    старше 30 дней; проваленные, свежие и ждущие остаются; журнал не трогается."""
+    labels = ["old_done", "fresh_done", "old_failed", "old_cancelled", "old_resolved", "pending"]
     ids = {
         label: await enqueue(queue_engine, record_event, RecordArgs(label=label))
         for label in labels
@@ -534,6 +619,7 @@ async def test_cleanup_removes_old_finished_tasks_only(queue_engine: AsyncEngine
         "fresh_done": (TaskStatus.DONE, 29),
         "old_failed": (TaskStatus.FAILED, 40),
         "old_cancelled": (TaskStatus.CANCELLED, 31),
+        "old_resolved": (TaskStatus.RESOLVED, 31),
     }
     async with AsyncSession(queue_engine) as session, session.begin():
         for label, (status, days) in finished.items():
@@ -611,3 +697,284 @@ async def _all_tasks_finished(engine: AsyncEngine) -> bool:
     async with AsyncSession(engine) as session:
         ids = list(await session.scalars(select(QueueTask.id)))
     return await all_finished(engine, ids)
+
+
+# --- Решить вручную, отмена и исходы (4.20, 4.31, 4.32) ---
+
+
+async def _fail_alone(
+    engine: AsyncEngine, definition: TaskDefinition[LabelArgs], label: str
+) -> int:
+    """Операция с ключом `sub:<метка>` окончательно проваливается."""
+    FAILING.add(label)
+    failed = await enqueue(engine, definition, LabelArgs(label=label), key=f"sub:{label}")
+    await run_workers([make_worker(engine)], lambda: _status_is(engine, failed, TaskStatus.FAILED))
+    return failed
+
+
+async def _status_is(engine: AsyncEngine, task_id: int, status: TaskStatus) -> bool:
+    return await status_of(engine, task_id) == status
+
+
+async def test_4_31_resolve_manually_releases_following_operations(
+    queue_engine: AsyncEngine,
+) -> None:
+    """4.31: «Отметить решённым вручную» с комментарием — операция завершена, в журнале
+    кто и почему, следующие операции подписки идут дальше; обработчик исхода выполнен."""
+    failed = await _fail_alone(queue_engine, hooked, "m1")
+    behind = await enqueue(queue_engine, record_event, RecordArgs(label="m2"), key="sub:m1")
+
+    async with AsyncSession(queue_engine) as session, session.begin():
+        await resolve_failed(
+            session, REGISTRY, failed, actor=Actor.team_member(7), comment="сделал в панели"
+        )
+    await run_workers([make_worker(queue_engine)], lambda: all_finished(queue_engine, [behind]))
+
+    assert await status_of(queue_engine, failed) == TaskStatus.RESOLVED
+    assert [e[1] for e in await events(queue_engine)] == ["failed:m1", "resolved:m1", "m2"]
+    async with AsyncSession(queue_engine) as session:
+        last = (await entries_for(session, task_subject(failed)))[-1]
+    assert (last.action, last.actor, last.details) == (
+        "queue.resolved",
+        Actor.team_member(7),
+        {"comment": "сделал в панели"},
+    )
+
+
+async def test_4_31_irreversible_operation_cannot_be_cancelled(queue_engine: AsyncEngine) -> None:
+    """4.31: операцию вроде смены даты при возврате отменить нельзя — только повторить
+    или отметить решённой вручную."""
+    failed = await _fail_alone(queue_engine, irreversible, "r1")
+
+    async with AsyncSession(queue_engine) as session:
+        listed = await failed_tasks(session, REGISTRY)
+        with pytest.raises(TaskNotCancellableError):
+            await cancel_failed(session, REGISTRY, failed, actor=Actor.team_member(7), comment="—")
+    assert [(t.task_id, t.cancellable) for t in listed] == [(failed, False)]
+    assert await status_of(queue_engine, failed) == TaskStatus.FAILED
+
+    async with AsyncSession(queue_engine) as session, session.begin():
+        await resolve_failed(session, REGISTRY, failed, actor=Actor.team_member(7), comment="ok")
+    assert await status_of(queue_engine, failed) == TaskStatus.RESOLVED
+
+
+async def test_4_32_cancel_runs_consequences_and_needs_comment(queue_engine: AsyncEngine) -> None:
+    """4.32: отмена — с комментарием; последствия отмены (сообщение клиенту, неиспользованный
+    триал) выполняет обработчик вида операции в той же транзакции."""
+    failed = await _fail_alone(queue_engine, hooked, "c1")
+
+    async with AsyncSession(queue_engine) as session, session.begin():
+        with pytest.raises(ValueError, match="комментарий"):
+            await cancel_failed(session, REGISTRY, failed, actor=Actor.team_member(7), comment=" ")
+        await cancel_failed(session, REGISTRY, failed, actor=Actor.team_member(7), comment="дубль")
+
+    assert await status_of(queue_engine, failed) == TaskStatus.CANCELLED
+    assert [e[1] for e in await events(queue_engine)] == ["failed:c1", "cancelled:c1"]
+
+
+async def test_4_20_failure_consequences_run_once_when_attempts_run_out(
+    queue_engine: AsyncEngine,
+) -> None:
+    """4.20: когда попытки исчерпаны, последствия провала (например, «оплачен — не
+    применён» и уведомление команды) выполняются один раз."""
+    failed = await _fail_alone(queue_engine, hooked, "f1")
+
+    await run_workers([make_worker(queue_engine)], lambda: _sleep_true(0.3))
+
+    assert await status_of(queue_engine, failed) == TaskStatus.FAILED
+    assert [e[1] for e in await events(queue_engine)] == ["failed:f1"]
+
+
+async def test_broken_failure_consequences_do_not_keep_operation_running(
+    queue_engine: AsyncEngine,
+) -> None:
+    """Сбой обработчика провала не мешает операции стать проваленной: иначе она
+    перезапускалась бы бесконечно. Сбой виден в журнале."""
+    failed = await _fail_alone(queue_engine, bad_hook, "b1")
+
+    async with AsyncSession(queue_engine) as session:
+        journal = await entries_for(session, task_subject(failed))
+    hook_failures = [e for e in journal if e.action == "queue.failed_hook"]
+    assert len(hook_failures) == 1
+    assert hook_failures[0].details == {"error": "RuntimeError: обработчик провала сломан"}
+    assert [e.action for e in journal].count("queue.failed") == 1
+
+
+async def test_4_27_4_30_attention_lists_failed_and_counts_waiting_for_panel(
+    queue_engine: AsyncEngine,
+) -> None:
+    """4.27, 4.30, 4.31: «Требуют внимания» — проваленные операции с текстом ошибки и числом
+    ждущих за ними; операции «ждут панель» — отдельным счётчиком, не в списке."""
+    failed = await _fail_alone(queue_engine, hooked, "a1")
+    await enqueue(queue_engine, record_event, RecordArgs(label="a2"), key="sub:a1")
+    await enqueue(queue_engine, record_event, RecordArgs(label="a3"), key="sub:a1")
+    PANEL["up"] = False
+    waiting = await enqueue(queue_engine, needs_panel, LabelArgs(label="w1"))
+    await run_workers(
+        [make_worker(queue_engine)],
+        lambda: _status_is(queue_engine, waiting, TaskStatus.WAITING_PANEL),
+    )
+
+    async with AsyncSession(queue_engine) as session:
+        listed = await failed_tasks(session, REGISTRY)
+        waiting_count = await waiting_panel_count(session)
+
+    assert [(t.task_id, t.name, t.key, t.waiting_behind) for t in listed] == [
+        (failed, "test.hooked", "sub:a1", 2)
+    ]
+    assert listed[0].last_error == "RuntimeError: a1: сбой"
+    assert listed[0].failed_at is not None
+    assert listed[0].cancellable
+    assert waiting_count == 1
+
+
+# --- Окно повторов после простоя панели (0047) ---
+
+_WINDOW_POLICY = RetryPolicy(
+    first_delay=timedelta(milliseconds=50),
+    max_delay=timedelta(milliseconds=50),
+    max_attempts=100,
+    max_age=timedelta(milliseconds=400),
+    unavailable_recheck=timedelta(milliseconds=50),
+)
+
+
+async def _counted_attempts(engine: AsyncEngine, task_id: int) -> list[AttemptResult | None]:
+    async with AsyncSession(engine) as session:
+        return [
+            a.result
+            for a in await attempts_of(session, task_id)
+            if a.result != AttemptResult.UNAVAILABLE
+        ]
+
+
+async def _outage_after_first_error(
+    engine: AsyncEngine, task_id: int, policy: RetryPolicy, outage: float
+) -> None:
+    """Первая попытка — обычная ошибка; затем панель недоступна `outage` секунд;
+    затем панель вернулась, а ошибка осталась. Воркер работает до провала операции."""
+    stop = asyncio.Event()
+    runner = asyncio.create_task(make_worker(engine, policy=policy).run(stop))
+    try:
+
+        async def first_error() -> bool:
+            return len(await _counted_attempts(engine, task_id)) >= 1
+
+        await wait_until(first_error)
+        PANEL["up"] = False
+        await asyncio.sleep(outage)
+        PANEL["up"] = True
+        await wait_until(lambda: _status_is(engine, task_id, TaskStatus.FAILED))
+    finally:
+        stop.set()
+        await runner
+
+
+async def test_0047_retry_window_restarts_after_panel_outage(queue_engine: AsyncEngine) -> None:
+    """4.14, 4.30, 0047: простой панели дольше окна не съедает повторы — после возвращения
+    панели окно отсчитывается заново, и операция снова повторяется, а не проваливается
+    с первой же ошибкой."""
+    FAILING.add("o1")
+    task_id = await enqueue(queue_engine, panel_switch, LabelArgs(label="o1"))
+
+    await _outage_after_first_error(queue_engine, task_id, _WINDOW_POLICY, outage=0.6)
+
+    async with AsyncSession(queue_engine) as session:
+        attempts = await attempts_of(session, task_id)
+    last_outage = max(a.number for a in attempts if a.result == AttemptResult.UNAVAILABLE)
+    after = [a for a in attempts if a.number > last_outage]
+    # Окно 0,4 с при паузе 0,05 с: после простоя — несколько повторов, а не один
+    assert len(after) >= 4
+    assert all(a.result == AttemptResult.ERROR for a in after)
+
+
+async def test_0047_attempt_limit_counts_whole_round_across_outage(
+    queue_engine: AsyncEngine,
+) -> None:
+    """0047: лимит попыток простоем не сбрасывается — защищает от бесконечных повторов,
+    если панель то падает, то поднимается."""
+    FAILING.add("o2")
+    policy = dataclasses.replace(_WINDOW_POLICY, max_attempts=3, max_age=timedelta(seconds=60))
+    task_id = await enqueue(queue_engine, panel_switch, LabelArgs(label="o2"))
+
+    await _outage_after_first_error(queue_engine, task_id, policy, outage=0.3)
+
+    assert await _counted_attempts(queue_engine, task_id) == [AttemptResult.ERROR] * 3
+
+
+# --- Отказ внешнего сервиса и общий обработчик провала (4.31, 4.33) ---
+
+
+async def test_4_33_rejected_attempt_is_marked_and_next_attempt_knows_it(
+    queue_engine: AsyncEngine,
+) -> None:
+    """4.33: отказ, после которого действие точно не выполнено, отмечен в истории отдельно,
+    и следующая попытка видит итог прошлой — по нему задача решает, можно ли повторить."""
+    FAILING.add("j1")
+    task_id = await enqueue(queue_engine, rejecting, LabelArgs(label="j1"))
+    worker = make_worker(queue_engine)
+
+    assert await worker.run_one() is True
+    FAILING.discard("j1")
+    await run_workers([worker], lambda: all_finished(queue_engine, [task_id]))
+
+    async with AsyncSession(queue_engine) as session:
+        attempts = await attempts_of(session, task_id)
+    assert [a.result for a in attempts] == [AttemptResult.REJECTED, AttemptResult.DONE]
+    # Событие отказавшей попытки откатилось вместе с ней; вторая видит итог первой
+    assert [e[1] for e in await events(queue_engine)] == ["j1:rejected"]
+
+
+async def test_4_31_operations_without_own_consequences_use_common_failure_handler(
+    queue_engine: AsyncEngine,
+) -> None:
+    """4.31: провал операции без своих последствий обрабатывает общий обработчик (например,
+    уведомление команды); у операции со своими последствиями общий не вызывается."""
+    calls: list[tuple[int, str]] = []
+
+    async def on_failed(_session: AsyncSession, task_id: int, name: str) -> None:
+        calls.append((task_id, name))
+
+    FAILING.update({"g1", "g2"})
+    plain = await enqueue(queue_engine, switch, LabelArgs(label="g1"))
+    own = await enqueue(queue_engine, hooked, LabelArgs(label="g2"))
+
+    await run_workers(
+        [make_worker(queue_engine, on_failed=on_failed)],
+        lambda: all_finished(queue_engine, [plain, own]),
+    )
+
+    assert calls == [(plain, "test.switch")]
+    assert [e[1] for e in await events(queue_engine)] == ["failed:g2"]
+
+
+async def test_rule_4_service_task_without_team_is_dropped_not_failed(
+    queue_engine: AsyncEngine,
+) -> None:
+    """Сквозное правило 4, 4.27, 4.31: задача, которой не нужна команда (сообщение,
+    служебная сверка), исчерпав попытки, снимается: не попадает в «Требуют внимания», не
+    уведомляет команду, не держит очередь ключа; свои последствия (запись о недоставке)
+    выполняет."""
+    calls: list[str] = []
+
+    async def on_failed(_session: AsyncSession, _task_id: int, name: str) -> None:
+        calls.append(name)
+
+    FAILING.add("q1")
+    dropped = await enqueue(queue_engine, quiet, LabelArgs(label="q1"), key="sub:q")
+    behind = await enqueue(queue_engine, record_event, RecordArgs(label="q2"), key="sub:q")
+
+    await run_workers(
+        [make_worker(queue_engine, on_failed=on_failed)],
+        lambda: all_finished(queue_engine, [dropped, behind]),
+    )
+
+    assert await status_of(queue_engine, dropped) == TaskStatus.CANCELLED
+    assert await status_of(queue_engine, behind) == TaskStatus.DONE
+    assert calls == []
+    assert [e[1] for e in await events(queue_engine)] == ["dropped:q1", "q2"]
+    async with AsyncSession(queue_engine) as session:
+        assert await failed_tasks(session, REGISTRY) == []
+        actions = [e.action for e in await entries_for(session, task_subject(dropped))]
+    assert "queue.dropped" in actions
+    assert "queue.failed" not in actions

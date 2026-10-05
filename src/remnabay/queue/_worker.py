@@ -19,7 +19,7 @@
 import asyncio
 import contextlib
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
@@ -33,14 +33,18 @@ from sqlalchemy.orm import aliased
 
 from remnabay.journal import Actor, JsonValue, Outcome, record
 from remnabay.queue._core import (
+    Ending,
+    RejectedError,
     RetryPolicy,
     RunnableTask,
     TaskContext,
     TaskDefinition,
+    TaskRegistry,
     task,
     task_subject,
 )
 from remnabay.queue._models import (
+    FINISHED,
     RUNNABLE,
     UNFINISHED,
     AttemptResult,
@@ -52,8 +56,8 @@ from remnabay.queue._models import (
 
 logger = logging.getLogger(__name__)
 
-# Выполненные и отменённые задачи хранятся 30 дней; проваленные и ждущие — пока
-# их не разберут. Попытки остаются в журнале и после очистки.
+# Завершённые задачи (выполненные, отменённые, решённые вручную) хранятся 30 дней;
+# проваленные и ждущие — пока их не разберут. Попытки остаются в журнале и после очистки.
 FINISHED_RETENTION = timedelta(days=30)
 SLOT_RETENTION = timedelta(days=1)
 CLEANUP_EVERY = timedelta(hours=1)
@@ -83,27 +87,48 @@ class WorkerConfig:
         return self.concurrency * 2 + 1
 
 
+# Что сделать с проваленной задачей, у вида которой нет своего обработчика провала:
+# например, уведомить команду (4.31). Получает сессию, номер и имя задачи
+type FailedFallback = Callable[[AsyncSession, int, str], Awaitable[None]]
+
+# Политика повторов, которая читается при каждом решении: настройки оператора
+# меняются без перезапуска (04-operator-settings)
+type PolicySource = Callable[[AsyncSession], Awaitable[RetryPolicy]]
+
+
+# Период, который читается при каждом планировании: например, интервал сверки
+# с панелью из настроек оператора (4.8)
+type IntervalSource = Callable[[AsyncSession], Awaitable[timedelta]]
+
+
 class Scheduled(Protocol):
     @property
     def name(self) -> str: ...
 
-    @property
-    def every(self) -> timedelta: ...
+    async def interval(self, session: AsyncSession) -> timedelta: ...
 
     async def enqueue(self, session: AsyncSession) -> int: ...
 
 
 @dataclass(frozen=True)
 class Periodic[A: BaseModel]:
-    """Периодическая задача: ставится раз в `every`, даже если воркеров несколько."""
+    """Периодическая задача: ставится раз в `every`, даже если воркеров несколько.
+
+    `every` — постоянный период или функция, которая читает его из базы.
+    """
 
     task: TaskDefinition[A]
     args: A
-    every: timedelta
+    every: timedelta | IntervalSource
 
     @property
     def name(self) -> str:
         return self.task.name
+
+    async def interval(self, session: AsyncSession) -> timedelta:
+        if isinstance(self.every, timedelta):
+            return self.every
+        return await self.every(session)
 
     async def enqueue(self, session: AsyncSession) -> int:
         return await self.task.enqueue(session, self.args)
@@ -115,11 +140,11 @@ class CleanupArgs(BaseModel):
 
 @task("queue.cleanup", CleanupArgs)
 async def cleanup(context: TaskContext, _args: CleanupArgs) -> None:
-    """Удаляет старые выполненные и отменённые задачи и старые слоты расписания."""
+    """Удаляет старые завершённые задачи и старые слоты расписания."""
     now = func.clock_timestamp()
     await context.session.execute(
         delete(QueueTask).where(
-            QueueTask.status.in_((TaskStatus.DONE, TaskStatus.CANCELLED)),
+            QueueTask.status.in_(FINISHED),
             QueueTask.finished_at < now - FINISHED_RETENTION,
         )
     )
@@ -183,26 +208,30 @@ class Worker:
     def __init__(
         self,
         engine: AsyncEngine,
-        tasks: Sequence[RunnableTask],
+        tasks: Iterable[RunnableTask],
         *,
         periodic: Sequence[Scheduled] = (),
-        policy: RetryPolicy | None = None,
+        policy: RetryPolicy | PolicySource | None = None,
         config: WorkerConfig | None = None,
         unavailable: tuple[type[Exception], ...] = (),
+        on_failed: FailedFallback | None = None,
     ) -> None:
-        """`unavailable` — ошибки «внешний сервис недоступен»: задача с такой ошибкой
+        """`policy` — постоянная политика повторов или функция, которая читает её из
+        базы при каждом решении.
+
+        `on_failed` — что сделать с проваленной задачей, у вида которой нет своего
+        обработчика провала.
+
+        `unavailable` — ошибки «внешний сервис недоступен»: задача с такой ошибкой
         ждёт («ждёт панель», 4.30), а не проваливается, и попытка не считается в лимит.
         """
         self._sessions = async_sessionmaker(engine, expire_on_commit=False)
-        self._tasks: dict[str, RunnableTask] = {}
-        for definition in (*tasks, cleanup):
-            if definition.name in self._tasks:
-                raise ValueError(f"Вид задачи {definition.name} зарегистрирован дважды")
-            self._tasks[definition.name] = definition
+        self._tasks = TaskRegistry((*tasks, cleanup))
         self._periodic = (*periodic, Periodic(cleanup, CleanupArgs(), CLEANUP_EVERY))
         self._policy = policy or RetryPolicy()
         self._config = config or WorkerConfig()
         self._unavailable = unavailable
+        self._on_failed = on_failed
 
     async def run(self, stop: asyncio.Event) -> None:
         """Работает, пока не выставлен `stop`; начатые задачи доделываются."""
@@ -234,7 +263,10 @@ class Worker:
             for periodic in self._periodic:
                 inserted = await session.scalar(
                     insert(QueuePeriodicSlot)
-                    .values(name=periodic.name, slot_start=_slot_start(now, periodic.every))
+                    .values(
+                        name=periodic.name,
+                        slot_start=_slot_start(now, await periodic.interval(session)),
+                    )
                     .on_conflict_do_nothing()
                     .returning(QueuePeriodicSlot.name)
                 )
@@ -263,9 +295,22 @@ class Worker:
             if await self._exhausted_before_start(session, task_id, retry_round):
                 await self._fail(session, task_id)
                 return True
+            previous = await self._previous_result(session, task_id)
             number = await self._start_attempt(side, task_id, retry_round)
-            await self._execute(session, side, task_id, name, args, retry_round, number)
+            context = TaskContext(
+                session=session, task_id=task_id, attempt_number=number, previous_result=previous
+            )
+            await self._execute(context, side, name, args, retry_round)
         return True
+
+    @staticmethod
+    async def _previous_result(session: AsyncSession, task_id: int) -> AttemptResult | None:
+        return await session.scalar(
+            select(QueueAttempt.result)
+            .where(QueueAttempt.task_id == task_id)
+            .order_by(QueueAttempt.id.desc())
+            .limit(1)
+        )
 
     @staticmethod
     def _next_task_query():
@@ -282,28 +327,32 @@ class Worker:
                     earlier.status.in_(UNFINISHED),
                 ),
             )
-            .order_by(QueueTask.id)
+            # Первой — та, чей срок наступил раньше: новая задача не ждёт, пока воркеры
+            # переберут ранние задачи, которые лишь перепроверяют панель (4.30).
+            # Порядок задач одного ключа держит условие выше, а не сортировка
+            .order_by(QueueTask.run_at, QueueTask.id)
             .limit(1)
             .with_for_update(skip_locked=True, key_share=True, of=QueueTask)
         )
 
     async def _execute(
         self,
-        session: AsyncSession,
+        context: TaskContext,
         side: AsyncSession,
-        task_id: int,
         name: str,
         args: dict[str, JsonValue],
         retry_round: int,
-        number: int,
     ) -> None:
-        context = TaskContext(session=session, task_id=task_id, attempt_number=number)
+        session, task_id, number = context.session, context.task_id, context.attempt_number
         try:
             async with session.begin_nested():
                 await self._run_with_timeout(context, name, args)
         except self._unavailable as error:
             await self._finish_attempt(side, task_id, number, AttemptResult.UNAVAILABLE, error)
             await self._after_failure(session, task_id, retry_round, number, unavailable=True)
+        except RejectedError as error:
+            await self._finish_attempt(side, task_id, number, AttemptResult.REJECTED, error)
+            await self._after_failure(session, task_id, retry_round, number, unavailable=False)
         except Exception as error:
             await self._finish_attempt(side, task_id, number, AttemptResult.ERROR, error)
             await self._after_failure(session, task_id, retry_round, number, unavailable=False)
@@ -361,11 +410,12 @@ class Worker:
     ) -> None:
         """После неудачной попытки: «ждёт панель», повтор с паузой или провал."""
         if unavailable:
+            policy = await self._policy_for(session)
             await self._set_status(
                 session,
                 task_id,
                 TaskStatus.WAITING_PANEL,
-                run_at=func.clock_timestamp() + self._policy.unavailable_recheck,
+                run_at=func.clock_timestamp() + policy.unavailable_recheck,
             )
         else:
             await self._retry_or_fail(session, task_id, retry_round)
@@ -461,18 +511,34 @@ class Worker:
                 },
             )
 
+    async def _policy_for(self, session: AsyncSession) -> RetryPolicy:
+        if isinstance(self._policy, RetryPolicy):
+            return self._policy
+        return await self._policy(session)
+
     async def _round_stats(
         self, session: AsyncSession, task_id: int, retry_round: int
     ) -> tuple[int, datetime | None, datetime]:
-        """Сколько попыток круга засчитано, когда была первая и сколько сейчас времени."""
+        """Сколько попыток круга засчитано, откуда отсчитывается окно и сколько сейчас времени.
+
+        Окно — от первой засчитанной попытки круга, а если панель была недоступна —
+        от первой засчитанной попытки после её возвращения (0047). Число попыток
+        считается за весь круг.
+        """
+        unavailable = QueueAttempt.result == AttemptResult.UNAVAILABLE
         counted = QueueAttempt.result.is_distinct_from(AttemptResult.UNAVAILABLE)
+        of_round = (QueueAttempt.task_id == task_id, QueueAttempt.retry_round == retry_round)
+        last_outage = (
+            select(func.max(QueueAttempt.number)).where(*of_round, unavailable).scalar_subquery()
+        )
+        after_outage = QueueAttempt.number > func.coalesce(last_outage, 0)
         row = (
             await session.execute(
                 select(
                     func.count().filter(counted),
-                    func.min(QueueAttempt.started_at).filter(counted),
+                    func.min(QueueAttempt.started_at).filter(counted, after_outage),
                     func.clock_timestamp(),
-                ).where(QueueAttempt.task_id == task_id, QueueAttempt.retry_round == retry_round)
+                ).where(*of_round)
             )
         ).one()
         return row[0], row[1], row[2]
@@ -480,18 +546,18 @@ class Worker:
     async def _exhausted_before_start(
         self, session: AsyncSession, task_id: int, retry_round: int
     ) -> bool:
+        policy = await self._policy_for(session)
         counted, first_started, now = await self._round_stats(session, task_id, retry_round)
-        if counted >= self._policy.max_attempts:
+        if counted >= policy.max_attempts:
             return True
-        return first_started is not None and now - first_started >= self._policy.max_age
+        return first_started is not None and now - first_started >= policy.max_age
 
     async def _retry_or_fail(self, session: AsyncSession, task_id: int, retry_round: int) -> None:
+        policy = await self._policy_for(session)
         counted, first_started, now = await self._round_stats(session, task_id, retry_round)
-        delay = self._policy.delay_after(counted)
-        out_of_window = (
-            first_started is not None and now + delay - first_started > self._policy.max_age
-        )
-        if counted >= self._policy.max_attempts or out_of_window:
+        delay = policy.delay_after(counted)
+        out_of_window = first_started is not None and now + delay - first_started > policy.max_age
+        if counted >= policy.max_attempts or out_of_window:
             await self._fail(session, task_id)
         else:
             await self._set_status(
@@ -499,15 +565,56 @@ class Worker:
             )
 
     async def _fail(self, session: AsyncSession, task_id: int) -> None:
-        """Окончательный провал: задача ждёт команду, следующие задачи ключа — её (4.27)."""
-        await self._set_status(session, task_id, TaskStatus.FAILED)
+        """Попытки исчерпаны: задача проваливается и ждёт команду, следующие задачи
+        ключа ждут её (4.27).
+
+        Задача вида, которому не нужно внимание команды (сообщение, служебная сверка),
+        не проваливается, а снимается: она не держит очередь ключа и не попадает в
+        «Требуют внимания».
+
+        Обработчик `on_failed` вида задачи (или общий, если своего нет и нужно внимание
+        команды) выполняется в точке сохранения: его сбой пишется в лог и журнал, но не
+        мешает задаче завершиться — иначе она перезапускалась бы бесконечно.
+        """
+        row = (
+            await session.execute(
+                select(QueueTask.name, QueueTask.args).where(QueueTask.id == task_id)
+            )
+        ).first()
+        if row is None:
+            return
+        name, args = row
+        definition = self._tasks.get(name)
+        attention = definition is None or definition.needs_attention
+        if attention:
+            await self._set_status(session, task_id, TaskStatus.FAILED)
+        else:
+            await self._set_status(
+                session, task_id, TaskStatus.CANCELLED, finished_at=func.clock_timestamp()
+            )
         await record(
             session,
             actor=Actor.SYSTEM,
-            action="queue.failed",
+            action="queue.failed" if attention else "queue.dropped",
             subject=task_subject(task_id),
             outcome=Outcome.FAILURE,
         )
+        try:
+            async with session.begin_nested():
+                if definition is not None and definition.handles(Ending.FAILED):
+                    await definition.ended(Ending.FAILED, session, task_id, args)
+                elif attention and self._on_failed is not None:
+                    await self._on_failed(session, task_id, name)
+        except Exception as error:
+            logger.exception("Задача %s: сбой обработчика провала", task_id)
+            await record(
+                session,
+                actor=Actor.SYSTEM,
+                action="queue.failed_hook",
+                subject=task_subject(task_id),
+                outcome=Outcome.FAILURE,
+                details={"error": _describe(error)},
+            )
 
     @staticmethod
     async def _set_status(

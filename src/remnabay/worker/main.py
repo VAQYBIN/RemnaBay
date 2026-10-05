@@ -10,27 +10,62 @@ import logging
 import signal
 import tempfile
 import time
-from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from remnabay import runtime
 from remnabay.config import Settings
 from remnabay.db import create_engine
-from remnabay.panel import PanelUnavailableError
-from remnabay.queue import TaskDefinition, Worker, WorkerConfig
+from remnabay.messaging import TelegramSender, notify_team, send_message
+from remnabay.panel import PanelClient, PanelUnavailableError
+from remnabay.panel_sync import (
+    HEALTH_CHECK,
+    SYNC_ALL,
+    health_check,
+    reconcile_subscription,
+    sync_page,
+)
+from remnabay.payments import NotReadyApplier, apply_payment, processing_notice
+from remnabay.queue import RetryPolicy, TaskRegistry, Worker, WorkerConfig
+from remnabay.shop_settings import RETRY_MAX_ATTEMPTS, RETRY_WINDOW, get_setting
 
 DEFAULT_HEARTBEAT_PATH = Path(tempfile.gettempdir()) / "remnabay-worker.heartbeat"
 HEARTBEAT_INTERVAL_SECONDS = 10.0
 # Несколько пропущенных пульсов подряд — воркер считается зависшим
 HEARTBEAT_MAX_AGE_SECONDS = 60.0
 
-# Виды задач магазина. Добавляются блоками, которые их вводят; очистка очереди
-# встроена в сам воркер
-TASKS: Sequence[TaskDefinition[Any]] = ()
+# Виды задач магазина — общие для воркера и действий команды над проваленными.
+# Добавляются блоками, которые их вводят; очистка очереди встроена в сам воркер
+TASKS = TaskRegistry(
+    (
+        send_message,
+        reconcile_subscription,
+        sync_page,
+        health_check,
+        apply_payment,
+        processing_notice,
+    )
+)
+# Периодические задачи: сверка всех подписок с панелью (4.8), проверка связи с ней (4.13)
+PERIODIC = (SYNC_ALL, HEALTH_CHECK)
 # Ошибки «внешний сервис недоступен»: задача ждёт, а не проваливается (4.30)
 UNAVAILABLE: tuple[type[Exception], ...] = (PanelUnavailableError,)
 
 logger = logging.getLogger(__name__)
+
+
+async def notify_operation_failed(session: AsyncSession, _task_id: int, _name: str) -> None:
+    """Операция без своих последствий провала — команда получает уведомление (4.31)."""
+    await notify_team(session, "team.operation_failed")
+
+
+async def retry_policy(session: AsyncSession) -> RetryPolicy:
+    """Политика повторов: лимит попыток и окно — из настроек оператора (4.14)."""
+    return RetryPolicy(
+        max_attempts=await get_setting(session, RETRY_MAX_ATTEMPTS),
+        max_age=await get_setting(session, RETRY_WINDOW),
+    )
 
 
 # Операции с маленьким локальным файлом не блокируют цикл заметно
@@ -91,10 +126,25 @@ def run(settings: Settings) -> None:
             loop.add_signal_handler(signal_number, stop.set)
         config = WorkerConfig()
         engine = create_engine(settings, pool_size=config.pool_size)
+        sender = TelegramSender(settings.bot_token.get_secret_value())
+        panel = PanelClient(str(settings.panel_url), settings.panel_token.get_secret_value())
         try:
-            queue = Worker(engine, TASKS, config=config, unavailable=UNAVAILABLE)
-            await run_worker(stop, queue=queue)
+            queue = Worker(
+                engine,
+                TASKS,
+                periodic=PERIODIC,
+                policy=retry_policy,
+                config=config,
+                unavailable=UNAVAILABLE,
+                on_failed=notify_operation_failed,
+            )
+            with runtime.use(
+                runtime.Runtime(sender=sender, panel=panel, payments=NotReadyApplier())
+            ):
+                await run_worker(stop, queue=queue)
         finally:
+            await panel.aclose()
+            await sender.close()
             await engine.dispose()
 
     asyncio.run(main())

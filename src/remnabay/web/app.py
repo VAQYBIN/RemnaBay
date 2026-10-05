@@ -12,7 +12,9 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from remnabay.config import Settings, load_settings
-from remnabay.db import create_engine
+from remnabay.crypto import SecretBox
+from remnabay.db import create_engine, create_session_factory
+from remnabay.web import panel_webhook
 
 HEALTH_PATH = "/health"
 # Меньше интервала проверки здоровья в Docker, чтобы ответ успевал прийти
@@ -39,6 +41,9 @@ def create_app(settings: Settings) -> FastAPI:
         await engine.dispose()
 
     app = FastAPI(title="RemnaBay", lifespan=lifespan)
+    app.state.sessions = create_session_factory(engine)
+    app.state.box = SecretBox(settings.encryption_key.get_secret_value())
+    app.include_router(panel_webhook.router)
 
     @app.get(
         HEALTH_PATH,
