@@ -22,6 +22,7 @@ ENTRY_POINTS = (
     "remnabay.shop",
     "remnabay.brand",
     "remnabay.checklist",
+    "remnabay.stats",
     "remnabay.web.admin",
     "remnabay.web.app",
     "remnabay.worker.main",

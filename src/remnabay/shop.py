@@ -35,6 +35,10 @@ SHOP_SUPPORT_CONTACT = ShopSetting(
     "shop.support_contact", TypeAdapter[str](Annotated[str, Field(max_length=256)]), ""
 )
 
+# Валюта учёта: одна на магазин (0020); меняется, пока не было платежей (блок 3)
+SHOP_CURRENCY = ShopSetting(
+    "shop.currency", TypeAdapter[str](Annotated[str, Field(pattern=r"^[A-Z]{3}$")]), "RUB"
+)
 # Триал включён (блок 5): в чек-листе — информационный пункт (1.7)
 TRIAL_ENABLED = ShopSetting("trial.enabled", TypeAdapter(bool), False)
 
