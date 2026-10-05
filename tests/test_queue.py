@@ -221,10 +221,10 @@ async def test_4_14_retries_stop_when_time_window_ends(queue_engine: AsyncEngine
     """4.14: повторы прекращаются, когда следующая попытка выпала бы за окно по времени."""
     FAILING.add("x")
     policy = RetryPolicy(
-        first_delay=timedelta(milliseconds=100),
-        max_delay=timedelta(seconds=1),
+        first_delay=timedelta(milliseconds=200),
+        max_delay=timedelta(seconds=2),
         max_attempts=100,
-        max_age=timedelta(milliseconds=500),
+        max_age=timedelta(seconds=1),
     )
     task_id = await enqueue(queue_engine, switch, LabelArgs(label="x"))
 
@@ -235,7 +235,8 @@ async def test_4_14_retries_stop_when_time_window_ends(queue_engine: AsyncEngine
 
     async with AsyncSession(queue_engine) as session:
         attempts = await attempts_of(session, task_id)
-    # Попытки на 0; 0,1; 0,3 с — следующая была бы на 0,7 с, за окном 0,5 с
+    # Попытки на 0; 0,2; 0,6 с — следующая была бы на 1,4 с, за окном 1 с.
+    # Запас на задержки окружения — 0,4 с: третья попытка успевает, даже если вторая опоздала
     assert len(attempts) == 3
     assert await status_of(queue_engine, task_id) == TaskStatus.FAILED
 
