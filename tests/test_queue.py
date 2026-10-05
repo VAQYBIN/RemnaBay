@@ -563,6 +563,22 @@ async def test_periodic_task_runs_once_per_period_with_two_workers(
     assert ticks == slots
 
 
+async def test_4_30_task_due_earlier_runs_first(queue_engine: AsyncEngine) -> None:
+    """4.30: задача, чей срок наступил раньше, выполняется раньше, даже если поставлена
+    позже: новая работа не ждёт, пока воркеры переберут ранние перепроверки панели."""
+    later = await enqueue(queue_engine, record_event, RecordArgs(label="later"))
+    async with AsyncSession(queue_engine) as session, session.begin():
+        earlier = await record_event.enqueue(
+            session, RecordArgs(label="earlier"), delay=timedelta(minutes=-1)
+        )
+    worker = make_worker(queue_engine)
+
+    await worker.run_one()
+
+    assert later < earlier
+    assert [e[1] for e in await events(queue_engine)] == ["earlier"]
+
+
 async def test_4_8_periodic_interval_is_read_at_each_planning(queue_engine: AsyncEngine) -> None:
     """4.8: период задачи может читаться из настроек при каждом планировании — смена
     интервала сверки действует без перезапуска воркера."""

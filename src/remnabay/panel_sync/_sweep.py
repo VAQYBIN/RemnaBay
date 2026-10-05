@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from remnabay.domain.subscriptions import Subscription, operations_key
+from remnabay.panel_sync._outage import panel_available
 from remnabay.panel_sync._reconcile import Source, enqueue_reconcile, reconcile_subscription
 from remnabay.queue import Periodic, TaskContext, task, unfinished_keys
 from remnabay.shop_settings import PANEL_SYNC_INTERVAL, get_setting
@@ -34,6 +35,9 @@ async def sync_page(context: TaskContext, args: SyncPageArgs) -> None:
     вторая не ставится — иначе они копились бы каждые 15 минут.
     """
     session = context.session
+    if not await panel_available(session):
+        # Панель недоступна — сверять не с чем; следующая сверка будет через интервал
+        return
     ids = list(
         await session.scalars(
             select(Subscription.id)

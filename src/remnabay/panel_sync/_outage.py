@@ -30,6 +30,9 @@ from remnabay.shop_settings import (
 )
 
 HEALTH_CHECK_EVERY = timedelta(minutes=1)
+# Проверки связи идут строго по одной: если несколько скопились в очереди, вторая
+# дождётся первой и увидит открытый ею простой, а не откроет свой
+_HEALTH_CHECK_LOCK = 4_013_000
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +41,7 @@ class PanelOutage(Base):
     """Простой панели: с какого момента недоступна, когда вернулась, когда уведомили команду.
 
     Открытый простой — не больше одного: его открывает и закрывает только проверка
-    связи, а она ставится раз в минуту одна на все воркеры.
+    связи, а проверки идут строго по одной.
     """
 
     __tablename__ = "panel_outages"
@@ -97,6 +100,7 @@ class HealthCheckArgs(BaseModel):
 @task("panel.health_check", HealthCheckArgs)
 async def health_check(context: TaskContext, _args: HealthCheckArgs) -> None:
     session = context.session
+    await session.execute(select(func.pg_advisory_xact_lock(_HEALTH_CHECK_LOCK)))
     outage = await current_outage(session)
     try:
         await runtime.current().panel.get_metadata()

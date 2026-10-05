@@ -1,11 +1,12 @@
 """Сверка подписки с панелью: панель всегда права (4.3–4.10, 4.29)."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import delete, func, select
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from remnabay.domain.clients import Client
 from remnabay.domain.payments import Payment, PaymentState
@@ -21,6 +22,7 @@ from remnabay.journal import Actor, JournalEntry, Subject, entries_for
 from remnabay.messaging import SendArgs
 from remnabay.panel import PanelRequestError, PanelUnavailableError
 from remnabay.panel_sync import (
+    PanelOutage,
     ReconcileArgs,
     Source,
     SyncPageArgs,
@@ -471,3 +473,33 @@ async def test_4_30_error_answer_is_not_an_outage(db_session: AsyncSession) -> N
     await _check(db_session, FakePanel(error_status=401))
 
     assert await panel_available(db_session)
+
+
+async def test_4_13_parallel_health_checks_open_one_outage(queue_engine: AsyncEngine) -> None:
+    """4.13: проверки связи скопились в очереди и пошли одновременно — простой один, и
+    уведомление о нём будет одно."""
+    panel = FakePanel(down=True)
+
+    async def check() -> None:
+        async with AsyncSession(queue_engine) as session, session.begin():
+            await _check(session, panel)
+
+    try:
+        await asyncio.gather(check(), check(), check())
+        async with AsyncSession(queue_engine) as session:
+            opened = await session.scalar(select(func.count()).select_from(PanelOutage))
+        assert opened == 1
+    finally:
+        async with AsyncSession(queue_engine) as session, session.begin():
+            await session.execute(delete(PanelOutage))
+
+
+async def test_4_8_no_sync_while_panel_is_down(db_session: AsyncSession) -> None:
+    """4.8, 4.30: пока панель недоступна, сверка подписок не ставится — сверять не с чем,
+    а очередь не забивается перепроверками."""
+    await _subscription(db_session)
+    await _check(db_session, FakePanel(down=True))
+
+    await _run_page(db_session, SyncPageArgs())
+
+    assert await _queued(db_session) == []

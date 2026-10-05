@@ -327,7 +327,10 @@ class Worker:
                     earlier.status.in_(UNFINISHED),
                 ),
             )
-            .order_by(QueueTask.id)
+            # Первой — та, чей срок наступил раньше: новая задача не ждёт, пока воркеры
+            # переберут ранние задачи, которые лишь перепроверяют панель (4.30).
+            # Порядок задач одного ключа держит условие выше, а не сортировка
+            .order_by(QueueTask.run_at, QueueTask.id)
             .limit(1)
             .with_for_update(skip_locked=True, key_share=True, of=QueueTask)
         )
