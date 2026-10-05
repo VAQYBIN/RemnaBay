@@ -5,6 +5,13 @@
 """
 
 from remnabay.panel_sync._events import receive_event, webhook_received
+from remnabay.panel_sync._outage import (
+    HEALTH_CHECK,
+    PanelOutage,
+    current_outage,
+    health_check,
+    panel_available,
+)
 from remnabay.panel_sync._reconcile import (
     ReconcileArgs,
     Source,
@@ -15,11 +22,16 @@ from remnabay.panel_sync._reconcile import (
 from remnabay.panel_sync._sweep import SYNC_ALL, SyncPageArgs, sync_interval, sync_page
 
 __all__ = [
+    "HEALTH_CHECK",
     "SYNC_ALL",
+    "PanelOutage",
     "ReconcileArgs",
     "Source",
     "SyncPageArgs",
+    "current_outage",
     "enqueue_reconcile",
+    "health_check",
+    "panel_available",
     "receive_event",
     "reconcile",
     "reconcile_subscription",

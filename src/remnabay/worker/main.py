@@ -19,7 +19,13 @@ from remnabay.config import Settings
 from remnabay.db import create_engine
 from remnabay.messaging import TelegramSender, notify_team, send_message
 from remnabay.panel import PanelClient, PanelUnavailableError
-from remnabay.panel_sync import SYNC_ALL, reconcile_subscription, sync_page
+from remnabay.panel_sync import (
+    HEALTH_CHECK,
+    SYNC_ALL,
+    health_check,
+    reconcile_subscription,
+    sync_page,
+)
 from remnabay.queue import RetryPolicy, TaskRegistry, Worker, WorkerConfig
 from remnabay.shop_settings import RETRY_MAX_ATTEMPTS, RETRY_WINDOW, get_setting
 
@@ -30,9 +36,9 @@ HEARTBEAT_MAX_AGE_SECONDS = 60.0
 
 # Виды задач магазина — общие для воркера и действий команды над проваленными.
 # Добавляются блоками, которые их вводят; очистка очереди встроена в сам воркер
-TASKS = TaskRegistry((send_message, reconcile_subscription, sync_page))
-# Периодические задачи: сверка всех подписок с панелью (4.8)
-PERIODIC = (SYNC_ALL,)
+TASKS = TaskRegistry((send_message, reconcile_subscription, sync_page, health_check))
+# Периодические задачи: сверка всех подписок с панелью (4.8), проверка связи с ней (4.13)
+PERIODIC = (SYNC_ALL, HEALTH_CHECK)
 # Ошибки «внешний сервис недоступен»: задача ждёт, а не проваливается (4.30)
 UNAVAILABLE: tuple[type[Exception], ...] = (PanelUnavailableError,)
 

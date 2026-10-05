@@ -14,8 +14,9 @@ import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Annotated
+from zoneinfo import ZoneInfo, available_timezones
 
-from pydantic import Field, PositiveInt, TypeAdapter, ValidationError
+from pydantic import AfterValidator, Field, PositiveInt, TypeAdapter, ValidationError
 from sqlalchemy import DateTime, ForeignKey, String, func, select
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -84,6 +85,20 @@ _DURATION = TypeAdapter[timedelta](PositiveDuration)
 SHOP_LANGUAGE = ShopSetting(
     "shop.default_language", TypeAdapter[str](Annotated[str, Field(pattern=r"^[a-z]{2}$")]), "ru"
 )
+
+
+def _known_time_zone(name: str) -> str:
+    if name not in available_timezones():
+        raise ValueError(f"Неизвестный часовой пояс {name}")
+    return name
+
+
+# «Магазин»: часовой пояс — периоды в админке (1.18) и запасной текст дат (0044)
+SHOP_TIME_ZONE = ShopSetting(
+    "shop.time_zone",
+    TypeAdapter[str](Annotated[str, AfterValidator(_known_time_zone)]),
+    "Europe/Moscow",
+)
 # «Оплата» → «Повтор операций»: прекращение через 1 час или после 20 попыток (4.14)
 RETRY_MAX_ATTEMPTS = ShopSetting("retry.max_attempts", _ATTEMPTS, 20)
 RETRY_WINDOW = ShopSetting("retry.window", _DURATION, timedelta(hours=1))
@@ -121,6 +136,10 @@ async def get_setting[T](session: AsyncSession, setting: ShopSetting[T]) -> T:
             "Настройка %s испорчена в базе — действует значение по умолчанию", setting.key
         )
         return setting.default
+
+
+async def shop_time_zone(session: AsyncSession) -> ZoneInfo:
+    return ZoneInfo(await get_setting(session, SHOP_TIME_ZONE))
 
 
 async def set_setting[T](

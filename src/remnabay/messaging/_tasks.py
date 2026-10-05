@@ -78,17 +78,22 @@ async def not_delivered(
     )
 
 
+async def load_texts(session: AsyncSession) -> Texts:
+    """Тексты бота: по умолчанию, с правками оператора, язык по умолчанию — из настроек."""
+    return Texts(
+        _catalogs(),
+        await load_overrides(session),
+        default_language=await get_setting(session, SHOP_LANGUAGE),
+    )
+
+
 async def _render(session: AsyncSession, args: SendArgs) -> OutgoingMessage:
     language = None
     if args.client_id is not None:
         language = await session.scalar(
             select(Client.language_code).where(Client.id == args.client_id)
         )
-    texts = Texts(
-        _catalogs(),
-        await load_overrides(session),
-        default_language=await get_setting(session, SHOP_LANGUAGE),
-    )
+    texts = await load_texts(session)
     buttons = tuple(
         Button(texts.render(button.text_key, language), url=button.url, copy_text=button.copy_text)
         for button in args.buttons

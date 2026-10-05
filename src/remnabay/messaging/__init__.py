@@ -24,7 +24,13 @@ from remnabay.messaging._sender import (
     TelegramSender,
     UndeliverableError,
 )
-from remnabay.messaging._tasks import ButtonArgs, SendArgs, not_delivered, send_message
+from remnabay.messaging._tasks import (
+    ButtonArgs,
+    SendArgs,
+    load_texts,
+    not_delivered,
+    send_message,
+)
 
 
 async def send_to_client(
@@ -85,6 +91,7 @@ __all__ = [
     "Sender",
     "TelegramSender",
     "UndeliverableError",
+    "load_texts",
     "notify_team",
     "send_message",
     "send_to_client",

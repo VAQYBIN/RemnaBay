@@ -16,21 +16,25 @@ from remnabay.domain.subscriptions import (
     TermSegment,
 )
 from remnabay.domain.tariffs import TrafficResetStrategy
-from remnabay.journal import Actor, Subject, entries_for
+from remnabay.domain.team import TeamMember, TeamRole
+from remnabay.journal import Actor, JournalEntry, Subject, entries_for
 from remnabay.messaging import SendArgs
 from remnabay.panel import PanelUnavailableError
 from remnabay.panel_sync import (
     ReconcileArgs,
     Source,
     SyncPageArgs,
+    current_outage,
     enqueue_reconcile,
+    health_check,
+    panel_available,
     reconcile,
     sync_interval,
     sync_page,
 )
 from remnabay.queue import TaskContext
 from remnabay.queue._models import QueueTask
-from remnabay.shop_settings import PANEL_SYNC_INTERVAL, set_setting
+from remnabay.shop_settings import PANEL_OUTAGE_ALERT_AFTER, PANEL_SYNC_INTERVAL, set_setting
 from tests.domain_support import (
     add,
     make_client,
@@ -367,3 +371,91 @@ async def test_4_8_sync_interval_comes_from_settings(db_session: AsyncSession) -
     assert await sync_interval(db_session) == timedelta(minutes=15)
     await set_setting(db_session, PANEL_SYNC_INTERVAL, timedelta(minutes=5), member_id=member.id)
     assert await sync_interval(db_session) == timedelta(minutes=5)
+
+
+# --- Недоступность панели (4.11–4.13, 4.30) ---
+
+
+async def _check(session: AsyncSession, panel: FakePanel) -> None:
+    with fake_runtime(panel=panel):
+        await health_check.run(TaskContext(session=session, task_id=1, attempt_number=1), {})
+    await session.flush()
+
+
+async def _notifications(session: AsyncSession) -> list[SendArgs]:
+    rows = await session.scalars(
+        select(QueueTask.args).where(QueueTask.name == "messages.send").order_by(QueueTask.id)
+    )
+    return [SendArgs.model_validate(args) for args in rows]
+
+
+async def _owner(session: AsyncSession) -> None:
+    await add(session, TeamMember(telegram_id=1, role=TeamRole.OWNER))
+
+
+async def test_4_13_long_outage_notifies_team_once(db_session: AsyncSession) -> None:
+    """4.12, 4.13, 4.30: панель недоступна — простой начался, данные клиента «могут быть
+    неактуальны»; дольше 5 минут — одно уведомление команде на весь простой."""
+    await _owner(db_session)
+    panel = FakePanel(down=True)
+
+    await _check(db_session, panel)
+    outage = await current_outage(db_session)
+    assert outage is not None
+    assert not await panel_available(db_session)
+    assert await _notifications(db_session) == []
+
+    outage.started_at = datetime(2026, 10, 1, 20, 0, tzinfo=UTC)
+    await _check(db_session, panel)
+    await _check(db_session, panel)
+
+    [notification] = await _notifications(db_session)
+    assert (notification.chat_id, notification.text_key) == (1, "team.panel_unavailable")
+    # Время — в часовом поясе магазина (по умолчанию Москва), месяц словом (0044)
+    assert notification.variables == {"since": "1 октября 2026, 23:00 (МСК)"}
+
+
+async def test_4_13_short_outage_ends_without_notification(db_session: AsyncSession) -> None:
+    """4.13: панель вернулась раньше 5 минут — уведомления нет; простой закрыт, данные снова
+    актуальны; следующий простой — новый, со своим уведомлением."""
+    await _owner(db_session)
+    panel = FakePanel(down=True)
+
+    await _check(db_session, panel)
+    panel.down = False
+    await _check(db_session, panel)
+
+    assert await panel_available(db_session)
+    assert await _notifications(db_session) == []
+    actions = (
+        await db_session.scalars(
+            select(JournalEntry.action).where(JournalEntry.action.like("panel.%"))
+        )
+    ).all()
+    assert actions == ["panel.unavailable", "panel.available_again"]
+
+
+async def test_4_13_alert_delay_comes_from_settings(db_session: AsyncSession) -> None:
+    """4.13: через сколько уведомлять о простое — настройка оператора."""
+    member = make_team_member(telegram_id=1)
+    await add(db_session, member)
+    await set_setting(
+        db_session, PANEL_OUTAGE_ALERT_AFTER, timedelta(seconds=1), member_id=member.id
+    )
+    panel = FakePanel(down=True)
+
+    await _check(db_session, panel)
+    outage = await current_outage(db_session)
+    assert outage is not None
+    outage.started_at = datetime.now(UTC) - timedelta(seconds=2)
+    await _check(db_session, panel)
+
+    assert [n.text_key for n in await _notifications(db_session)] == ["team.panel_unavailable"]
+
+
+async def test_4_30_error_answer_is_not_an_outage(db_session: AsyncSession) -> None:
+    """4.30: панель ответила ошибкой (например, неверный токен) — это не простой: до неё
+    достучались. Проверка связи при этом не падает."""
+    await _check(db_session, FakePanel(error_status=401))
+
+    assert await panel_available(db_session)

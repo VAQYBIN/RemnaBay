@@ -58,12 +58,18 @@ class FakePanel:
 
     users: dict[int, dict[str, Any]] = field(default_factory=dict[int, dict[str, Any]])
     down: bool = False
+    # Панель на связи, но отвечает этой ошибкой (например, 401 — неверный токен)
+    error_status: int | None = None
     requests: list[str] = field(default_factory=list[str])
 
     def handle(self, request: httpx2.Request) -> httpx2.Response:
         self.requests.append(f"{request.method} {request.url.path}")
         if self.down:
             raise httpx2.ConnectError("панель недоступна", request=request)
+        if self.error_status is not None:
+            return httpx2.Response(self.error_status, json={"message": "ошибка"})
+        if request.url.path == "/api/system/metadata":
+            return httpx2.Response(200, json={"response": {"version": "3.4.4"}})
         match = _USER_PATH.match(request.url.path)
         if request.method == "GET" and match:
             user = self.users.get(int(match.group(1)))
