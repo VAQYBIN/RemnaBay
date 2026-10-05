@@ -34,6 +34,7 @@ from sqlalchemy.orm import aliased
 from remnabay.journal import Actor, JsonValue, Outcome, record
 from remnabay.queue._core import (
     Ending,
+    RejectedError,
     RetryPolicy,
     RunnableTask,
     TaskContext,
@@ -85,6 +86,10 @@ class WorkerConfig:
         """Соединений нужно по два на поток (задача и попытки) и одно планировщику."""
         return self.concurrency * 2 + 1
 
+
+# Что сделать с проваленной задачей, у вида которой нет своего обработчика провала:
+# например, уведомить команду (4.31). Получает сессию, номер и имя задачи
+type FailedFallback = Callable[[AsyncSession, int, str], Awaitable[None]]
 
 # Политика повторов, которая читается при каждом решении: настройки оператора
 # меняются без перезапуска (04-operator-settings)
@@ -197,9 +202,13 @@ class Worker:
         policy: RetryPolicy | PolicySource | None = None,
         config: WorkerConfig | None = None,
         unavailable: tuple[type[Exception], ...] = (),
+        on_failed: FailedFallback | None = None,
     ) -> None:
         """`policy` — постоянная политика повторов или функция, которая читает её из
         базы при каждом решении.
+
+        `on_failed` — что сделать с проваленной задачей, у вида которой нет своего
+        обработчика провала.
 
         `unavailable` — ошибки «внешний сервис недоступен»: задача с такой ошибкой
         ждёт («ждёт панель», 4.30), а не проваливается, и попытка не считается в лимит.
@@ -210,6 +219,7 @@ class Worker:
         self._policy = policy or RetryPolicy()
         self._config = config or WorkerConfig()
         self._unavailable = unavailable
+        self._on_failed = on_failed
 
     async def run(self, stop: asyncio.Event) -> None:
         """Работает, пока не выставлен `stop`; начатые задачи доделываются."""
@@ -270,9 +280,22 @@ class Worker:
             if await self._exhausted_before_start(session, task_id, retry_round):
                 await self._fail(session, task_id)
                 return True
+            previous = await self._previous_result(session, task_id)
             number = await self._start_attempt(side, task_id, retry_round)
-            await self._execute(session, side, task_id, name, args, retry_round, number)
+            context = TaskContext(
+                session=session, task_id=task_id, attempt_number=number, previous_result=previous
+            )
+            await self._execute(context, side, name, args, retry_round)
         return True
+
+    @staticmethod
+    async def _previous_result(session: AsyncSession, task_id: int) -> AttemptResult | None:
+        return await session.scalar(
+            select(QueueAttempt.result)
+            .where(QueueAttempt.task_id == task_id)
+            .order_by(QueueAttempt.id.desc())
+            .limit(1)
+        )
 
     @staticmethod
     def _next_task_query():
@@ -296,21 +319,22 @@ class Worker:
 
     async def _execute(
         self,
-        session: AsyncSession,
+        context: TaskContext,
         side: AsyncSession,
-        task_id: int,
         name: str,
         args: dict[str, JsonValue],
         retry_round: int,
-        number: int,
     ) -> None:
-        context = TaskContext(session=session, task_id=task_id, attempt_number=number)
+        session, task_id, number = context.session, context.task_id, context.attempt_number
         try:
             async with session.begin_nested():
                 await self._run_with_timeout(context, name, args)
         except self._unavailable as error:
             await self._finish_attempt(side, task_id, number, AttemptResult.UNAVAILABLE, error)
             await self._after_failure(session, task_id, retry_round, number, unavailable=True)
+        except RejectedError as error:
+            await self._finish_attempt(side, task_id, number, AttemptResult.REJECTED, error)
+            await self._after_failure(session, task_id, retry_round, number, unavailable=False)
         except Exception as error:
             await self._finish_attempt(side, task_id, number, AttemptResult.ERROR, error)
             await self._after_failure(session, task_id, retry_round, number, unavailable=False)
@@ -525,7 +549,8 @@ class Worker:
     async def _fail(self, session: AsyncSession, task_id: int) -> None:
         """Окончательный провал: задача ждёт команду, следующие задачи ключа — её (4.27).
 
-        Обработчик `on_failed` выполняется в точке сохранения: его сбой пишется в лог
+        Обработчик `on_failed` вида задачи (или общий, если своего нет) выполняется
+        в точке сохранения: его сбой пишется в лог
         и журнал, но не мешает задаче стать проваленной — иначе она перезапускалась
         бы бесконечно.
         """
@@ -542,12 +567,15 @@ class Worker:
             subject=task_subject(task_id),
             outcome=Outcome.FAILURE,
         )
-        definition = self._tasks.get(task.name) if task is not None else None
-        if task is None or definition is None:
+        if task is None:
             return
+        definition = self._tasks.get(task.name)
         try:
             async with session.begin_nested():
-                await definition.ended(Ending.FAILED, session, task_id, task.args)
+                if definition is not None and definition.handles(Ending.FAILED):
+                    await definition.ended(Ending.FAILED, session, task_id, task.args)
+                elif self._on_failed is not None:
+                    await self._on_failed(session, task_id, task.name)
         except Exception as error:
             logger.exception("Задача %s: сбой обработчика провала", task_id)
             await record(

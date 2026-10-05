@@ -58,6 +58,7 @@ from tests.queue_support import (
     needs_panel,
     panel_switch,
     record_event,
+    rejecting,
     run_workers,
     spawn,
     sql_sleep,
@@ -855,3 +856,49 @@ async def test_0047_attempt_limit_counts_whole_round_across_outage(
     await _outage_after_first_error(queue_engine, task_id, policy, outage=0.3)
 
     assert await _counted_attempts(queue_engine, task_id) == [AttemptResult.ERROR] * 3
+
+
+# --- Отказ внешнего сервиса и общий обработчик провала (4.31, 4.33) ---
+
+
+async def test_4_33_rejected_attempt_is_marked_and_next_attempt_knows_it(
+    queue_engine: AsyncEngine,
+) -> None:
+    """4.33: отказ, после которого действие точно не выполнено, отмечен в истории отдельно,
+    и следующая попытка видит итог прошлой — по нему задача решает, можно ли повторить."""
+    FAILING.add("j1")
+    task_id = await enqueue(queue_engine, rejecting, LabelArgs(label="j1"))
+    worker = make_worker(queue_engine)
+
+    assert await worker.run_one() is True
+    FAILING.discard("j1")
+    await run_workers([worker], lambda: all_finished(queue_engine, [task_id]))
+
+    async with AsyncSession(queue_engine) as session:
+        attempts = await attempts_of(session, task_id)
+    assert [a.result for a in attempts] == [AttemptResult.REJECTED, AttemptResult.DONE]
+    # Событие отказавшей попытки откатилось вместе с ней; вторая видит итог первой
+    assert [e[1] for e in await events(queue_engine)] == ["j1:rejected"]
+
+
+async def test_4_31_operations_without_own_consequences_use_common_failure_handler(
+    queue_engine: AsyncEngine,
+) -> None:
+    """4.31: провал операции без своих последствий обрабатывает общий обработчик (например,
+    уведомление команды); у операции со своими последствиями общий не вызывается."""
+    calls: list[tuple[int, str]] = []
+
+    async def on_failed(_session: AsyncSession, task_id: int, name: str) -> None:
+        calls.append((task_id, name))
+
+    FAILING.update({"g1", "g2"})
+    plain = await enqueue(queue_engine, switch, LabelArgs(label="g1"))
+    own = await enqueue(queue_engine, hooked, LabelArgs(label="g2"))
+
+    await run_workers(
+        [make_worker(queue_engine, on_failed=on_failed)],
+        lambda: all_finished(queue_engine, [plain, own]),
+    )
+
+    assert calls == [(plain, "test.switch")]
+    assert [e[1] for e in await events(queue_engine)] == ["failed:g2"]

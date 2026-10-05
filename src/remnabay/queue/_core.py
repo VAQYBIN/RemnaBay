@@ -15,6 +15,7 @@ from sqlalchemy.orm import aliased
 from remnabay.journal import Actor, JsonValue, Outcome, Subject, record
 from remnabay.queue._models import (
     UNFINISHED,
+    AttemptResult,
     QueueAttempt,
     QueueKey,
     QueueTask,
@@ -41,6 +42,18 @@ class TaskContext:
     session: AsyncSession
     task_id: int
     attempt_number: int
+    # Чем закончилась прошлая попытка. Задача, которую нельзя выполнить дважды
+    # (сообщение клиенту, 4.33), повторяет действие, только если прошлая попытка
+    # точно его не выполнила: `None` (попытка первая) или `REJECTED`
+    previous_result: AttemptResult | None = None
+
+
+class RejectedError(Exception):
+    """Внешний сервис отказал так, что действие точно не выполнено: повтор безопасен.
+
+    Попытка засчитывается в лимит, как обычная ошибка, но в истории отмечена
+    отдельно — по ней следующая попытка знает, что действие можно повторить.
+    """
 
 
 class Ending(StrEnum):
@@ -71,6 +84,8 @@ class RunnableTask(Protocol):
     def cancellable(self) -> bool: ...
 
     async def run(self, context: TaskContext, raw_args: dict[str, JsonValue]) -> None: ...
+
+    def handles(self, ending: Ending) -> bool: ...
 
     async def ended(
         self, ending: Ending, session: AsyncSession, task_id: int, raw_args: dict[str, JsonValue]
@@ -152,6 +167,10 @@ class TaskDefinition[A: BaseModel]:
     def on_resolved(self, hook: EndingHook[A]) -> EndingHook[A]:
         """Декоратор: что сделать, когда команда отметила задачу решённой вручную."""
         return self._on(Ending.RESOLVED, hook)
+
+    def handles(self, ending: Ending) -> bool:
+        """Задан ли у вида задачи свой обработчик этого исхода."""
+        return ending in self._hooks
 
     async def ended(
         self, ending: Ending, session: AsyncSession, task_id: int, raw_args: dict[str, JsonValue]

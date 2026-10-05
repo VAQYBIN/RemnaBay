@@ -52,6 +52,9 @@ class AttemptResult(StrEnum):
     UNAVAILABLE = "unavailable"
     # Попытка оборвалась вместе с процессом воркера
     ABORTED = "aborted"
+    # Внешний сервис отказал так, что действие точно не выполнено: повтор безопасен
+    # (например, Telegram ответил «слишком много запросов», 4.33)
+    REJECTED = "rejected"
 
 
 def _in_statuses(*statuses: TaskStatus) -> str:

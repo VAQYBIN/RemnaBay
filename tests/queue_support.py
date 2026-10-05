@@ -15,8 +15,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
 from remnabay.queue import (
+    FailedFallback,
     Periodic,
     PolicySource,
+    RejectedError,
     RetryPolicy,
     TaskContext,
     TaskDefinition,
@@ -174,6 +176,15 @@ async def panel_switch(context: TaskContext, args: LabelArgs) -> None:
     await _write_event(context, args.label, datetime.now(UTC))
 
 
+@task("test.rejecting", LabelArgs)
+async def rejecting(context: TaskContext, args: LabelArgs) -> None:
+    """Внешний сервис отказывает, пока метка в `FAILING`; событие — с итогом прошлой попытки."""
+    previous = context.previous_result.value if context.previous_result else "-"
+    await _write_event(context, f"{args.label}:{previous}", datetime.now(UTC))
+    if args.label in FAILING:
+        raise RejectedError("сервис отказал")
+
+
 @task("test.panel", LabelArgs)
 async def needs_panel(context: TaskContext, args: LabelArgs) -> None:
     if not PANEL["up"]:
@@ -223,6 +234,7 @@ ALL_TASKS = (
     irreversible,
     bad_hook,
     panel_switch,
+    rejecting,
     needs_panel,
     crash,
     spawn,
@@ -252,6 +264,7 @@ def make_worker(
     config: WorkerConfig = FAST_CONFIG,
     periodic: Sequence[Periodic[RecordArgs]] = (),
     unavailable: tuple[type[Exception], ...] = (PanelDownError,),
+    on_failed: FailedFallback | None = None,
 ) -> Worker:
     return Worker(
         engine,
@@ -260,6 +273,7 @@ def make_worker(
         policy=policy,
         config=config,
         unavailable=unavailable,
+        on_failed=on_failed,
     )
 
 

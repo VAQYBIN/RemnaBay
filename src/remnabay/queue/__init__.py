@@ -15,6 +15,7 @@
 from remnabay.queue._core import (
     Ending,
     FailedTask,
+    RejectedError,
     RetryPolicy,
     TaskContext,
     TaskDefinition,
@@ -34,6 +35,7 @@ from remnabay.queue._core import (
 )
 from remnabay.queue._models import AttemptResult, TaskStatus
 from remnabay.queue._worker import (
+    FailedFallback,
     Periodic,
     PolicySource,
     TaskTimeoutError,
@@ -44,9 +46,11 @@ from remnabay.queue._worker import (
 __all__ = [
     "AttemptResult",
     "Ending",
+    "FailedFallback",
     "FailedTask",
     "Periodic",
     "PolicySource",
+    "RejectedError",
     "RetryPolicy",
     "TaskContext",
     "TaskDefinition",
