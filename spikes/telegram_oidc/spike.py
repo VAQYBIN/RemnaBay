@@ -15,6 +15,7 @@ TELEGRAM_LOGIN_CLIENT_SECRET (Client Secret из @BotFather → Login Widget).
 
 import base64
 import hashlib
+import html
 import json
 import secrets
 import time
@@ -154,7 +155,9 @@ class Handler(BaseHTTPRequestHandler):
         if "code" not in query or pending is None:
             result["note"] = "нет кода или неизвестный state"
             save(result)
-            self._send(200, f"<pre>{json.dumps(result, ensure_ascii=False, indent=2)}</pre>")
+            self._send(
+                200, f"<pre>{html.escape(json.dumps(result, ensure_ascii=False, indent=2))}</pre>"
+            )
             return
         nonce, verifier, redirect_uri, started = pending
         response = httpx2.post(
@@ -196,7 +199,9 @@ class Handler(BaseHTTPRequestHandler):
                 "id_matches_owner": user_id is not None and int(user_id) == OWNER_ID,
             }
         save(result)
-        self._send(200, f"<pre>{json.dumps(result, ensure_ascii=False, indent=2)}</pre>")
+        self._send(
+            200, f"<pre>{html.escape(json.dumps(result, ensure_ascii=False, indent=2))}</pre>"
+        )
 
 
 if __name__ == "__main__":
