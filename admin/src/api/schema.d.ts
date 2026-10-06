@@ -273,6 +273,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/settings/panel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Panel Settings */
+        get: operations["panel_settings_api_admin_settings_panel_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/settings/panel/webhook-secret": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Webhook Secret
+         * @description Свой секрет — например, уже заданный в панели для прежнего бота (0052).
+         */
+        put: operations["update_webhook_secret_api_admin_settings_panel_webhook_secret_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/settings/panel/webhook-secret/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Webhook Secret
+         * @description Новый секрет, созданный магазином: его нужно указать в панели.
+         */
+        post: operations["generate_webhook_secret_api_admin_settings_panel_webhook_secret_generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/stats": {
         parameters: {
             query?: never;
@@ -563,6 +620,18 @@ export interface components {
             error: ("unavailable" | "unauthorized" | "error" | "incompatible_version") | null;
         };
         /**
+         * PanelSettingsOut
+         * @description «Панель»: адрес и секрет вебхука для панели (1.9).
+         */
+        PanelSettingsOut: {
+            /** Webhook Url */
+            webhook_url: string;
+            /** Webhook Secret */
+            webhook_secret: string | null;
+            /** Webhook Secret Fits Panel */
+            webhook_secret_fits_panel: boolean;
+        };
+        /**
          * Period
          * @enum {string}
          */
@@ -665,6 +734,11 @@ export interface components {
             url: string;
             /** Secret */
             secret: string | null;
+        };
+        /** WebhookSecretIn */
+        WebhookSecretIn: {
+            /** Webhook Secret */
+            webhook_secret: string;
         };
         _Contact: string;
         _Name: string;
@@ -1115,6 +1189,79 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    panel_settings_api_admin_settings_panel_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PanelSettingsOut"];
+                };
+            };
+        };
+    };
+    update_webhook_secret_api_admin_settings_panel_webhook_secret_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookSecretIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PanelSettingsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_webhook_secret_api_admin_settings_panel_webhook_secret_generate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PanelSettingsOut"];
                 };
             };
         };

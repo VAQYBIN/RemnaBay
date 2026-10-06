@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { $api, errorMessage } from '@/api/client'
 import { Field } from '@/components/Field'
+import { SearchSelect } from '@/components/SearchSelect'
 import { Module } from '@/components/frame/Module'
 import { Button } from '@/components/ui/button'
 import {
@@ -113,18 +114,13 @@ export function ShopSettingsPage() {
             <Input id="support" value={form.support} maxLength={256} onChange={(e) => setForm({ ...form, support: e.target.value })} />
           </Field>
           <Field id="time-zone" label="Часовой пояс магазина" hint="Периоды и даты в админке и запасной текст дат в боте.">
-            <select
+            <SearchSelect
               id="time-zone"
               value={form.timeZone}
-              onChange={(e) => setForm({ ...form, timeZone: e.target.value })}
-              className="h-9 rounded-lg border bg-transparent px-3 text-sm"
-            >
-              {zones.map((zone) => (
-                <option key={zone} value={zone}>
-                  {zone}
-                </option>
-              ))}
-            </select>
+              options={zones}
+              onChange={(timeZone) => setForm({ ...form, timeZone })}
+              searchPlaceholder="Найти пояс, например Moscow"
+            />
           </Field>
           <Field
             id="testers"

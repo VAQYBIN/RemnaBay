@@ -1,6 +1,6 @@
 import { Monitor, Moon, Sun } from 'lucide-react'
 
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { DropdownMenuRadioGroup, DropdownMenuRadioItem } from '@/components/ui/dropdown-menu'
 import { type ThemePreference, useThemePreference } from '@/lib/theme'
 
 const OPTIONS: { value: ThemePreference; label: string; icon: typeof Sun }[] = [
@@ -9,23 +9,20 @@ const OPTIONS: { value: ThemePreference; label: string; icon: typeof Sun }[] = [
   { value: 'dark', label: 'Тёмная', icon: Moon },
 ]
 
-/** «Системная / Светлая / Тёмная» (1.25). */
-export function ThemeSwitch() {
+/** «Системная / Светлая / Тёмная» (1.25) — пункты меню участника с отметкой выбранного. */
+export function ThemeRadioItems() {
   const [preference, setPreference] = useThemePreference()
   return (
-    <ToggleGroup
-      type="single"
+    <DropdownMenuRadioGroup
       value={preference}
-      onValueChange={(value) => value && setPreference(value as ThemePreference)}
-      aria-label="Тема"
-      className="w-full"
+      onValueChange={(value) => setPreference(value as ThemePreference)}
     >
       {OPTIONS.map(({ value, label, icon: Icon }) => (
-        <ToggleGroupItem key={value} value={value} aria-label={label} className="flex-1 gap-1.5">
+        <DropdownMenuRadioItem key={value} value={value} onSelect={(event) => event.preventDefault()}>
           <Icon />
-          <span className="text-xs">{label}</span>
-        </ToggleGroupItem>
+          {label}
+        </DropdownMenuRadioItem>
       ))}
-    </ToggleGroup>
+    </DropdownMenuRadioGroup>
   )
 }

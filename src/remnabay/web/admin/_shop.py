@@ -29,8 +29,11 @@ from remnabay.shop import MAX_TESTERS, SHOP_SUPPORT_CONTACT, SHOP_TESTERS, ShopS
 from remnabay.shop_settings import (
     SHOP_TIME_ZONE,
     SettingError,
+    check_webhook_secret,
     get_setting,
+    new_webhook_secret,
     set_setting,
+    set_webhook_secret,
     webhook_secret,
 )
 from remnabay.web.admin._deps import AppSettings, DbSession, Member, Owner
@@ -280,3 +283,78 @@ async def update_login_settings(
             await set_setting(session, setting, value, member_id=owner.id)
     await session.commit()
     return await _login_settings(session)
+
+
+class PanelSettingsOut(BaseModel):
+    """«Панель»: адрес и секрет вебхука для панели (1.9)."""
+
+    webhook_url: str
+    # Нет — секрет не расшифровывается (сменили ENCRYPTION_KEY): задайте заново
+    webhook_secret: str | None
+    # Секрет подходит под правила панели; созданный до решения 0052 мог не подходить
+    webhook_secret_fits_panel: bool
+
+
+class WebhookSecretIn(BaseModel):
+    webhook_secret: str
+
+
+async def _panel_settings(
+    request: Request, session: DbSession, settings: AppSettings
+) -> PanelSettingsOut:
+    box: SecretBox = request.app.state.box
+    try:
+        secret: str | None = await webhook_secret(session, box)
+    except SecretDecryptionError:
+        secret = None
+    await session.commit()
+    return PanelSettingsOut(
+        webhook_url=settings.public_link(PANEL_WEBHOOK_PATH),
+        webhook_secret=secret,
+        webhook_secret_fits_panel=secret is not None and _fits_panel(secret),
+    )
+
+
+def _fits_panel(secret: str) -> bool:
+    try:
+        check_webhook_secret(secret)
+    except SettingError:
+        return False
+    return True
+
+
+@router.get("/settings/panel", tags=["settings"])
+async def panel_settings(
+    request: Request, session: DbSession, settings: AppSettings, owner: Owner
+) -> PanelSettingsOut:
+    del owner
+    return await _panel_settings(request, session, settings)
+
+
+@router.put("/settings/panel/webhook-secret", tags=["settings"])
+async def update_webhook_secret(
+    body: WebhookSecretIn,
+    request: Request,
+    session: DbSession,
+    settings: AppSettings,
+    owner: Owner,
+) -> PanelSettingsOut:
+    """Свой секрет — например, уже заданный в панели для прежнего бота (0052)."""
+    box: SecretBox = request.app.state.box
+    try:
+        await set_webhook_secret(session, box, body.webhook_secret.strip(), member_id=owner.id)
+    except SettingError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
+    await session.commit()
+    return await _panel_settings(request, session, settings)
+
+
+@router.post("/settings/panel/webhook-secret/generate", tags=["settings"])
+async def generate_webhook_secret(
+    request: Request, session: DbSession, settings: AppSettings, owner: Owner
+) -> PanelSettingsOut:
+    """Новый секрет, созданный магазином: его нужно указать в панели."""
+    box: SecretBox = request.app.state.box
+    await set_webhook_secret(session, box, new_webhook_secret(), member_id=owner.id)
+    await session.commit()
+    return await _panel_settings(request, session, settings)

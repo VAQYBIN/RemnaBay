@@ -70,7 +70,16 @@ function Body({ item, isOwner }: { item: Item; isOwner: boolean }) {
           <p>Укажите в панели адрес и секрет вебхука. Пункт выполнится, когда придёт первое событие.</p>
           {item.webhook && <CopyField label="Адрес" value={item.webhook.url} />}
           {item.webhook?.secret && <CopyField label="Секрет" value={item.webhook.secret} />}
-          {!isOwner && <p className="text-xs">Секрет видит владелец.</p>}
+          {isOwner ? (
+            <p>
+              В панели уже задан свой секрет?{' '}
+              <Link to="/settings/panel" className="text-brand-text underline-offset-4 hover:underline">
+                Укажите его в настройках
+              </Link>
+            </p>
+          ) : (
+            <p className="text-xs">Секрет видит владелец.</p>
+          )}
         </div>
       )
     case 'device_limit':

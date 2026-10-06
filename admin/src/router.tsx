@@ -7,6 +7,7 @@ import { HomePage } from '@/pages/HomePage'
 import { LoginPage } from '@/pages/LoginPage'
 import { BrandSettingsPage } from '@/pages/settings/BrandSettingsPage'
 import { LoginSettingsPage } from '@/pages/settings/LoginSettingsPage'
+import { PanelSettingsPage } from '@/pages/settings/PanelSettingsPage'
 import { SettingsLayout } from '@/pages/settings/SettingsLayout'
 import { ShopSettingsPage } from '@/pages/settings/ShopSettingsPage'
 
@@ -27,6 +28,7 @@ export const router = createBrowserRouter(
             { index: true, element: <Navigate to="brand" replace /> },
             { path: 'brand', Component: BrandSettingsPage },
             { path: 'shop', Component: ShopSettingsPage },
+            { path: 'panel', Component: PanelSettingsPage },
             { path: 'login', Component: LoginSettingsPage },
           ],
         },

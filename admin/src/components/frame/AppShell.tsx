@@ -15,7 +15,7 @@ import { isOwner, type Member, useLogout, useMe } from '@/lib/session'
 import { cn } from '@/lib/utils'
 
 import { BrandLockup, BrandMark } from './BrandMark'
-import { ThemeSwitch } from './ThemeSwitch'
+import { ThemeRadioItems } from './ThemeSwitch'
 
 type NavItem = { to: string; label: string; icon: typeof House; ownerOnly?: boolean }
 
@@ -51,11 +51,13 @@ function MemberMenu({ member, compact = false }: { member: Member; compact?: boo
           )}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="glass-float w-64">
+      <DropdownMenuContent
+        align={compact ? 'end' : 'start'}
+        side={compact ? 'bottom' : 'top'}
+        className="glass-float w-56"
+      >
         <DropdownMenuLabel className="text-xs text-muted-foreground">Тема</DropdownMenuLabel>
-        <div className="px-1 pb-1">
-          <ThemeSwitch />
-        </div>
+        <ThemeRadioItems />
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={logout}>
           <LogOut />

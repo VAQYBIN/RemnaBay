@@ -3,6 +3,7 @@ import { AlertTriangle, Trash2, Upload } from 'lucide-react'
 import { type ChangeEvent, useEffect, useRef, useState } from 'react'
 
 import { $api, errorMessage, fetchClient, type Schemas } from '@/api/client'
+import { ColorField } from '@/components/ColorField'
 import { Field } from '@/components/Field'
 import { Module } from '@/components/frame/Module'
 import { RemnaBayMark } from '@/components/frame/RemnaBayMark'
@@ -62,29 +63,6 @@ function Preview({ palette }: { palette: Palette }) {
           </div>
         </div>
       ))}
-    </div>
-  )
-}
-
-function ColorInput({
-  id,
-  value,
-  onChange,
-}: {
-  id: string
-  value: string
-  onChange: (value: string) => void
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <input
-        type="color"
-        aria-label="Выбрать цвет"
-        value={HEX.test(value) ? value : '#000000'}
-        onChange={(event) => onChange(event.target.value)}
-        className="h-9 w-12 shrink-0 cursor-pointer rounded-md border bg-transparent p-1"
-      />
-      <Input id={id} value={value} onChange={(event) => onChange(event.target.value)} className="tabular font-mono" maxLength={7} />
     </div>
   )
 }
@@ -228,7 +206,7 @@ export function BrandSettingsPage() {
       <Module title="Цвета">
         <div className="flex flex-col gap-5">
           <Field id="brand-primary" label="Основной фирменный цвет" hint="Главная кнопка, активный пункт меню, ссылки.">
-            <ColorInput id="brand-primary" value={form.primary} onChange={(value) => setForm({ ...form, primary: value })} />
+            <ColorField id="brand-primary" value={form.primary} onChange={(value) => setForm({ ...form, primary: value })} />
           </Field>
           <Field
             id="brand-secondary"
@@ -244,7 +222,7 @@ export function BrandSettingsPage() {
               </>
             }
           >
-            <ColorInput id="brand-secondary" value={form.secondary} onChange={(value) => setForm({ ...form, secondary: value })} />
+            <ColorField id="brand-secondary" emptyLabel="не задан" value={form.secondary} onChange={(value) => setForm({ ...form, secondary: value })} />
           </Field>
           {palette.adjusted && (
             <p className="text-sm text-muted-foreground">

@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils'
 const SECTIONS = [
   { to: 'brand', label: 'Бренд' },
   { to: 'shop', label: 'Магазин' },
+  { to: 'panel', label: 'Панель' },
   { to: 'login', label: 'Вход в админку' },
 ]
 
