@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from remnabay import journal
 from remnabay.access._owner import TEAM_MEMBER_SUBJECT
 from remnabay.access._settings import SESSION_TTL
-from remnabay.domain.team import AdminSession, LoginMethod, TeamMember
+from remnabay.domain.team import AdminSession, TeamMember
 from remnabay.journal import Actor, Outcome, Subject
 from remnabay.shop_settings import get_setting
 
@@ -22,7 +22,7 @@ def _hash(token: str) -> bytes:
 
 
 async def create_session(
-    session: AsyncSession, member: TeamMember, method: LoginMethod, *, now: datetime
+    session: AsyncSession, member: TeamMember, method: str, *, now: datetime
 ) -> tuple[str, datetime]:
     """Новая сессия участника: токен для cookie и срок. Вход пишется в журнал."""
     token = secrets.token_urlsafe(_TOKEN_BYTES)
@@ -36,7 +36,7 @@ async def create_session(
         action="team.login",
         outcome=Outcome.SUCCESS,
         subject=Subject(TEAM_MEMBER_SUBJECT, member.id),
-        details={"method": method.value},
+        details={"method": method},
     )
     return token, expires_at
 

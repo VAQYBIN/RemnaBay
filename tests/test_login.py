@@ -13,15 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from remnabay.access import (
     LoginClosed,
     open_bot_login,
-    sign_login_url,
     start_bot_login,
 )
 from remnabay.domain.team import LoginRequest, TeamMember, TeamRole
 from remnabay.journal import JournalEntry
 from remnabay.shop import SHOP_STATE, ShopState
-from remnabay.web.admin import ADMIN_LOGIN_URL_PATH, SESSION_COOKIE
-from tests.bot_support import ADMIN_LOGIN_URL, BOT_NAME, BOT_USERNAME, telegram_user
-from tests.conftest import REQUIRED_ENV, journaled_in_test
+from remnabay.web.admin import LOGIN_PAGE_PATH, SESSION_COOKIE
+from tests.bot_support import BOT_NAME, BOT_USERNAME, telegram_user
+from tests.conftest import journaled_in_test
 from tests.domain_support import add, make_team_member, put_setting
 from tests.web_support import Shop, running_shop
 
@@ -118,7 +117,7 @@ async def test_1_4_login_works_while_shop_not_opened(shop: Shop, owner: TeamMemb
 
 
 async def test_1_4_admin_command_for_team(shop: Shop, owner: TeamMember) -> None:
-    """1.4: на /admin участник команды получает кнопку входа (login_url)."""
+    """1.4 (0053): на /admin участник команды получает кнопку со ссылкой на страницу входа."""
     del owner
     await shop.send_text(telegram_user(OWNER_TG), "/admin")
 
@@ -127,8 +126,8 @@ async def test_1_4_admin_command_for_team(shop: Shop, owner: TeamMember) -> None
     assert isinstance(message.reply_markup, InlineKeyboardMarkup)
     [[button]] = message.reply_markup.inline_keyboard
     assert button.text == "Войти в админку"
-    assert button.login_url is not None
-    assert button.login_url.url == f"https://shop.example.com{ADMIN_LOGIN_URL_PATH}"
+    assert button.url == f"https://shop.example.com{LOGIN_PAGE_PATH}"
+    assert button.login_url is None
 
 
 @pytest.mark.parametrize(
@@ -150,68 +149,6 @@ async def test_1_4_admin_command_for_others_is_unknown(
     await shop.send_text(telegram_user(STRANGER_TG), "/admin")
 
     assert shop.telegram.texts() == [answer]
-
-
-def _login_url_params(telegram_id: int, auth_date: datetime) -> dict[str, str]:
-    fields = {
-        "id": str(telegram_id),
-        "first_name": "Иван",
-        "auth_date": str(int(auth_date.timestamp())),
-    }
-    return {**fields, "hash": sign_login_url(fields, REQUIRED_ENV["BOT_TOKEN"])}
-
-
-async def test_1_4_login_url_signs_in(shop: Shop, owner: TeamMember) -> None:
-    """1.4: кнопка из ответа на /admin ведёт в админку с открытой сессией."""
-    del owner
-    params = _login_url_params(OWNER_TG, datetime.now(UTC))
-
-    response = await shop.http.get(ADMIN_LOGIN_URL_PATH, params=params)
-
-    assert response.status_code == 303
-    assert response.headers["location"] == "/admin/"
-    assert (await shop.http.get("/api/admin/auth/me")).status_code == 200
-
-
-async def test_1_4_login_url_matches_bot_button(shop: Shop) -> None:
-    """Кнопка бота ведёт на тот же адрес, что принимает вход."""
-    del shop
-    assert urlsplit(ADMIN_LOGIN_URL).path == ADMIN_LOGIN_URL_PATH
-
-
-async def test_1_4_login_url_with_wrong_signature_is_rejected(
-    shop: Shop, owner: TeamMember
-) -> None:
-    del owner
-    params = {**_login_url_params(OWNER_TG, datetime.now(UTC)), "id": str(STRANGER_TG)}
-
-    response = await shop.http.get(ADMIN_LOGIN_URL_PATH, params=params)
-
-    assert response.headers["location"] == "/admin/login?error=invalid"
-    assert SESSION_COOKIE not in shop.http.cookies
-
-
-async def test_1_5_login_url_is_single_use(shop: Shop, owner: TeamMember) -> None:
-    """1.5: те же данные Telegram второй раз не открывают сессию."""
-    del owner
-    params = _login_url_params(OWNER_TG, datetime.now(UTC))
-    await shop.http.get(ADMIN_LOGIN_URL_PATH, params=params)
-    shop.http.cookies.clear()
-
-    response = await shop.http.get(ADMIN_LOGIN_URL_PATH, params=params)
-
-    assert response.headers["location"] == "/admin/login?error=expired"
-    assert SESSION_COOKIE not in shop.http.cookies
-
-
-async def test_1_5_login_url_expires(shop: Shop, owner: TeamMember) -> None:
-    """1.5: данные старше срока подтверждения входа (5 минут) не принимаются."""
-    del owner
-    params = _login_url_params(OWNER_TG, datetime.now(UTC) - timedelta(minutes=6))
-
-    response = await shop.http.get(ADMIN_LOGIN_URL_PATH, params=params)
-
-    assert response.headers["location"] == "/admin/login?error=expired"
 
 
 async def test_1_5_confirmation_single_use(shop: Shop, owner: TeamMember) -> None:
@@ -277,15 +214,6 @@ async def test_1_6_non_team_rejected(shop: Shop, state: ShopState) -> None:
         )
     )
     assert [e.details["telegram_id"] for e in rejected] == [STRANGER_TG]
-
-
-async def test_1_6_non_team_login_url_rejected(shop: Shop) -> None:
-    params = _login_url_params(STRANGER_TG, datetime.now(UTC))
-
-    response = await shop.http.get(ADMIN_LOGIN_URL_PATH, params=params)
-
-    assert response.headers["location"] == "/admin/login?error=rejected"
-    assert SESSION_COOKIE not in shop.http.cookies
 
 
 async def test_1_6_forwarded_confirmation_does_not_sign_in(shop: Shop, owner: TeamMember) -> None:

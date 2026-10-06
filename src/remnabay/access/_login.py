@@ -14,13 +14,11 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 
 from sqlalchemy import delete, select
-from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from remnabay import journal
 from remnabay.access._owner import TEAM_MEMBER_SUBJECT
 from remnabay.access._settings import LOGIN_TTL
-from remnabay.access._telegram_auth import TelegramAuth
 from remnabay.domain.team import LoginMethod, LoginRequest, LoginStatus, TeamMember
 from remnabay.journal import Actor, Outcome, Subject
 from remnabay.shop_settings import get_setting
@@ -51,19 +49,6 @@ async def active_member(session: AsyncSession, telegram_id: int) -> TeamMember |
         select(TeamMember).where(
             TeamMember.telegram_id == telegram_id, TeamMember.revoked_at.is_(None)
         )
-    )
-
-
-async def _reject(
-    session: AsyncSession, telegram_id: int, method: LoginMethod, reason: str
-) -> None:
-    """Вход отклонён (1.6): запись в журнал от имени системы — аккаунт не из команды."""
-    await journal.record(
-        session,
-        actor=Actor.SYSTEM,
-        action="team.login_rejected",
-        outcome=Outcome.FAILURE,
-        details={"telegram_id": telegram_id, "method": method.value, "reason": reason},
     )
 
 
@@ -136,10 +121,9 @@ async def open_bot_login(
         return LoginClosed.EXPIRED
     if request.telegram_id is not None and request.telegram_id != telegram_id:
         return LoginClosed.EXPIRED
-    if await active_member(session, telegram_id) is None:
+    if await member_for_login(session, telegram_id, LoginMethod.BOT_CONFIRM.value) is None:
         request.status = LoginStatus.REJECTED
         request.telegram_id = telegram_id
-        await _reject(session, telegram_id, LoginMethod.BOT_CONFIRM, "not_in_team")
         return LoginClosed.REJECTED
     request.telegram_id = telegram_id
     return LoginOpened(request_id=request.id, code=request.code or "")
@@ -195,33 +179,19 @@ async def poll_bot_login(session: AsyncSession, poll_key: str, *, now: datetime)
     return PollResult(PollStatus.SIGNED_IN, member)
 
 
-async def login_with_telegram(
-    session: AsyncSession, auth: TelegramAuth, *, now: datetime
-) -> TeamMember | LoginClosed:
-    """Вход по кнопке `login_url` из ответа на /admin. Данные с проверенной подписью
-    принимаются один раз и пока свежи — не старше срока подтверждения входа (1.5)."""
-    ttl = await get_setting(session, LOGIN_TTL)
-    if not now - ttl <= auth.auth_date <= now + timedelta(minutes=1):
-        return LoginClosed.EXPIRED
-    first_use = await session.scalar(
-        insert(LoginRequest)
-        .values(
-            method=LoginMethod.LOGIN_URL,
-            status=LoginStatus.USED,
-            token_hash=_hash(auth.signature),
-            telegram_id=auth.telegram_id,
-            expires_at=auth.auth_date + ttl,
-            used_at=now,
-        )
-        .on_conflict_do_nothing(index_elements=[LoginRequest.token_hash])
-        .returning(LoginRequest.id)
-    )
-    if first_use is None:
-        return LoginClosed.EXPIRED
-    member = await active_member(session, auth.telegram_id)
+async def member_for_login(
+    session: AsyncSession, telegram_id: int, method: str
+) -> TeamMember | None:
+    """Участник команды с этим Telegram ID; чужой аккаунт — отказ с записью в журнал (1.6)."""
+    member = await active_member(session, telegram_id)
     if member is None:
-        await _reject(session, auth.telegram_id, LoginMethod.LOGIN_URL, "not_in_team")
-        return LoginClosed.REJECTED
+        await journal.record(
+            session,
+            actor=Actor.SYSTEM,
+            action="team.login_rejected",
+            outcome=Outcome.FAILURE,
+            details={"telegram_id": telegram_id, "method": method, "reason": "not_in_team"},
+        )
     return member
 
 

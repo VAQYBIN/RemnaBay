@@ -12,13 +12,14 @@ from aiogram.types import CallbackQuery, Chat, Message, Update, User
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from remnabay.access import create_session
+from remnabay.access import VIA_BOT, create_session
 from remnabay.config import load_settings
-from remnabay.domain.team import LoginMethod, TeamMember
+from remnabay.domain.team import TeamMember
 from remnabay.web.admin import SESSION_COOKIE
 from remnabay.web.app import create_app
 from remnabay.web.deps import get_session
 from tests.bot_support import FakeTelegram, same_session
+from tests.oidc_support import FakeTelegramOidc
 from tests.panel_support import FakePanel
 
 # Запросы админки идут со страницы магазина (проверка Origin, 0051)
@@ -35,6 +36,7 @@ class Shop:
     telegram: FakeTelegram
     session: AsyncSession
     panel: FakePanel
+    oidc: FakeTelegramOidc
     updates: count[int] = field(default_factory=lambda: count(1))
 
     @property
@@ -74,9 +76,7 @@ class Shop:
 
     async def sign_in(self, member: TeamMember) -> None:
         """Сессия участника без прохождения входа — для тестов других разделов."""
-        token, _ = await create_session(
-            self.session, member, LoginMethod.BOT_CONFIRM, now=datetime.now(UTC)
-        )
+        token, _ = await create_session(self.session, member, VIA_BOT, now=datetime.now(UTC))
         self.http.cookies.set(SESSION_COOKIE, token)
 
 
@@ -89,6 +89,8 @@ async def running_shop(session: AsyncSession) -> AsyncGenerator[Shop]:
     app.state.dispatcher.workflow_data["sessions"] = same_session(session)
     panel = FakePanel()
     app.state.panel = panel.client()
+    oidc = FakeTelegramOidc()
+    app.state.oidc = oidc.client()
 
     async def test_session() -> AsyncGenerator[AsyncSession]:
         yield session
@@ -98,4 +100,4 @@ async def running_shop(session: AsyncSession) -> AsyncGenerator[Shop]:
     async with httpx2.AsyncClient(
         transport=transport, base_url=SHOP_ORIGIN, headers={"Origin": SHOP_ORIGIN}
     ) as http:
-        yield Shop(app=app, http=http, telegram=telegram, session=session, panel=panel)
+        yield Shop(app=app, http=http, telegram=telegram, session=session, panel=panel, oidc=oidc)

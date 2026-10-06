@@ -78,7 +78,7 @@ class LoginMethod(StrEnum):
 
     # Кнопка на странице входа → подтверждение в боте
     BOT_CONFIRM = "bot_confirm"
-    # Кнопка login_url, которую бот присылает на /admin
+    # Кнопка login_url на /admin — до решения 0053; новых таких запросов нет
     LOGIN_URL = "login_url"
 
 

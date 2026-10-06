@@ -10,38 +10,44 @@ from remnabay.access._login import (
     active_member,
     confirm_bot_login,
     is_login_link,
-    login_with_telegram,
+    member_for_login,
     open_bot_login,
     poll_bot_login,
     start_bot_login,
 )
+from remnabay.access._oidc import OidcAttempt, OidcError, TelegramOidc
 from remnabay.access._owner import TEAM_MEMBER_SUBJECT, ensure_owner
 from remnabay.access._sessions import create_session, end_session, member_for_session
 from remnabay.access._settings import LOGIN_TTL, SESSION_TTL
-from remnabay.access._telegram_auth import TelegramAuth, sign_login_url, verify_login_url
+
+# Чем вошёл участник — в записи журнала о входе
+VIA_OIDC = "oidc"
+VIA_BOT = "bot_confirm"
 
 __all__ = [
     "LOGIN_TTL",
     "SESSION_TTL",
     "START_PREFIX",
     "TEAM_MEMBER_SUBJECT",
+    "VIA_BOT",
+    "VIA_OIDC",
     "LoginClosed",
     "LoginOpened",
     "NewLogin",
+    "OidcAttempt",
+    "OidcError",
     "PollResult",
     "PollStatus",
-    "TelegramAuth",
+    "TelegramOidc",
     "active_member",
     "confirm_bot_login",
     "create_session",
     "end_session",
     "ensure_owner",
     "is_login_link",
-    "login_with_telegram",
+    "member_for_login",
     "member_for_session",
     "open_bot_login",
     "poll_bot_login",
-    "sign_login_url",
     "start_bot_login",
-    "verify_login_url",
 ]

@@ -70,6 +70,8 @@ class Settings(BaseSettings):
     )
 
     bot_token: SecretStr
+    # Вход в админку через Telegram OpenID Connect (0053): Client Secret из @BotFather
+    telegram_login_client_secret: SecretStr
     panel_url: HttpUrl
     panel_token: SecretStr
     database_url: PsycopgDsn
@@ -79,6 +81,11 @@ class Settings(BaseSettings):
     # Режим разработки (0049, 0051): документация API, бот опросом, cookie без HTTPS.
     # Оператор его не задаёт
     dev_mode: bool = False
+
+    @property
+    def bot_id(self) -> str:
+        """ID бота — часть токена до двоеточия; он же Client ID входа через Telegram."""
+        return self.bot_token.get_secret_value().split(":", 1)[0]
 
     def public_link(self, path: str) -> str:
         """Адрес страницы магазина по публичному адресу: `https://shop.example.com/<path>`."""

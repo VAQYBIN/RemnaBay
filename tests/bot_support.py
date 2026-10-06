@@ -27,7 +27,7 @@ from tests.conftest import REQUIRED_ENV
 BOT_TOKEN = REQUIRED_ENV["BOT_TOKEN"]
 BOT_USERNAME = "shop_test_bot"
 BOT_NAME = "Тестовый магазин"
-ADMIN_LOGIN_URL = "https://shop.example.com/api/admin/auth/telegram"
+ADMIN_LOGIN_URL = "https://shop.example.com/admin/login"
 _ids = count(1)
 
 

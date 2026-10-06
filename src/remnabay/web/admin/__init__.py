@@ -5,12 +5,16 @@ from typing import Any
 from fastapi import APIRouter, Depends, FastAPI
 
 from remnabay.web.admin import _about, _auth, _brand, _shop, _stats
-from remnabay.web.admin._auth import ADMIN_PATH, LOGIN_COOKIE, TELEGRAM_LOGIN_PATH
+from remnabay.web.admin._auth import (
+    ADMIN_PATH,
+    LOGIN_COOKIE,
+    LOGIN_PAGE_PATH,
+    OIDC_CALLBACK_URL,
+    OIDC_COOKIE,
+)
 from remnabay.web.admin._deps import SESSION_COOKIE, same_origin
 
 API_PREFIX = "/api/admin"
-# Сюда кнопка login_url передаёт подписанные данные Telegram (1.4)
-ADMIN_LOGIN_URL_PATH = API_PREFIX + _auth.router.prefix + TELEGRAM_LOGIN_PATH
 
 
 def build_router() -> APIRouter:
@@ -32,10 +36,12 @@ def openapi_schema() -> dict[str, Any]:
 
 
 __all__ = [
-    "ADMIN_LOGIN_URL_PATH",
     "ADMIN_PATH",
     "API_PREFIX",
     "LOGIN_COOKIE",
+    "LOGIN_PAGE_PATH",
+    "OIDC_CALLBACK_URL",
+    "OIDC_COOKIE",
     "SESSION_COOKIE",
     "build_router",
     "openapi_schema",

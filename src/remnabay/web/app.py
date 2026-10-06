@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from remnabay.access import ensure_owner
+from remnabay.access import TelegramOidc, ensure_owner
 from remnabay.bot import (
     TELEGRAM_WEBHOOK_PATH,
     Polling,
@@ -25,7 +25,7 @@ from remnabay.db import create_engine, create_session_factory
 from remnabay.panel import PanelClient
 from remnabay.shop_settings import TELEGRAM_WEBHOOK_SECRET, generated_secret
 from remnabay.web import admin, admin_static, brand_files, panel_webhook, telegram_webhook
-from remnabay.web.admin import ADMIN_LOGIN_URL_PATH
+from remnabay.web.admin import LOGIN_PAGE_PATH
 
 HEALTH_PATH = "/health"
 # Меньше интервала проверки здоровья в Docker, чтобы ответ успевал прийти
@@ -54,11 +54,11 @@ def create_app(settings: Settings, *, startup: bool = False) -> FastAPI:
     sessions = create_session_factory(engine)
     box = SecretBox(settings.encryption_key.get_secret_value())
     bot = create_bot(settings.bot_token.get_secret_value())
+    # Вход в админку через Telegram OpenID Connect (0053)
+    oidc = TelegramOidc(settings.bot_id, settings.telegram_login_client_secret.get_secret_value())
     # Чек-лист проверяет панель из веба (1.8, 1.10)
     panel = PanelClient(str(settings.panel_url), settings.panel_token.get_secret_value())
-    dispatcher = create_dispatcher(
-        sessions, admin_login_url=settings.public_link(ADMIN_LOGIN_URL_PATH)
-    )
+    dispatcher = create_dispatcher(sessions, admin_login_url=settings.public_link(LOGIN_PAGE_PATH))
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
@@ -79,6 +79,7 @@ def create_app(settings: Settings, *, startup: bool = False) -> FastAPI:
             await polling.stop()
         await bot.session.close()
         await panel.aclose()
+        await oidc.aclose()
         await engine.dispose()
 
     # Документация API — только при разработке (0049)
@@ -96,6 +97,7 @@ def create_app(settings: Settings, *, startup: bool = False) -> FastAPI:
     app.state.bot = bot
     app.state.dispatcher = dispatcher
     app.state.panel = panel
+    app.state.oidc = oidc
     app.include_router(panel_webhook.router)
     app.include_router(telegram_webhook.router)
     app.include_router(admin.build_router())

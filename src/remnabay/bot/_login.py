@@ -2,8 +2,8 @@
 
 - Ссылка `t.me/<бот>?start=login_…` со страницы входа: участнику команды бот
   присылает подтверждение с кодом; остальным отвечает как на непонятное сообщение.
-- Скрытая команда `/admin`: участнику — кнопка `login_url`, остальным — как на
-  непонятное сообщение.
+- Скрытая команда `/admin`: участнику — кнопка со ссылкой на страницу входа
+  (решение 0053), остальным — как на непонятное сообщение.
 """
 
 from datetime import UTC, datetime
@@ -15,7 +15,6 @@ from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    LoginUrl,
     Message,
 )
 
@@ -29,7 +28,7 @@ from remnabay.access import (
 from remnabay.bot._context import BotContext
 
 ADMIN_COMMAND = "admin"
-# Адрес, куда кнопка login_url передаёт подписанные данные Telegram
+# Адрес страницы входа в админку — для кнопки на /admin
 ADMIN_LOGIN_URL_KEY = "admin_login_url"
 
 
@@ -77,9 +76,7 @@ async def admin_command(message: Message, ctx: BotContext, admin_login_url: str)
     if ctx.member is None:
         await message.answer(ctx.render("fallback.unknown"))
         return
-    button = InlineKeyboardButton(
-        text=ctx.render("btn.open_admin"), login_url=LoginUrl(url=admin_login_url)
-    )
+    button = InlineKeyboardButton(text=ctx.render("btn.open_admin"), url=admin_login_url)
     await message.answer(
         ctx.render("team.admin_link", brand_name=await ctx.brand_name()),
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[button]]),

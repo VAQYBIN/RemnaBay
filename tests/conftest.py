@@ -15,6 +15,7 @@ from tests import queue_support
 
 REQUIRED_ENV = {
     "BOT_TOKEN": "123456:test-bot-token",
+    "TELEGRAM_LOGIN_CLIENT_SECRET": "test-oidc-client-secret",
     "PANEL_URL": "https://panel.example.com",
     "PANEL_TOKEN": "test-panel-token",
     "DATABASE_URL": os.environ.get(

@@ -14,6 +14,7 @@
 | Параметр | Назначение | Обязателен |
 |---|---|---|
 | Токен бота | Доступ к Telegram Bot API | да |
+| Client Secret входа через Telegram | Вход в админку через Telegram OpenID Connect; выдаёт @BotFather → Login Widget ([решение 0053](decisions/0053-telegram-oidc-login.md)) | да |
 | Адрес API панели | Подключение к Remnawave | да |
 | Токен API панели | Подключение к Remnawave | да |
 | Подключение к базе данных | Хранение данных магазина | да |

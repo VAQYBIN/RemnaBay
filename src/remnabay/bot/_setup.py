@@ -27,7 +27,7 @@ def create_bot(token: str, *, session: BaseSession | None = None) -> Bot:
 def create_dispatcher(sessions: SessionFactory, *, admin_login_url: str) -> Dispatcher:
     """Диспетчер со всеми роутерами; непонятное сообщение — последним.
 
-    `admin_login_url` — адрес входа в админку для кнопки `login_url` на /admin.
+    `admin_login_url` — страница входа в админку для кнопки на /admin.
     """
     dispatcher = Dispatcher()
     dispatcher.workflow_data[SESSIONS_KEY] = sessions

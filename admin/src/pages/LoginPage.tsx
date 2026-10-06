@@ -12,17 +12,20 @@ import { useMe } from '@/lib/session'
 
 const POLL_INTERVAL_MS = 2000
 
-type Problem = 'rejected' | 'expired' | 'invalid' | 'failed'
+type Problem = 'rejected' | 'expired' | 'failed' | 'start_failed'
 
 const PROBLEMS: Record<Problem, string> = {
   rejected: 'Этот аккаунт Telegram не входит в команду магазина.',
   expired: 'Подтверждение устарело. Начните вход заново.',
-  invalid: 'Telegram передал неверные данные входа. Попробуйте ещё раз.',
-  failed: 'Не удалось начать вход. Попробуйте ещё раз.',
+  failed: 'Telegram не подтвердил вход. Попробуйте ещё раз или войдите через бот.',
+  start_failed: 'Не удалось начать вход. Попробуйте ещё раз.',
 }
 
+// Вход через Telegram OpenID Connect: сервер уводит на страницу Telegram (1.4, 0053)
+const OIDC_START = '/api/admin/auth/telegram/start'
+
 function problemFromQuery(value: string | null): Problem | null {
-  return value === 'rejected' || value === 'expired' || value === 'invalid' ? value : null
+  return value === 'rejected' || value === 'expired' || value === 'failed' ? value : null
 }
 
 /** Ожидание подтверждения в боте: код, ссылка на бот, опрос (1.4, 1.5). */
@@ -81,6 +84,7 @@ export function LoginPage() {
   const start = $api.useMutation('post', '/api/admin/auth/login-requests')
   const [problem, setProblem] = useState<Problem | null>(problemFromQuery(params.get('error')))
   const [request, setRequest] = useState<Schemas['LoginRequestOut'] | null>(null)
+  const [viaBot, setViaBot] = useState(false)
 
   const begin = () => {
     setProblem(null)
@@ -91,7 +95,7 @@ export function LoginPage() {
           setRequest(result)
           window.open(result.bot_link, '_blank', 'noreferrer')
         },
-        onError: () => setProblem('failed'),
+        onError: () => setProblem('start_failed'),
       },
     )
   }
@@ -135,15 +139,41 @@ export function LoginPage() {
 
         {request ? (
           <Waiting request={request} onDone={finish} />
+        ) : viaBot ? (
+          <div className="flex flex-col gap-3">
+            <Button size="lg" className="h-11 w-full" onClick={begin} disabled={start.isPending}>
+              <Send />
+              Получить подтверждение в боте
+            </Button>
+            <Button variant="ghost" onClick={() => setViaBot(false)}>
+              Назад
+            </Button>
+          </div>
         ) : (
-          <Button size="lg" className="h-11 w-full" onClick={begin} disabled={start.isPending}>
-            <Send />
-            Войти через Telegram
-          </Button>
+          <div className="flex flex-col items-center gap-3">
+            <Button asChild size="lg" className="h-11 w-full">
+              <a href={OIDC_START}>
+                <Send />
+                Войти через Telegram
+              </a>
+            </Button>
+            <button
+              type="button"
+              onClick={() => {
+                setProblem(null)
+                setViaBot(true)
+              }}
+              className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+            >
+              Войти через бот
+            </button>
+          </div>
         )}
 
         <p className="text-center text-xs text-muted-foreground">
-          Вход и по команде /admin в боте магазина.
+          {viaBot
+            ? 'Бот пришлёт подтверждение с кодом — подтвердите, если код тот же.'
+            : 'Вход подтверждается в приложении Telegram. Ссылку на эту страницу бот присылает и по команде /admin.'}
         </p>
       </div>
     </main>
