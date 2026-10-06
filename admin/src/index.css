@@ -210,3 +210,24 @@
   border: 2px solid #fff;
   box-shadow: 0 0 0 1px rgb(0 0 0 / 0.35), var(--rb-shadow);
 }
+
+/* Тонкая полоса прокрутки в цветах рамы — без системных стрелок и белой дорожки */
+.rb-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--rb-border) transparent;
+}
+.rb-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.rb-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.rb-scroll::-webkit-scrollbar-thumb {
+  background-color: var(--rb-border);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.rb-scroll::-webkit-scrollbar-button {
+  display: none;
+}

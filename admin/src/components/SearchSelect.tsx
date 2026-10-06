@@ -47,7 +47,7 @@ export function SearchSelect({
       <PopoverContent className="glass-float w-(--radix-popover-trigger-width) min-w-64 p-0" align="start">
         <Command className="bg-transparent">
           <CommandInput placeholder={searchPlaceholder} />
-          <CommandList className="max-h-72">
+          <CommandList className="rb-scroll max-h-72 px-1 pb-1">
             <CommandEmpty>{emptyText}</CommandEmpty>
             {options.map((option) => (
               <CommandItem
@@ -57,8 +57,9 @@ export function SearchSelect({
                   onChange(option)
                   setOpen(false)
                 }}
+                className={cn(option === value && 'font-medium text-brand-text')}
               >
-                <Check className={cn('size-4', option === value ? 'opacity-100' : 'opacity-0')} />
+                <Check className={cn('size-4 text-brand-text', option === value ? 'opacity-100' : 'opacity-0')} />
                 {option}
               </CommandItem>
             ))}
