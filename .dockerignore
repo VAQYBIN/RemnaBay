@@ -24,3 +24,4 @@ third-party-licenses
 *.log
 .cache
 scripts
+spikes
