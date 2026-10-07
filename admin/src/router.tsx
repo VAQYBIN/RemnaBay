@@ -5,6 +5,8 @@ import { AboutPage } from '@/pages/AboutPage'
 import { ExpiringPage } from '@/pages/ExpiringPage'
 import { HomePage } from '@/pages/HomePage'
 import { LoginPage } from '@/pages/LoginPage'
+import { PaymentCardPage } from '@/pages/payments/PaymentCardPage'
+import { PaymentsPage } from '@/pages/payments/PaymentsPage'
 import { BrandSettingsPage } from '@/pages/settings/BrandSettingsPage'
 import { LoginSettingsPage } from '@/pages/settings/LoginSettingsPage'
 import { PanelSettingsPage } from '@/pages/settings/PanelSettingsPage'
@@ -23,6 +25,8 @@ export const router = createBrowserRouter(
       children: [
         { index: true, Component: HomePage },
         { path: 'expiring', Component: ExpiringPage },
+        { path: 'payments', Component: PaymentsPage },
+        { path: 'payments/:paymentId', Component: PaymentCardPage },
         { path: 'tariffs', Component: TariffsPage },
         {
           path: 'settings',

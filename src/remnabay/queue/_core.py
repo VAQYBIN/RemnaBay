@@ -485,3 +485,31 @@ async def waiting_panel_count(session: AsyncSession) -> int:
         select(func.count()).where(QueueTask.status == TaskStatus.WAITING_PANEL)
     )
     return count or 0
+
+
+@dataclass(frozen=True)
+class WaitingTask:
+    """Задача «ждёт панель» — видна в «Требуют внимания» отдельно и продолжится сама (4.30)."""
+
+    task_id: int
+    name: str
+    args: dict[str, JsonValue]
+    key: str | None
+    created_at: datetime
+
+
+async def waiting_panel_tasks(session: AsyncSession) -> list[WaitingTask]:
+    """Задачи, которые ждут восстановления панели, от старых к новым (4.30)."""
+    result = await session.scalars(
+        select(QueueTask).where(QueueTask.status == TaskStatus.WAITING_PANEL).order_by(QueueTask.id)
+    )
+    return [
+        WaitingTask(
+            task_id=task.id,
+            name=task.name,
+            args=task.args,
+            key=task.key,
+            created_at=task.created_at,
+        )
+        for task in result
+    ]

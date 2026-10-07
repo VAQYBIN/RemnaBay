@@ -22,6 +22,7 @@ from remnabay.queue._core import (
     TaskNotCancellableError,
     TaskNotFailedError,
     TaskRegistry,
+    WaitingTask,
     attempts_of,
     cancel_failed,
     failed_tasks,
@@ -34,6 +35,7 @@ from remnabay.queue._core import (
     unfinished_keys,
     waiting_behind,
     waiting_panel_count,
+    waiting_panel_tasks,
 )
 from remnabay.queue._models import AttemptResult, QueueAttempt, TaskStatus
 from remnabay.queue._worker import (
@@ -65,6 +67,7 @@ __all__ = [
     "TaskRegistry",
     "TaskStatus",
     "TaskTimeoutError",
+    "WaitingTask",
     "Worker",
     "WorkerConfig",
     "attempts_of",
@@ -80,4 +83,5 @@ __all__ = [
     "unfinished_keys",
     "waiting_behind",
     "waiting_panel_count",
+    "waiting_panel_tasks",
 ]
