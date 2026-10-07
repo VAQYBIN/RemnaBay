@@ -74,7 +74,8 @@ class Tariff(Base):
         CheckConstraint("duration_days > 0", name="duration_positive"),
         CheckConstraint("traffic_limit_bytes > 0", name="traffic_limit_positive"),
         CheckConstraint("price >= 0", name="price_not_negative"),
-        CheckConstraint("device_limit >= 0", name="device_limit_not_negative"),
+        # У тарифа всегда есть лимит устройств (0054)
+        CheckConstraint("device_limit >= 1", name="device_limit_positive"),
         CheckConstraint("successor_id <> id", name="successor_not_self"),
         CheckConstraint("name <> ''", name="name_not_empty"),
     )

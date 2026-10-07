@@ -65,6 +65,8 @@ class FakePanel:
     version: str = "3.4.4"
     # Лимит устройств в панели (HWID): None — не настроен
     hwid_enabled: bool | None = True
+    # Внутренние сквады панели: uuid → название
+    squads: dict[str, str] = field(default_factory=dict[str, str])
 
     def handle(self, request: httpx2.Request) -> httpx2.Response:
         self.requests.append(f"{request.method} {request.url.path}")
@@ -77,6 +79,10 @@ class FakePanel:
         if request.url.path == "/api/subscription-settings":
             hwid = None if self.hwid_enabled is None else {"enabled": self.hwid_enabled}
             return httpx2.Response(200, json={"response": {"hwidSettings": hwid}})
+        if request.url.path == "/api/internal-squads":
+            squads = [{"uuid": uuid, "name": name} for uuid, name in self.squads.items()]
+            body = {"total": len(squads), "internalSquads": squads}
+            return httpx2.Response(200, json={"response": body})
         match = _USER_PATH.match(request.url.path)
         if request.method == "GET" and match:
             user = self.users.get(int(match.group(1)))
