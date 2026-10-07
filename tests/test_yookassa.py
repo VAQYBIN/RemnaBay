@@ -248,7 +248,7 @@ async def shop(
 ) -> AsyncGenerator[Shop]:
     del valid_env
     async with running_shop(db_session) as shop:
-        shop.app.state.providers = providers
+        shop.use_providers(providers)
         yield shop
 
 

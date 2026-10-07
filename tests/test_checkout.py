@@ -425,7 +425,7 @@ async def test_3_12_declined_payment_tells_client_and_offers_retry(
     [message] = await _messages(db_session)
     assert message.text_key == "event.payment_failed"
     assert [button.text_key for button in message.buttons] == ["btn.try_again", "btn.main_menu"]
-    assert message.buttons[0].callback_data == f"pay:retry:{payment.id}"
+    assert message.buttons[0].callback_data == f"payretry:{payment.id}"
     assert "payments.apply" not in await _tasks(db_session)
 
 
@@ -540,7 +540,7 @@ async def shop(
     valid_env: dict[str, str], db_session: AsyncSession, providers: Providers
 ) -> AsyncGenerator[Shop]:
     async with running_shop(db_session) as shop:
-        shop.app.state.providers = providers
+        shop.use_providers(providers)
         yield shop
 
 

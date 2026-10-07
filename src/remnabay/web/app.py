@@ -70,7 +70,9 @@ def create_app(settings: Settings, *, startup: bool = False) -> FastAPI:
     # Платёжные провайдеры с ключами оператора из админки (3.27)
     yookassa = yookassa_http()
     providers = Providers(box, [YooKassaKind(yookassa)])
-    dispatcher = create_dispatcher(sessions, admin_login_url=settings.public_link(LOGIN_PAGE_PATH))
+    dispatcher = create_dispatcher(
+        sessions, admin_login_url=settings.public_link(LOGIN_PAGE_PATH), providers=providers
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:

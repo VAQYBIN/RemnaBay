@@ -50,7 +50,7 @@ async def owner(shop: Shop) -> TeamMember:
 @pytest.fixture
 async def payments_ready(shop: Shop) -> None:
     """Способ оплаты подключён: ключи тестового провайдера сохранены."""
-    shop.app.state.providers = fake_providers()
+    shop.use_providers(fake_providers())
     await connect_fake(shop.session)
 
 

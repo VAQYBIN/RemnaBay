@@ -287,7 +287,7 @@ async def decline(session: AsyncSession, payment: Payment, actor: Actor) -> None
 def retry_callback(payment_id: int) -> str:
     """Данные кнопки «Попробовать снова»: бот снова показывает подтверждение той же
     операции (03-screens, С5)."""
-    return f"pay:retry:{payment_id}"
+    return f"payretry:{payment_id}"
 
 
 async def provider_reported(

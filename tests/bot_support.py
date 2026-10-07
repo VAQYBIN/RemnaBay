@@ -15,6 +15,7 @@ from aiogram.methods import (
     EditMessageText,
     GetMe,
     SendMessage,
+    SendRichMessage,
     SetWebhook,
     TelegramMethod,
 )
@@ -22,6 +23,8 @@ from aiogram.types import CallbackQuery, Chat, Message, Update, User
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from remnabay.bot import SessionFactory, create_bot, create_dispatcher
+from remnabay.crypto import SecretBox
+from remnabay.payments import Providers
 from tests.conftest import REQUIRED_ENV
 
 BOT_TOKEN = REQUIRED_ENV["BOT_TOKEN"]
@@ -60,6 +63,12 @@ class FakeTelegram(BaseSession):
                     chat=Chat(id=chat_id, type="private"),
                     text=method.text,
                 )
+            case SendRichMessage():
+                return Message(
+                    message_id=next(_ids),
+                    date=datetime.now(UTC),
+                    chat=Chat(id=cast(int, method.chat_id), type="private"),
+                )
             case AnswerCallbackQuery() | SetWebhook() | DeleteWebhook():
                 return True
             case _:
@@ -81,6 +90,17 @@ class FakeTelegram(BaseSession):
 
     def texts(self) -> list[str]:
         return [r.text for r in self.sent()]
+
+    def screens(self) -> list[SendMessage | SendRichMessage | EditMessageText]:
+        """Всё, что бот показал клиенту: новые сообщения и правки живого меню."""
+        return [
+            r
+            for r in self.requests
+            if isinstance(r, SendMessage | SendRichMessage | EditMessageText)
+        ]
+
+    def last(self) -> SendMessage | SendRichMessage | EditMessageText:
+        return self.screens()[-1]
 
 
 @dataclass
@@ -145,5 +165,9 @@ async def bot_harness(session: AsyncSession) -> AsyncGenerator[BotHarness]:
     """Диспетчер, который работает в той же сессии, что и проверки теста."""
     telegram = FakeTelegram()
     bot = create_bot(BOT_TOKEN, session=telegram)
-    dispatcher = create_dispatcher(same_session(session), admin_login_url=ADMIN_LOGIN_URL)
+    dispatcher = create_dispatcher(
+        same_session(session),
+        admin_login_url=ADMIN_LOGIN_URL,
+        providers=Providers(SecretBox(REQUIRED_ENV["ENCRYPTION_KEY"]), []),
+    )
     yield BotHarness(bot=bot, dispatcher=dispatcher, telegram=telegram)

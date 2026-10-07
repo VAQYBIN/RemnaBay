@@ -39,7 +39,7 @@ async def shop(
 ) -> AsyncGenerator[Shop]:
     del valid_env
     async with running_shop(db_session) as shop, yookassa.http() as http:
-        shop.app.state.providers = Providers(shop_box(), [YooKassaKind(http)])
+        shop.use_providers(Providers(shop_box(), [YooKassaKind(http)]))
         yield shop
 
 
