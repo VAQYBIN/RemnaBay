@@ -233,8 +233,8 @@
 "fallback.unknown" = "Не совсем понял. Откройте главное меню — там всё самое нужное."
 
 # Единицы с множественным числом: подставляются в {days_text}, {period},
-# {trial_period}, {minutes_text}. ПРЕДЛОЖЕНИЕ, НЕ УТВЕРЖДЕНО: в 03-bot-texts.md
-# этих ключей нет — вопрос в docs/open-questions.md. Формы — по правилам языка
+# {trial_period}, {minutes_text} (03-bot-texts.md, «Единицы», решение 0056).
+# Формы — по правилам языка
 # (CLDR): для русского one — 1, 21; few — 2–4, 22–24; many — 0, 5–20, 25.
 [plural."unit.days"]
 one = "{count} день"
