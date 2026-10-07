@@ -171,7 +171,12 @@ class ShopApplier:
         *,
         from_trial: bool = False,
     ) -> Applied:
-        """Продление подписки или покупка поверх триала: пользователь и ссылка прежние."""
+        """Продление подписки или покупка поверх триала: пользователь и ссылка прежние.
+
+        Строка подписки блокируется до обращения к панели: сверка этой подписки и
+        другое её продление ждут, пока применение не запишет отрезок, — иначе сверка
+        приняла бы продлённый срок за изменение в панели (4.17)."""
+        await session.refresh(subscription, with_for_update=True)
         panel = runtime.current().panel
         user = await panel.get_user(subscription.panel_user_id)
         if user is None:

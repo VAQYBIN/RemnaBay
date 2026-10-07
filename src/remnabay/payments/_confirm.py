@@ -18,7 +18,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from remnabay.domain.payments import Payment, PaymentState
 from remnabay.journal import Actor, JsonValue, Outcome
 from remnabay.messaging import notify_team
-from remnabay.payments._apply import enqueue_apply, journal_payment, money
+from remnabay.payments._apply import (
+    PROCESSING_NOTICE_DELAY,
+    PaymentArgs,
+    enqueue_apply,
+    journal_payment,
+    money,
+    processing_notice,
+)
 
 # Счёт ещё не оплачен с точки зрения магазина: подтверждение оплаты применяется
 AWAITING_PAYMENT = (
@@ -105,6 +112,10 @@ async def confirm_payment(
                 "paid_amount": await money(session, payment, paid=True),
                 "amount": await money(session, payment),
             },
+        )
+        # Клиент заплатил: «Оплата получена, подписка создаётся», пока решает команда (4.19)
+        await processing_notice.enqueue(
+            session, PaymentArgs(payment_id=payment.id), delay=PROCESSING_NOTICE_DELAY
         )
         return payment
     payment.state = PaymentState.PAID

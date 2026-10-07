@@ -282,3 +282,15 @@ async def test_3_30_unavailable_yookassa_creates_nothing(
     with pytest.raises(PaymentUnavailableError):
         await open_invoice(db_session, providers, _checkout(client, tariff), now=NOW)
     assert await db_session.scalar(select(Payment)) is None
+
+
+@pytest.mark.usefixtures("client")
+async def test_3_28_refund_notification_is_accepted_without_checking(
+    shop: Shop, yookassa: FakeYooKassa
+) -> None:
+    """Уведомления не об оплате (например, о возврате) магазину не нужны: «принято», без
+    запроса к ЮКассе и без записи в журнал."""
+    body = {"type": "notification", "event": "refund.succeeded", "object": {"id": "rf-1"}}
+    response = await shop.http.post(f"/webhooks/payments/{YOOKASSA}", content=json.dumps(body))
+    assert response.status_code == 200
+    assert yookassa.requests == []

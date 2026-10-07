@@ -13,6 +13,7 @@ from remnabay.payments._provider import (
     Invoice,
     InvoiceRequest,
     NotificationError,
+    NotificationIgnoredError,
     PaymentProvider,
     ProviderAuthError,
     ProviderError,
@@ -182,6 +183,9 @@ class YooKassaProvider:
             payment_id = notification.object["id"]
         except (ValueError, ValidationError, KeyError, TypeError) as error:
             raise NotificationError("Уведомление не похоже на уведомление ЮКассы") from error
+        if not notification.event.startswith("payment."):
+            # Возвраты и другие события — не об оплате счёта
+            raise NotificationIgnoredError(f"Событие {notification.event} магазину не нужно")
         if not isinstance(payment_id, str) or not payment_id:
             raise NotificationError("В уведомлении нет идентификатора платежа")
         try:

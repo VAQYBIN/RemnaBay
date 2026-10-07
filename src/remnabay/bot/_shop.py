@@ -564,6 +564,9 @@ async def pay(
     except CheckoutError:
         await _show(query, ctx, await main_menu(ctx))
         return
+    # Платёж сохранён до того, как клиент увидит ссылку на оплату: иначе сбой при показе
+    # экрана откатил бы платёж, а оплата по ссылке стала бы «неизвестной» (4.23)
+    await ctx.session.commit()
     if payment.state != PaymentState.PENDING:
         await _show(query, ctx, await main_menu(ctx))
         return

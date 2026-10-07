@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from remnabay.journal import Actor, JsonValue, Outcome, Subject, record
 from remnabay.payments import (
     NotificationError,
+    NotificationIgnoredError,
     ProviderError,
     Providers,
     provider_reported,
@@ -86,6 +87,8 @@ async def payment_webhook(
         )
     try:
         reported = await provider.verify_notification(body, request.headers)
+    except NotificationIgnoredError:
+        return Response(status_code=status.HTTP_200_OK)
     except NotificationError as error:
         return await _reject(
             session, provider_code, "not_verified", status.HTTP_400_BAD_REQUEST, str(error)

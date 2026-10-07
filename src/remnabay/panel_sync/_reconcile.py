@@ -238,7 +238,10 @@ async def reconcile(session: AsyncSession, subscription: Subscription, args: Rec
 
 @task("panel.reconcile_subscription", ReconcileArgs, needs_attention=False)
 async def reconcile_subscription(context: TaskContext, args: ReconcileArgs) -> None:
-    subscription = await context.session.get(Subscription, args.subscription_id)
+    # Блокировка: применение платежа к этой подписке и сверка не идут одновременно
+    subscription = await context.session.get(
+        Subscription, args.subscription_id, with_for_update=True
+    )
     if subscription is not None:
         await reconcile(context.session, subscription, args)
 

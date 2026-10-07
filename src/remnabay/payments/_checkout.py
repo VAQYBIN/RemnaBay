@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, TypeAdapter
 from sqlalchemy import select
@@ -109,6 +109,30 @@ async def _unpaid_same_operation(session: AsyncSession, checkout: Checkout) -> l
     return list(result)
 
 
+async def _operation_of(
+    session: AsyncSession, checkout: Checkout, *, now: datetime, lifetime: timedelta
+) -> UUID:
+    """Номер операции нового счёта. Счёт той же операции, который ещё может быть
+    оплачен или ждёт применения (в том числе истёкший, отменённый или оплаченный, но
+    не применённый), передаёт ему свой номер: если оплатят оба, вторая оплата продлит
+    подписку, созданную первой, а не создаст вторую (3.11)."""
+    window = now - lifetime - await get_setting(session, POLL_AFTER_EXPIRY)
+    query = select(Payment.operation_id).where(
+        Payment.client_id == checkout.client.id,
+        Payment.purpose == checkout.purpose,
+        Payment.applied_at.is_(None),
+        Payment.operation_id.is_not(None),
+        Payment.state.in_((*_OPEN_INVOICE, PaymentState.PAID, PaymentState.PAID_NOT_APPLIED)),
+        Payment.created_at >= window,
+    )
+    if checkout.subscription is None:
+        query = query.where(Payment.subscription_id.is_(None))
+    else:
+        query = query.where(Payment.subscription_id == checkout.subscription.id)
+    found = await session.scalar(query.order_by(Payment.id.desc()).limit(1))
+    return found or uuid4()
+
+
 async def open_invoice(
     session: AsyncSession, providers: Providers, checkout: Checkout, *, now: datetime
 ) -> Payment:
@@ -144,6 +168,7 @@ async def open_invoice(
 
     replaced = await _unpaid_same_operation(session, checkout)
     lifetime = await get_setting(session, INVOICE_LIFETIME)
+    operation_id = await _operation_of(session, checkout, now=now, lifetime=lifetime)
     snapshot = TariffSnapshot.of(checkout.tariff)
     payment = Payment(
         client_id=checkout.client.id,
@@ -155,7 +180,7 @@ async def open_invoice(
         amount=snapshot.price,
         currency=await get_setting(session, SHOP_CURRENCY),
         idempotency_key=checkout.token,
-        operation_id=replaced[0].operation_id if replaced else uuid4(),
+        operation_id=operation_id,
         expires_at=now + lifetime,
     )
     try:

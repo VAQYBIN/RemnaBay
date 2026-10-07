@@ -508,8 +508,10 @@ async def test_3_39_amount_mismatch_is_not_applied_and_team_notified(
     assert payment.amount_mismatch
     assert (payment.paid_amount, payment.paid_currency) == (amount, currency)
     assert "payments.apply" not in await _tasks(db_session)
+    # Клиент заплатил — «Оплата получена, подписка создаётся» (4.19)
+    assert "payments.processing_notice" in await _tasks(db_session)
     assert "payment.amount_mismatch" in await _actions(db_session, payment)
-    [notice] = await _messages(db_session)
+    [notice] = [m for m in await _messages(db_session) if m.text_key.startswith("team.")]
     assert notice.text_key == "team.payment_amount_mismatch"
     assert notice.variables["amount"] == "199,00\xa0₽"
 
@@ -586,3 +588,35 @@ async def test_3_28_unknown_provider_webhook_is_not_found(shop: Shop) -> None:
     """Адрес вебхука есть только у провайдеров, которые знает магазин."""
     response = await shop.http.post("/webhooks/payments/nobody", content=b"{}")
     assert response.status_code == 404
+
+
+@pytest.mark.parametrize("closed", ["cancelled", "expired"])
+async def test_3_11_new_invoice_after_closed_one_keeps_operation(
+    db_session: AsyncSession,
+    providers: Providers,
+    client: Client,
+    tariff: Tariff,
+    closed: str,
+) -> None:
+    """3.11: прежний счёт отменён клиентом или истёк, но ещё может быть оплачен — новый
+    счёт той же покупки получает тот же номер операции: если оплатят оба, вторая оплата
+    продлит подписку, а не создаст вторую."""
+    old = await open_invoice(db_session, providers, _purchase(client, tariff, "s-1"), now=NOW)
+    if closed == "cancelled":
+        await cancel_by_client(db_session, providers, old.id, client_id=client.id)
+    else:
+        await _run(db_session, providers, expire_invoice, old)
+    new = await open_invoice(db_session, providers, _purchase(client, tariff, "s-2"), now=NOW)
+    assert new.operation_id == old.operation_id
+
+
+async def test_3_11_paid_but_not_applied_purchase_shares_operation(
+    db_session: AsyncSession, providers: Providers, client: Client, tariff: Tariff
+) -> None:
+    """3.11, 4.11: покупка оплачена, но ждёт панель — новая покупка той же операции не
+    создаст вторую подписку."""
+    old = await open_invoice(db_session, providers, _purchase(client, tariff, "s-1"), now=NOW)
+    old.state = PaymentState.PAID
+    new = await open_invoice(db_session, providers, _purchase(client, tariff, "s-2"), now=NOW)
+    assert new.operation_id == old.operation_id
+    assert old.state == PaymentState.PAID
