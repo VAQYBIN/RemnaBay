@@ -32,6 +32,10 @@ from remnabay.messaging._tasks import (
     send_message,
 )
 
+# «Главное меню» — на каждом событии (03-screens); нажатие разбирает бот
+MAIN_MENU_CALLBACK = "menu:main"
+MAIN_MENU_BUTTON = ButtonArgs(text_key="btn.main_menu", callback_data=MAIN_MENU_CALLBACK)
+
 
 async def send_to_client(
     session: AsyncSession,
@@ -80,6 +84,8 @@ async def notify_team(
 
 
 __all__ = [
+    "MAIN_MENU_BUTTON",
+    "MAIN_MENU_CALLBACK",
     "AmbiguousDeliveryError",
     "Button",
     "ButtonArgs",

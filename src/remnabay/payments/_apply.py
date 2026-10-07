@@ -59,9 +59,11 @@ async def journal_payment(
     )
 
 
-async def money(session: AsyncSession, payment: Payment) -> str:
-    """Сумма платежа для текста: «199,00 ₽»."""
+async def money(session: AsyncSession, payment: Payment, *, paid: bool = False) -> str:
+    """Сумма платежа для текста: «199,00 ₽». `paid` — подтверждённая провайдером (3.39)."""
     language = await get_setting(session, SHOP_LANGUAGE)
+    if paid and payment.paid_amount is not None and payment.paid_currency is not None:
+        return format_currency(payment.paid_amount, payment.paid_currency, locale=language)
     return format_currency(payment.amount, payment.currency, locale=language)
 
 

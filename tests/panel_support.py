@@ -9,9 +9,11 @@ from typing import Any
 import httpx2
 
 from remnabay import runtime
+from remnabay.crypto import SecretBox
 from remnabay.messaging import DeliveryError, OutgoingMessage
 from remnabay.panel import PanelClient
-from remnabay.payments import NotReadyApplier, PaymentApplier
+from remnabay.payments import NotReadyApplier, PaymentApplier, Providers
+from tests.conftest import REQUIRED_ENV
 
 PANEL_URL = "https://panel.example.com"
 _USER_PATH = re.compile(r"^/api/users/(\d+)$")
@@ -116,13 +118,16 @@ def fake_runtime(
     sender: FakeSender | None = None,
     panel: FakePanel | None = None,
     payments: PaymentApplier | None = None,
+    providers: Providers | None = None,
 ) -> Generator[runtime.Runtime]:
-    """Окружение воркера с подставными отправителем, панелью и шагом применения платежа."""
+    """Окружение воркера с подставными отправителем, панелью, шагом применения платежа
+    и провайдерами."""
     with runtime.use(
         runtime.Runtime(
             sender=sender or FakeSender(),
             panel=(panel or FakePanel()).client(),
             payments=payments or NotReadyApplier(),
+            providers=providers or Providers(SecretBox(REQUIRED_ENV["ENCRYPTION_KEY"]), []),
         )
     ) as current:
         yield current
