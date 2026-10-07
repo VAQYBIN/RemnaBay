@@ -144,6 +144,10 @@ def _at(value: str) -> datetime:
     return datetime.fromisoformat(value)
 
 
+def _close(first: datetime, second: datetime) -> bool:
+    return abs(first - second) < timedelta(minutes=1)
+
+
 # --- Покупка ---
 
 
@@ -157,7 +161,7 @@ async def test_3_6_purchase_creates_exactly_one_panel_user_with_tariff_params(
 
     [created] = _writes(panel, "POST /api/users")
     assert created["username"] == f"rb_{TELEGRAM_ID}_1"
-    assert _at(created["expireAt"]) == PAID_AT + timedelta(days=30)
+    assert _close(_at(created["expireAt"]), datetime.now(UTC) + timedelta(days=30))
     assert created["hwidDeviceLimit"] == 3
     assert created["activeInternalSquads"] == [str(SQUAD)]
     assert created["telegramId"] == TELEGRAM_ID
@@ -167,7 +171,7 @@ async def test_3_6_purchase_creates_exactly_one_panel_user_with_tariff_params(
     assert subscription is not None
     assert subscription.panel_username == f"rb_{TELEGRAM_ID}_1"
     assert subscription.tariff_id == tariff.id
-    assert subscription.expires_at == PAID_AT + timedelta(days=30)
+    assert subscription.expires_at == _at(created["expireAt"])
     assert payment.state == PaymentState.APPLIED
     assert payment.subscription_id == subscription.id
 
@@ -200,6 +204,17 @@ async def test_3_14_first_subscription_gets_default_name(
     assert subscription.name == "Основная"
 
 
+async def test_0057_new_subscription_term_starts_when_created_in_panel(
+    db_session: AsyncSession, panel: FakePanel, client: Client, tariff: Tariff
+) -> None:
+    """Решение 0057: применение покупки задержалось (панель была недоступна два дня) —
+    срок новой подписки считается от её создания в панели, клиент получает все дни."""
+    payment = await _paid(db_session, client, tariff, paid_at=datetime.now(UTC) - timedelta(days=2))
+    await _apply(db_session, panel, payment)
+    [created] = _writes(panel, "POST /api/users")
+    assert _close(_at(created["expireAt"]), datetime.now(UTC) + timedelta(days=30))
+
+
 async def test_3_25_purchase_adds_segment_costing_paid_amount(
     db_session: AsyncSession, panel: FakePanel, client: Client, tariff: Tariff
 ) -> None:
@@ -215,7 +230,8 @@ async def test_3_25_purchase_adds_segment_costing_paid_amount(
         payment.id,
         Decimal("199.00"),
     )
-    assert (segment.starts_at, segment.ends_at) == (PAID_AT, PAID_AT + timedelta(days=30))
+    assert segment.ends_at == subscription.expires_at
+    assert segment.ends_at - segment.starts_at == timedelta(days=30)
 
 
 async def test_0057_prefix_is_locked_when_first_panel_user_is_created(
@@ -483,7 +499,7 @@ async def test_3_11_second_paid_invoice_of_one_purchase_extends_created_subscrip
 
     assert len(_writes(panel, "POST /api/users")) == 1
     [update] = _writes(panel, "PATCH /api/users")
-    assert _at(update["expireAt"]) == PAID_AT + timedelta(days=60)
+    assert _close(_at(update["expireAt"]), datetime.now(UTC) + timedelta(days=60))
     assert second.subscription_id == first.subscription_id
     keys = [message.text_key for message in await _messages(db_session)]
     assert keys == ["event.subscription_ready", "team.double_payment", "event.renewed"]

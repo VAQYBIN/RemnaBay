@@ -16,7 +16,7 @@
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -252,9 +252,10 @@ class ShopApplier:
         if telegram_id is None:
             raise ApplyError("У клиента нет Telegram-аккаунта")
         days = terms.days
-        # Срок считается от момента подтверждения оплаты, как и у истёкшей подписки (3.18)
+        # Срок новой подписки — от момента её создания в панели: до этого доступа у
+        # клиента не было, задержка (например, панель недоступна) срок не съедает (0057)
         user = await self._panel_user(
-            session, terms.client_id, telegram_id, snapshot, terms.paid_at + days
+            session, terms.client_id, telegram_id, snapshot, datetime.now(UTC) + days
         )
         subscription = Subscription(
             client_id=terms.client_id,
