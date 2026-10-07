@@ -30,6 +30,7 @@ const TITLES: Record<Item['key'], string> = {
   payment: 'Способ оплаты',
   support: 'Контакт поддержки',
   trial: 'Триал',
+  username_prefix: 'Префикс имён в панели',
   migration: 'Миграция',
 }
 
@@ -127,6 +128,21 @@ function Body({ item, isOwner }: { item: Item; isOwner: boolean }) {
       )
     case 'trial':
       return <p>{item.trial_enabled ? 'Триал включён.' : 'Триал выключен — это нормально.'}</p>
+    case 'username_prefix': {
+      const prefix = item.username_prefix?.prefix ?? 'rb'
+      if (item.status === 'done') return <p>Пользователи в панели получают имена {prefix}_…</p>
+      return (
+        <p>
+          Необязательно: сейчас пользователи в панели получат имена {prefix}_&lt;Telegram ID&gt;_1. Префикс
+          задаётся один раз.{' '}
+          {isOwner && (
+            <Link to="/settings/panel" className="text-brand-text underline-offset-4 hover:underline">
+              Настройки панели
+            </Link>
+          )}
+        </p>
+      )
+    }
     case 'migration':
       return <p>Необязательно: перенос клиентов из прежнего бота.</p>
   }

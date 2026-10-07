@@ -30,8 +30,8 @@ from remnabay.panel_sync import (
     sync_page,
 )
 from remnabay.payments import (
-    NotReadyApplier,
     Providers,
+    ShopApplier,
     apply_payment,
     expire_invoice,
     poll_invoice,
@@ -174,7 +174,7 @@ def run(settings: Settings) -> None:
                 runtime.Runtime(
                     sender=sender,
                     panel=panel,
-                    payments=NotReadyApplier(),
+                    payments=ShopApplier(dev_mode=settings.dev_mode),
                     providers=Providers(box, []),
                 )
             ):

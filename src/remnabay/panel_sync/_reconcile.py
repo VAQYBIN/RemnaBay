@@ -38,7 +38,7 @@ _STATUSES = {
     UserStatus.LIMITED: PanelUserStatus.LIMITED,
     UserStatus.EXPIRED: PanelUserStatus.EXPIRED,
 }
-_STRATEGIES: dict[TrafficStrategy, TrafficResetStrategy | None] = {
+STRATEGIES: dict[TrafficStrategy, TrafficResetStrategy | None] = {
     TrafficStrategy.NO_RESET: None,
     TrafficStrategy.DAY: TrafficResetStrategy.DAY,
     TrafficStrategy.WEEK: TrafficResetStrategy.WEEK,
@@ -129,8 +129,8 @@ def _apply_access(subscription: Subscription, user: User) -> dict[str, JsonValue
             user.traffic_limit_bytes,
         ]
         subscription.traffic_limit_bytes = user.traffic_limit_bytes
-    if user.traffic_limit_strategy in _STRATEGIES:
-        strategy = _STRATEGIES[user.traffic_limit_strategy]
+    if user.traffic_limit_strategy in STRATEGIES:
+        strategy = STRATEGIES[user.traffic_limit_strategy]
         if strategy != subscription.traffic_reset_strategy:
             changes["traffic_reset_strategy"] = [subscription.traffic_reset_strategy, strategy]
             subscription.traffic_reset_strategy = strategy
@@ -189,6 +189,38 @@ async def _journal(
     )
 
 
+async def accept_user(
+    session: AsyncSession, subscription: Subscription, user: User
+) -> dict[str, JsonValue]:
+    """Принимает пользователя панели как факт: срок (отрезки), лимиты, состояние, ссылка.
+
+    Возвращает изменения для журнала. Общий шаг сверки и применения платежа: магазин
+    сначала узнаёт, что сейчас в панели, и только потом меняет её сам."""
+    changes = await _apply_term(session, subscription, user)
+    changes |= _apply_access(subscription, user)
+    changes |= await _apply_link(session, subscription, user)
+    subscription.expires_at = user.expire_at
+    subscription.traffic_used_bytes = user.user_traffic.used_traffic_bytes
+    subscription.panel_synced_at = datetime.now(UTC)
+    return changes
+
+
+def accept_access(subscription: Subscription, user: User) -> None:
+    """Лимиты, состояние, ссылка и срок из ответа панели на изменение, которое сделал
+    сам магазин: отрезки он пишет сам (4.34), сообщений об этом клиенту не нужно."""
+    _apply_access(subscription, user)
+    subscription.panel_short_uuid = user.short_uuid
+    subscription.subscription_url = user.subscription_url
+    subscription.expires_at = user.expire_at
+    subscription.traffic_used_bytes = user.user_traffic.used_traffic_bytes
+    subscription.panel_synced_at = datetime.now(UTC)
+
+
+async def term_end(session: AsyncSession, subscription: Subscription) -> datetime | None:
+    """Конец срока по данным магазина: конец последнего отрезка или данные панели."""
+    return await _term_end(session, subscription)
+
+
 async def reconcile(session: AsyncSession, subscription: Subscription, args: ReconcileArgs) -> None:
     """Приводит знание магазина о подписке к состоянию панели и пишет изменения в журнал."""
     if subscription.deleted_at is not None:
@@ -199,12 +231,7 @@ async def reconcile(session: AsyncSession, subscription: Subscription, args: Rec
         subscription.deleted_at = datetime.now(UTC)
         await _journal(session, subscription, "subscription.deleted_in_panel", args)
         return
-    changes = await _apply_term(session, subscription, user)
-    changes |= _apply_access(subscription, user)
-    changes |= await _apply_link(session, subscription, user)
-    subscription.expires_at = user.expire_at
-    subscription.traffic_used_bytes = user.user_traffic.used_traffic_bytes
-    subscription.panel_synced_at = datetime.now(UTC)
+    changes = await accept_user(session, subscription, user)
     if changes:
         await _journal(session, subscription, "subscription.changed_in_panel", args, changes)
 

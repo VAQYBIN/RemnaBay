@@ -24,6 +24,7 @@ from remnabay.panel import (
     PanelUnavailableError,
     is_compatible_version,
 )
+from remnabay.panel_names import username_prefix
 from remnabay.panel_sync import webhook_received
 from remnabay.shop import (
     SHOP_STATE,
@@ -47,6 +48,8 @@ class ItemKey(StrEnum):
     PAYMENT = "payment"
     SUPPORT = "support"
     TRIAL = "trial"
+    # Префикс имён пользователей в панели: необязательный (решение 0057)
+    USERNAME_PREFIX = "username_prefix"
     MIGRATION = "migration"
 
 
@@ -55,7 +58,7 @@ class ItemStatus(StrEnum):
     TODO = "todo"
     # Лимит устройств выключен: предупреждение, открытие не блокирует (1.10)
     WARNING = "warning"
-    # Необязательный пункт: миграция (1.12)
+    # Необязательный пункт: миграция (1.12), префикс имён в панели (решение 0057)
     OPTIONAL = "optional"
 
 
@@ -145,6 +148,15 @@ def _device_limit_item(facts: _PanelFacts) -> ChecklistItem:
     return ChecklistItem(ItemKey.DEVICE_LIMIT, ItemStatus.WARNING)
 
 
+def _prefix_item(prefix: str, locked: bool) -> ChecklistItem:
+    """Решение 0057: необязательный пункт; выполнен, когда префикс зафиксирован."""
+    return ChecklistItem(
+        ItemKey.USERNAME_PREFIX,
+        ItemStatus.DONE if locked else ItemStatus.OPTIONAL,
+        {"prefix": prefix, "locked": locked},
+    )
+
+
 async def payment_methods_ready(session: AsyncSession) -> bool:
     """Есть хотя бы один способ оплаты (1.14). Провайдеры и их ключи — блок 3:
     до него способов оплаты нет."""
@@ -158,6 +170,7 @@ async def build_checklist(
     *,
     webhook_url: str,
     webhook_secret: str | None,
+    dev_mode: bool,
 ) -> Checklist:
     """Состояние каждого пункта (1.7). `webhook_secret` — только для владельца."""
     facts = await _panel_facts(panel)
@@ -194,6 +207,7 @@ async def build_checklist(
             ItemStatus.DONE,
             {"enabled": await get_setting(session, TRIAL_ENABLED)},
         ),
+        _prefix_item(*await username_prefix(session, dev_mode=dev_mode)),
         # 1.12: необязательный; ведёт к усыновлению или импорту (блок 9)
         ChecklistItem(ItemKey.MIGRATION, ItemStatus.OPTIONAL),
     ]

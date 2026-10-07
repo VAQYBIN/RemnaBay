@@ -15,7 +15,7 @@ from remnabay.domain.clients import Client
 from remnabay.domain.payments import Payment, PaymentPurpose, PaymentState
 from remnabay.domain.subscriptions import Subscription
 from remnabay.journal import Actor, JsonValue
-from remnabay.messaging import send_to_client
+from remnabay.messaging import MAIN_MENU_BUTTON, send_to_client
 from remnabay.payments._apply import apply_payment, enqueue_apply, journal_payment
 from remnabay.queue import (
     QueueAttempt,
@@ -93,6 +93,7 @@ async def apply_as_new_subscription(
         await resolve_failed(session, _TASKS, task_id, actor=actor, comment=comment)
     payment.purpose = PaymentPurpose.PURCHASE
     payment.subscription_id = None
+    payment.new_subscription = True
     payment.state = PaymentState.PAID
     await enqueue_apply(session, payment)
     await journal_payment(session, payment, actor, "payment.applying_as_new", details=details)
@@ -116,7 +117,9 @@ async def resolve_payment_manually(
         session, payment, actor, "payment.resolved_manually", details={"comment": comment}
     )
     if payment.client_id is not None:
-        await send_to_client(session, payment.client_id, "event.payment_resolved.manual")
+        await send_to_client(
+            session, payment.client_id, "event.payment_resolved.manual", buttons=[MAIN_MENU_BUTTON]
+        )
 
 
 async def bind_unknown_payment(

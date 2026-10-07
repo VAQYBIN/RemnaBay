@@ -20,7 +20,13 @@ from remnabay import runtime
 from remnabay.domain.payments import Payment, PaymentState
 from remnabay.domain.subscriptions import Subscription, operations_key
 from remnabay.journal import Actor, ActorType, JournalEntry, JsonValue, Outcome, Subject, record
-from remnabay.messaging import load_texts, notify_team, send_to_client
+from remnabay.messaging import (
+    MAIN_MENU_BUTTON,
+    ButtonArgs,
+    load_texts,
+    notify_team,
+    send_to_client,
+)
 from remnabay.payments._applier import Applied
 from remnabay.queue import TaskContext, task
 from remnabay.shop_settings import SHOP_LANGUAGE, get_setting, shop_time_zone
@@ -103,22 +109,66 @@ async def _notify_resolved(session: AsyncSession, payment: Payment, applied: App
     if payment.client_id is None:
         return
     if applied.created:
-        await send_to_client(session, payment.client_id, "event.payment_resolved.created")
+        await send_to_client(
+            session,
+            payment.client_id,
+            "event.payment_resolved.created",
+            buttons=[MAIN_MENU_BUTTON],
+        )
         return
     subscription = await session.get(Subscription, applied.subscription_id)
     if subscription is None or subscription.expires_at is None:
         return
-    texts = await load_texts(session)
-    end_date = texts.date_fallback(
-        subscription.expires_at,
-        await get_setting(session, SHOP_LANGUAGE),
-        await shop_time_zone(session),
-    )
     await send_to_client(
         session,
         payment.client_id,
         "event.payment_resolved.renewed",
-        variables={"subscription_name": subscription.name, "end_date": end_date},
+        variables={
+            "subscription_name": subscription.name,
+            "end_date": await _end_date(session, subscription),
+        },
+        buttons=[MAIN_MENU_BUTTON],
+    )
+
+
+async def _notify_applied(session: AsyncSession, payment: Payment, applied: Applied) -> None:
+    """Клиент получает ссылку на подписку (3.6) или новую дату окончания (С6). Если
+    он заблокировал бот, подписка всё равно применена, недоставка — в журнале (3.13)."""
+    if payment.client_id is None:
+        return
+    subscription = await session.get(Subscription, applied.subscription_id)
+    if subscription is None:
+        return
+    if applied.purchase:
+        link = subscription.subscription_url
+        await send_to_client(
+            session,
+            payment.client_id,
+            "event.subscription_ready",
+            variables={"subscription_link": link},
+            buttons=[ButtonArgs(text_key="btn.copy_link", copy_text=link), MAIN_MENU_BUTTON],
+        )
+        return
+    await send_to_client(
+        session,
+        payment.client_id,
+        "event.renewed",
+        variables={
+            "subscription_name": subscription.name,
+            "end_date": await _end_date(session, subscription),
+        },
+        buttons=[MAIN_MENU_BUTTON],
+    )
+
+
+async def _end_date(session: AsyncSession, subscription: Subscription) -> str:
+    if subscription.expires_at is None:
+        return ""
+    texts = await load_texts(session)
+    return texts.date_fallback(
+        subscription.expires_at,
+        await get_setting(session, SHOP_LANGUAGE),
+        await shop_time_zone(session),
     )
 
 
@@ -143,6 +193,8 @@ async def apply_payment(context: TaskContext, args: PaymentArgs) -> None:
     )
     if await _resolved_by_team(session, payment):
         await _notify_resolved(session, payment, applied)
+    else:
+        await _notify_applied(session, payment, applied)
 
 
 @apply_payment.on_failed
@@ -167,4 +219,9 @@ async def processing_notice(context: TaskContext, args: PaymentArgs) -> None:
     if payment is None or payment.client_id is None:
         return
     if payment.state in (PaymentState.PAID, PaymentState.PAID_NOT_APPLIED):
-        await send_to_client(context.session, payment.client_id, "event.payment_processing")
+        await send_to_client(
+            context.session,
+            payment.client_id,
+            "event.payment_processing",
+            buttons=[MAIN_MENU_BUTTON],
+        )

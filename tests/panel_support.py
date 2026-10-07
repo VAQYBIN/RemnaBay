@@ -1,9 +1,11 @@
 """Подставная панель и окружение воркера для тестов сверки, вебхуков и сообщений."""
 
+import json
 import re
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx2
@@ -17,6 +19,18 @@ from tests.conftest import REQUIRED_ENV
 
 PANEL_URL = "https://panel.example.com"
 _USER_PATH = re.compile(r"^/api/users/(\d+)$")
+_USERNAME_PATH = re.compile(r"^/api/users/by-username/([\w-]+)$")
+_RESET_PATH = re.compile(r"^/api/users/(\d+)/actions/reset-traffic$")
+# Поля пользователя, которые меняет запрос PATCH /api/users
+_UPDATABLE = (
+    "expireAt",
+    "trafficLimitBytes",
+    "trafficLimitStrategy",
+    "hwidDeviceLimit",
+    "telegramId",
+    "description",
+    "externalSquadUuid",
+)
 
 
 def user_json(**overrides: Any) -> dict[str, Any]:
@@ -57,7 +71,8 @@ def user_json(**overrides: Any) -> dict[str, Any]:
 
 @dataclass
 class FakePanel:
-    """Панель с пользователями в памяти: отвечает на запрос пользователя по id."""
+    """Панель с пользователями в памяти: создаёт, читает, меняет пользователей и
+    обнуляет трафик."""
 
     users: dict[int, dict[str, Any]] = field(default_factory=dict[int, dict[str, Any]])
     down: bool = False
@@ -69,6 +84,66 @@ class FakePanel:
     hwid_enabled: bool | None = True
     # Внутренние сквады панели: uuid → название
     squads: dict[str, str] = field(default_factory=dict[str, str])
+    # Тела запросов, которые меняют пользователей: (метод и путь, тело)
+    writes: list[tuple[str, dict[str, Any]]] = field(
+        default_factory=list[tuple[str, dict[str, Any]]]
+    )
+    next_id: int = 1000
+    # Ответ на запрос пользователя «потерялся»: изменение применено, ответ — ошибка шлюза
+    lose_next_write: bool = False
+
+    def add_user(self, **overrides: Any) -> dict[str, Any]:
+        user = user_json(**overrides)
+        self.users[user["id"]] = user
+        return user
+
+    def _by_username(self, username: str) -> dict[str, Any] | None:
+        return next((u for u in self.users.values() if u["username"] == username), None)
+
+    def _written(self, request: httpx2.Request, user: dict[str, Any]) -> httpx2.Response:
+        if self.lose_next_write:
+            self.lose_next_write = False
+            return httpx2.Response(502, json={"message": "Bad Gateway"})
+        return httpx2.Response(200, json={"response": user})
+
+    def _create(self, request: httpx2.Request) -> httpx2.Response:
+        body: dict[str, Any] = json.loads(request.content)
+        self.writes.append(("POST /api/users", body))
+        if self._by_username(body["username"]) is not None:
+            return httpx2.Response(400, json={"message": "exists", "errorCode": "A019"})
+        self.next_id += 1
+        squads = [{"uuid": uuid, "name": "Squad"} for uuid in body.get("activeInternalSquads", [])]
+        user = self.add_user(
+            id=self.next_id,
+            shortUuid=f"short{self.next_id}",
+            username=body["username"],
+            expireAt=body["expireAt"],
+            trafficLimitBytes=body.get("trafficLimitBytes", 0),
+            trafficLimitStrategy=body.get("trafficLimitStrategy", "NO_RESET"),
+            hwidDeviceLimit=body.get("hwidDeviceLimit"),
+            telegramId=body.get("telegramId"),
+            description=body.get("description"),
+            subscriptionUrl=f"https://sub.example.com/short{self.next_id}",
+            activeInternalSquads=squads,
+            createdAt=datetime.now(UTC).isoformat(),
+            userTraffic={**user_json()["userTraffic"], "usedTrafficBytes": 0},
+        )
+        return self._written(request, user)
+
+    def _update(self, request: httpx2.Request) -> httpx2.Response:
+        body: dict[str, Any] = json.loads(request.content)
+        self.writes.append(("PATCH /api/users", body))
+        user = self.users.get(body["id"])
+        if user is None:
+            return httpx2.Response(404, json={"message": "User not found", "errorCode": "A063"})
+        for name in _UPDATABLE:
+            if name in body:
+                user[name] = body[name]
+        if "activeInternalSquads" in body:
+            user["activeInternalSquads"] = [
+                {"uuid": uuid, "name": "Squad"} for uuid in body["activeInternalSquads"]
+            ]
+        return self._written(request, user)
 
     def handle(self, request: httpx2.Request) -> httpx2.Response:
         self.requests.append(f"{request.method} {request.url.path}")
@@ -85,6 +160,23 @@ class FakePanel:
             squads = [{"uuid": uuid, "name": name} for uuid, name in self.squads.items()]
             body = {"total": len(squads), "internalSquads": squads}
             return httpx2.Response(200, json={"response": body})
+        if request.url.path == "/api/users" and request.method == "POST":
+            return self._create(request)
+        if request.url.path == "/api/users" and request.method == "PATCH":
+            return self._update(request)
+        reset = _RESET_PATH.match(request.url.path)
+        if reset and request.method == "POST":
+            user = self.users[int(reset.group(1))]
+            self.writes.append((request.url.path, {}))
+            user["userTraffic"] = {**user["userTraffic"], "usedTrafficBytes": 0}
+            return httpx2.Response(200, json={"response": user})
+        by_name = _USERNAME_PATH.match(request.url.path)
+        if request.method == "GET" and by_name:
+            found = self._by_username(by_name.group(1))
+            if found is None:
+                body = {"message": "User not found", "errorCode": "A063"}
+                return httpx2.Response(404, json=body)
+            return httpx2.Response(200, json={"response": found})
         match = _USER_PATH.match(request.url.path)
         if request.method == "GET" and match:
             user = self.users.get(int(match.group(1)))

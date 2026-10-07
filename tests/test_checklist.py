@@ -27,6 +27,7 @@ ITEMS = [
     "payment",
     "support",
     "trial",
+    "username_prefix",
     "migration",
 ]
 
@@ -85,6 +86,7 @@ async def test_1_7_checklist_shows_every_item(shop: Shop, owner: TeamMember) -> 
         "payment": "todo",
         "support": "todo",
         "trial": "done",
+        "username_prefix": "optional",
         "migration": "optional",
     }
 

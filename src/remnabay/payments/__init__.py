@@ -71,6 +71,7 @@ from remnabay.payments._providers import (
     ProviderKeysError,
     Providers,
 )
+from remnabay.payments._shop_applier import ApplyError, ShopApplier
 from remnabay.payments._snapshot import TariffSnapshot
 from remnabay.payments._team import (
     PaymentActionError,
@@ -90,6 +91,7 @@ __all__ = [
     "PROCESSING_NOTICE_DELAY",
     "Applied",
     "ApplierNotReadyError",
+    "ApplyError",
     "CatalogError",
     "Checkout",
     "CheckoutError",
@@ -116,6 +118,7 @@ __all__ = [
     "ProviderUnavailableError",
     "Providers",
     "Quote",
+    "ShopApplier",
     "TariffSnapshot",
     "apply_as_new_subscription",
     "apply_payment",

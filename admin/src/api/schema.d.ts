@@ -330,6 +330,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/settings/panel/username-prefix": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Username Prefix
+         * @description Префикс имён пользователей в панели — задаётся один раз (решение 0057).
+         */
+        put: operations["update_username_prefix_api_admin_settings_panel_username_prefix_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/stats": {
         parameters: {
             query?: never;
@@ -653,7 +673,7 @@ export interface components {
          * ItemKey
          * @enum {string}
          */
-        ItemKey: "panel" | "webhook" | "device_limit" | "brand" | "tariffs" | "payment" | "support" | "trial" | "migration";
+        ItemKey: "panel" | "webhook" | "device_limit" | "brand" | "tariffs" | "payment" | "support" | "trial" | "username_prefix" | "migration";
         /** ItemOut */
         ItemOut: {
             key: components["schemas"]["ItemKey"];
@@ -665,6 +685,7 @@ export interface components {
             brand?: components["schemas"]["BrandDetailsOut"] | null;
             /** Trial Enabled */
             trial_enabled?: boolean | null;
+            username_prefix?: components["schemas"]["PrefixDetailsOut"] | null;
         };
         /**
          * ItemStatus
@@ -785,7 +806,7 @@ export interface components {
         };
         /**
          * PanelSettingsOut
-         * @description «Панель»: адрес и секрет вебхука для панели (1.9).
+         * @description «Панель»: адрес и секрет вебхука для панели (1.9), префикс имён (решение 0057).
          */
         PanelSettingsOut: {
             /** Webhook Url */
@@ -794,12 +815,34 @@ export interface components {
             webhook_secret: string | null;
             /** Webhook Secret Fits Panel */
             webhook_secret_fits_panel: boolean;
+            /** Username Prefix */
+            username_prefix: string;
+            /** Username Prefix Locked */
+            username_prefix_locked: boolean;
         };
         /**
          * Period
          * @enum {string}
          */
         Period: "today" | "7d" | "30d";
+        /** PrefixDetailsOut */
+        PrefixDetailsOut: {
+            /** Prefix */
+            prefix: string;
+            /** Locked */
+            locked: boolean;
+        };
+        /** PrefixLockedOut */
+        PrefixLockedOut: {
+            /**
+             * Reason
+             * @default locked
+             * @constant
+             */
+            reason: "locked";
+            /** Message */
+            message: string;
+        };
         /**
          * RevenueOut
          * @description Выручка и число оплат — только владельцу (1.20).
@@ -957,6 +1000,11 @@ export interface components {
          * @enum {string}
          */
         Usage: "subscriptions" | "payments" | "promo_codes" | "successor";
+        /** UsernamePrefixIn */
+        UsernamePrefixIn: {
+            /** Username Prefix */
+            username_prefix: string;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -1506,6 +1554,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PanelSettingsOut"];
+                };
+            };
+        };
+    };
+    update_username_prefix_api_admin_settings_panel_username_prefix_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UsernamePrefixIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PanelSettingsOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrefixLockedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
