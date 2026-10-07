@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from remnabay.access import active_member, is_login_link
 from remnabay.brand import brand_name
 from remnabay.clients import TelegramUser, register_telegram_user
-from remnabay.domain.clients import Client
+from remnabay.domain.clients import Client, TelegramAccount
 from remnabay.domain.team import TeamMember
 from remnabay.messaging import load_texts
 from remnabay.shop import ShopState, is_tester, shop_state
@@ -35,6 +35,8 @@ class BotContext:
     # Действующий участник команды, если человек в ней состоит
     member: TeamMember | None
     texts: Texts
+    # Клиент появился этим обновлением — впервые открыл бот (3.15)
+    new_client: bool = False
 
     def render(self, key: str, /, **variables: str) -> str:
         """Текст по ключу на языке клиента (0018)."""
@@ -58,6 +60,7 @@ async def context_middleware(handler: Handler, event: TelegramObject, data: dict
 
     sessions: SessionFactory = data[SESSIONS_KEY]
     async with sessions() as session:
+        new_client = await session.get(TelegramAccount, user.id) is None
         client = await register_telegram_user(
             session,
             TelegramUser(
@@ -75,6 +78,7 @@ async def context_middleware(handler: Handler, event: TelegramObject, data: dict
             client=client,
             member=await active_member(session, user.id),
             texts=await load_texts(session),
+            new_client=new_client,
         )
         if await _shop_hidden_from(ctx, event, user.id):
             await _answer_shop_not_opened(event, ctx)

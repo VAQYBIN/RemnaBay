@@ -58,15 +58,19 @@ class AmbiguousDeliveryError(DeliveryError):
 
 @dataclass(frozen=True)
 class Button:
-    """Кнопка под сообщением: ссылка или копирование текста."""
+    """Кнопка под сообщением: ссылка, копирование текста или нажатие, которое
+    разбирает бот. `style` — смысловой цвет: `success` у целевого действия (03-screens)."""
 
     text: str
     url: str | None = None
     copy_text: str | None = None
+    callback_data: str | None = None
+    style: str | None = None
 
     def __post_init__(self) -> None:
-        if (self.url is None) == (self.copy_text is None):
-            raise ValueError("У кнопки — либо ссылка, либо текст для копирования")
+        kinds = (self.url, self.copy_text, self.callback_data)
+        if sum(kind is not None for kind in kinds) != 1:
+            raise ValueError("У кнопки — ровно одно: ссылка, текст для копирования или нажатие")
 
 
 @dataclass(frozen=True)
@@ -90,6 +94,8 @@ def _keyboard(buttons: tuple[Button, ...]) -> InlineKeyboardMarkup | None:
                 text=button.text,
                 url=button.url,
                 copy_text=CopyTextButton(text=button.copy_text) if button.copy_text else None,
+                callback_data=button.callback_data,
+                style=button.style,
             )
         ]
         for button in buttons

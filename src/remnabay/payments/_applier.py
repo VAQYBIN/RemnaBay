@@ -10,10 +10,14 @@ from remnabay.domain.payments import Payment
 
 @dataclass(frozen=True)
 class Applied:
-    """Итог применения: какая подписка получила оплаченное и создана ли она сейчас."""
+    """Итог применения: какая подписка получила оплаченное и создана ли она сейчас.
+
+    `purchase` — клиент купил подписку (новую или поверх триала): он получает
+    «Подписка готова» со ссылкой; иначе — «Подписка продлена»."""
 
     subscription_id: int
     created: bool
+    purchase: bool = False
 
 
 class PaymentApplier(Protocol):

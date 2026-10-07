@@ -1,5 +1,5 @@
 """Окружение воркера, которое нужно задачам очереди: отправитель сообщений, клиент панели,
-шаг применения платежа.
+шаг применения платежа, платёжные провайдеры.
 
 Задача очереди получает только сессию и свои аргументы; внешние клиенты она берёт
 отсюда. Окружение задаёт запуск воркера, а тесты — своё, с подставными клиентами.
@@ -16,15 +16,17 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from remnabay.messaging import Sender
     from remnabay.panel import PanelClient
-    from remnabay.payments import PaymentApplier
+    from remnabay.payments import PaymentApplier, Providers
 
 
 @dataclass(frozen=True)
 class Runtime:
     sender: Sender
     panel: PanelClient
-    # Шаг применения платежа; настоящий — с блоком 3
+    # Шаг применения платежа: что записать в панель и магазин при покупке и продлении
     payments: PaymentApplier
+    # Подключённые провайдеры — для опроса неоплаченных счетов (3.29)
+    providers: Providers
 
 
 _current: ContextVar[Runtime] = ContextVar("remnabay_runtime")

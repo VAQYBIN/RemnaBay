@@ -23,6 +23,7 @@ from remnabay.crypto import SecretBox, SecretDecryptionError
 from remnabay.domain.panel_events import PanelEvent
 from remnabay.domain.team import TeamMember, TeamRole
 from remnabay.panel import PanelClient
+from remnabay.panel_names import PrefixLockedError, save_prefix, username_prefix
 from remnabay.panel_sync import panel_available, sync_page
 from remnabay.queue import last_periodic_start
 from remnabay.shop import MAX_TESTERS, SHOP_SUPPORT_CONTACT, SHOP_TESTERS, ShopState, shop_state
@@ -60,6 +61,11 @@ class BrandDetailsOut(BaseModel):
     mark: bool
 
 
+class PrefixDetailsOut(BaseModel):
+    prefix: str
+    locked: bool
+
+
 class ItemOut(BaseModel):
     key: ItemKey
     status: ItemStatus
@@ -68,6 +74,7 @@ class ItemOut(BaseModel):
     webhook: WebhookDetailsOut | None = None
     brand: BrandDetailsOut | None = None
     trial_enabled: bool | None = None
+    username_prefix: PrefixDetailsOut | None = None
 
 
 class ChecklistOut(BaseModel):
@@ -90,6 +97,8 @@ def _item_out(item: ChecklistItem) -> ItemOut:
             out.brand = BrandDetailsOut.model_validate(details)
         case ItemKey.TRIAL:
             out.trial_enabled = bool(details.get("enabled"))
+        case ItemKey.USERNAME_PREFIX:
+            out.username_prefix = PrefixDetailsOut.model_validate(details)
         case _:
             pass
     return out
@@ -120,6 +129,8 @@ async def _checklist(
         panel,
         webhook_url=settings.public_link(PANEL_WEBHOOK_PATH),
         webhook_secret=secret,
+        dev_mode=settings.dev_mode,
+        providers=request.app.state.providers,
     )
     await session.commit()
     return checklist
@@ -286,13 +297,26 @@ async def update_login_settings(
 
 
 class PanelSettingsOut(BaseModel):
-    """«Панель»: адрес и секрет вебхука для панели (1.9)."""
+    """«Панель»: адрес и секрет вебхука для панели (1.9), префикс имён (решение 0057)."""
 
     webhook_url: str
     # Нет — секрет не расшифровывается (сменили ENCRYPTION_KEY): задайте заново
     webhook_secret: str | None
     # Секрет подходит под правила панели; созданный до решения 0052 мог не подходить
     webhook_secret_fits_panel: bool
+    # Начало имени пользователя в панели: <префикс>_<Telegram ID>_<N>
+    username_prefix: str
+    # Префикс зафиксирован — изменить нельзя
+    username_prefix_locked: bool
+
+
+class UsernamePrefixIn(BaseModel):
+    username_prefix: str
+
+
+class PrefixLockedOut(BaseModel):
+    reason: Literal["locked"] = "locked"
+    message: str
 
 
 class WebhookSecretIn(BaseModel):
@@ -307,11 +331,14 @@ async def _panel_settings(
         secret: str | None = await webhook_secret(session, box)
     except SecretDecryptionError:
         secret = None
+    prefix, locked = await username_prefix(session, dev_mode=settings.dev_mode)
     await session.commit()
     return PanelSettingsOut(
         webhook_url=settings.public_link(PANEL_WEBHOOK_PATH),
         webhook_secret=secret,
         webhook_secret_fits_panel=secret is not None and _fits_panel(secret),
+        username_prefix=prefix,
+        username_prefix_locked=locked,
     )
 
 
@@ -356,5 +383,34 @@ async def generate_webhook_secret(
     """Новый секрет, созданный магазином: его нужно указать в панели."""
     box: SecretBox = request.app.state.box
     await set_webhook_secret(session, box, new_webhook_secret(), member_id=owner.id)
+    await session.commit()
+    return await _panel_settings(request, session, settings)
+
+
+@router.put(
+    "/settings/panel/username-prefix",
+    tags=["settings"],
+    responses={status.HTTP_409_CONFLICT: {"model": PrefixLockedOut}},
+)
+async def update_username_prefix(
+    body: UsernamePrefixIn,
+    request: Request,
+    session: DbSession,
+    settings: AppSettings,
+    owner: Owner,
+) -> PanelSettingsOut:
+    """Префикс имён пользователей в панели — задаётся один раз (решение 0057)."""
+    try:
+        await save_prefix(session, body.username_prefix.strip(), member_id=owner.id)
+    except SettingError as error:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Префикс — латинские буквы, цифры и дефис, от 1 до 16 символов",
+        ) from error
+    except PrefixLockedError as error:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            PrefixLockedOut(message="Префикс уже зафиксирован — изменить его нельзя").model_dump(),
+        ) from error
     await session.commit()
     return await _panel_settings(request, session, settings)

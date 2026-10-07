@@ -330,6 +330,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/settings/panel/username-prefix": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Username Prefix
+         * @description Префикс имён пользователей в панели — задаётся один раз (решение 0057).
+         */
+        put: operations["update_username_prefix_api_admin_settings_panel_username_prefix_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/stats": {
         parameters: {
             query?: never;
@@ -494,6 +514,316 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/settings/payment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Payment Settings */
+        get: operations["payment_settings_api_admin_settings_payment_get"];
+        /**
+         * Update Payment Settings
+         * @description Время жизни счёта (3.8).
+         */
+        put: operations["update_payment_settings_api_admin_settings_payment_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/settings/payment/providers/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Connect Provider
+         * @description Подключить провайдера: ключи проверяются у провайдера, затем сохраняются.
+         */
+        put: operations["connect_provider_api_admin_settings_payment_providers__code__put"];
+        post?: never;
+        /**
+         * Disconnect Provider
+         * @description Отключить провайдера: новые счета через него не создаются. Уже созданные счета
+         *     опрашиваются, пока ключи есть, — без ключей оплату найдёт команда.
+         */
+        delete: operations["disconnect_provider_api_admin_settings_payment_providers__code__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/attention": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Attention List
+         * @description «Требуют внимания» (4.20, 4.23, 4.30, 4.31): проваленные платежи и операции,
+         *     неизвестные платежи; отдельно — операции, которые ждут панель.
+         */
+        get: operations["attention_list_api_admin_attention_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Payments List
+         * @description А4: платежи с фильтром по состоянию (отдельно — неизвестные) и периоду; даты
+         *     периода — в часовом поясе магазина (1.18). Последние сто, от новых к старым.
+         */
+        get: operations["payments_list_api_admin_payments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/payments/{payment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Payment Details
+         * @description А5: клиент, что должно было примениться, история попыток и текст ошибки (4.21).
+         */
+        get: operations["payment_details_api_admin_payments__payment_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/payments/{payment_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry
+         * @description «Применить повторно» (4.22).
+         */
+        post: operations["retry_api_admin_payments__payment_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/payments/{payment_id}/apply-as-new": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply As New
+         * @description «Применить созданием новой подписки» (4.22) — например, если пользователя удалили.
+         */
+        post: operations["apply_as_new_api_admin_payments__payment_id__apply_as_new_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/payments/{payment_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve
+         * @description «Отметить решённым вручную» с обязательным комментарием (4.22).
+         */
+        post: operations["resolve_api_admin_payments__payment_id__resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/payments/{payment_id}/bind": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bind
+         * @description «Привязать к клиенту» неизвестный платёж и выбрать, что применить (4.23):
+         *     покупку или продление подписки клиента выбранным тарифом.
+         */
+        post: operations["bind_api_admin_payments__payment_id__bind_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/tariff-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Tariff Options
+         * @description Тарифы для привязки неизвестного платежа (4.23): в продаже и в архиве.
+         */
+        get: operations["tariff_options_api_admin_tariff_options_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/clients/by-telegram/{telegram_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Client By Telegram
+         * @description Клиент по Telegram ID и его подписки — для привязки неизвестного платежа (4.23).
+         */
+        get: operations["client_by_telegram_api_admin_clients_by_telegram__telegram_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/operations/{task_id}/attempts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Operation Attempts
+         * @description История попыток операции с текстом ошибок (4.18).
+         */
+        get: operations["operation_attempts_api_admin_operations__task_id__attempts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/operations/{task_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Operation
+         * @description «Повторить» (4.31).
+         */
+        post: operations["retry_operation_api_admin_operations__task_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/operations/{task_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Operation
+         * @description «Отменить» с комментарием (4.31, 4.32): следующие операции подписки идут дальше,
+         *     действие считается невыполненным. Для смены даты при возврате — недоступна.
+         */
+        post: operations["cancel_operation_api_admin_operations__task_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/operations/{task_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve Operation
+         * @description «Отметить решённым вручную» с комментарием (4.31).
+         */
+        post: operations["resolve_operation_api_admin_operations__task_id__resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/about": {
         parameters: {
             query?: never;
@@ -528,6 +858,23 @@ export interface components {
             /** Font License */
             font_license: string;
         };
+        /** ActionRejectedOut */
+        ActionRejectedOut: {
+            /**
+             * Reason
+             * @default not_available
+             * @constant
+             */
+            reason: "not_available";
+            /** Message */
+            message: string;
+        };
+        /**
+         * ActorType
+         * @description Кто вызвал событие: роль команды, клиент или действующее лицо без доступа.
+         * @enum {string}
+         */
+        ActorType: "team_member" | "client" | "system" | "panel" | "provider";
         /**
          * AssetKind
          * @enum {string}
@@ -537,6 +884,55 @@ export interface components {
         AssetOut: {
             /** Url */
             url: string;
+        };
+        /** AttemptOut */
+        AttemptOut: {
+            /** Number */
+            number: number;
+            /** Retry Round */
+            retry_round: number;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Finished At */
+            finished_at: string | null;
+            result: components["schemas"]["AttemptResult"] | null;
+            /** Error */
+            error: string | null;
+        };
+        /**
+         * AttemptResult
+         * @enum {string}
+         */
+        AttemptResult: "done" | "error" | "unavailable" | "aborted" | "rejected";
+        /** AttentionOut */
+        AttentionOut: {
+            /** Payments */
+            payments: components["schemas"]["PaymentRow"][];
+            /** Operations */
+            operations: components["schemas"]["OperationRow"][];
+            /** Waiting Panel */
+            waiting_panel: components["schemas"]["WaitingRow"][];
+            /** Count */
+            count: number;
+            /** Time Zone */
+            time_zone: string;
+        };
+        /** BindIn */
+        BindIn: {
+            /** Telegram Id */
+            telegram_id: number;
+            /**
+             * Purpose
+             * @enum {string}
+             */
+            purpose: "purchase" | "renewal";
+            /** Tariff Id */
+            tariff_id: number;
+            /** Subscription Id */
+            subscription_id?: number | null;
         };
         /** BrandDetailsOut */
         BrandDetailsOut: {
@@ -593,11 +989,33 @@ export interface components {
             /** Items */
             items: components["schemas"]["ItemOut"][];
         };
+        /** ClientLookupOut */
+        ClientLookupOut: {
+            client: components["schemas"]["ClientRef"];
+            /** Subscriptions */
+            subscriptions: components["schemas"]["SubscriptionRef"][];
+        };
+        /** ClientRef */
+        ClientRef: {
+            /** Id */
+            id: number;
+            /** Telegram Id */
+            telegram_id: number | null;
+            /** Username */
+            username: string | null;
+            /** Name */
+            name: string | null;
+        };
         Color: string;
         /** ColorsIn */
         ColorsIn: {
             primary_color: components["schemas"]["Color"];
             secondary_color?: components["schemas"]["Color"] | null;
+        };
+        /** CommentIn */
+        CommentIn: {
+            /** Comment */
+            comment: string;
         };
         /** ConfirmIn */
         ConfirmIn: {
@@ -607,6 +1025,11 @@ export interface components {
              */
             confirm_last: boolean;
         };
+        /**
+         * ConnectionState
+         * @enum {string}
+         */
+        ConnectionState: "not_connected" | "ready" | "keys_lost" | "currency_unsupported";
         /** ExpiringOut */
         ExpiringOut: {
             /** Subscription Id */
@@ -636,6 +1059,24 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** HistoryOut */
+        HistoryOut: {
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            actor_type: components["schemas"]["ActorType"];
+            /** Actor Ref */
+            actor_ref: string | null;
+            /** Action */
+            action: string;
+            outcome: components["schemas"]["Outcome"];
+            /** Details */
+            details: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+        };
         /** InUseOut */
         InUseOut: {
             /**
@@ -653,7 +1094,7 @@ export interface components {
          * ItemKey
          * @enum {string}
          */
-        ItemKey: "panel" | "webhook" | "device_limit" | "brand" | "tariffs" | "payment" | "support" | "trial" | "migration";
+        ItemKey: "panel" | "webhook" | "device_limit" | "brand" | "tariffs" | "payment" | "support" | "trial" | "username_prefix" | "migration";
         /** ItemOut */
         ItemOut: {
             key: components["schemas"]["ItemKey"];
@@ -665,12 +1106,16 @@ export interface components {
             brand?: components["schemas"]["BrandDetailsOut"] | null;
             /** Trial Enabled */
             trial_enabled?: boolean | null;
+            username_prefix?: components["schemas"]["PrefixDetailsOut"] | null;
         };
         /**
          * ItemStatus
          * @enum {string}
          */
         ItemStatus: "done" | "todo" | "warning" | "optional";
+        JsonValue: string | number | boolean | components["schemas"]["JsonValue"][] | {
+            [key: string]: components["schemas"]["JsonValue"];
+        } | null;
         /** LastOnSaleOut */
         LastOnSaleOut: {
             /**
@@ -737,11 +1182,44 @@ export interface components {
             /** Missing */
             missing: components["schemas"]["ItemKey"][];
         };
+        /** OperationAttemptsOut */
+        OperationAttemptsOut: {
+            /** Task Id */
+            task_id: number;
+            /** Attempts */
+            attempts: components["schemas"]["AttemptOut"][];
+        };
+        /**
+         * OperationRow
+         * @description Проваленная операция, которая не платёж (4.31).
+         */
+        OperationRow: {
+            /** Task Id */
+            task_id: number;
+            /** Name */
+            name: string;
+            /** Key */
+            key: string | null;
+            /** Failed At */
+            failed_at: string | null;
+            /** Last Error */
+            last_error: string | null;
+            /** Waiting Behind */
+            waiting_behind: number;
+            /** Cancellable */
+            cancellable: boolean;
+        };
         /** OrderIn */
         OrderIn: {
             /** Tariff Ids */
             tariff_ids: number[];
         };
+        /**
+         * Outcome
+         * @description С каким результатом завершилось действие.
+         * @enum {string}
+         */
+        Outcome: "success" | "failure";
         /**
          * OverviewOut
          * @description Состояние связей и «Требуют внимания» на главной (А1, 4.20, 4.30).
@@ -785,7 +1263,7 @@ export interface components {
         };
         /**
          * PanelSettingsOut
-         * @description «Панель»: адрес и секрет вебхука для панели (1.9).
+         * @description «Панель»: адрес и секрет вебхука для панели (1.9), префикс имён (решение 0057).
          */
         PanelSettingsOut: {
             /** Webhook Url */
@@ -794,12 +1272,154 @@ export interface components {
             webhook_secret: string | null;
             /** Webhook Secret Fits Panel */
             webhook_secret_fits_panel: boolean;
+            /** Username Prefix */
+            username_prefix: string;
+            /** Username Prefix Locked */
+            username_prefix_locked: boolean;
+        };
+        /** PaymentCardOut */
+        PaymentCardOut: {
+            payment: components["schemas"]["PaymentRow"];
+            subscription: components["schemas"]["SubscriptionRef"] | null;
+            snapshot: components["schemas"]["SnapshotOut"] | null;
+            /** Paid Amount */
+            paid_amount: string | null;
+            /** Paid Currency */
+            paid_currency: string | null;
+            /** Provider */
+            provider: string | null;
+            /** Provider Payment Id */
+            provider_payment_id: string | null;
+            /** Expires At */
+            expires_at: string | null;
+            /** Applied At */
+            applied_at: string | null;
+            /** Last Error */
+            last_error: string | null;
+            /** Attempts */
+            attempts: components["schemas"]["AttemptOut"][];
+            /** History */
+            history: components["schemas"]["HistoryOut"][];
+            /** Actions */
+            actions: ("retry" | "apply_as_new" | "resolve" | "bind")[];
+            /** Time Zone */
+            time_zone: string;
+        };
+        /**
+         * PaymentPurpose
+         * @description За что платёж: покупка новой подписки, продление или смена тарифа.
+         * @enum {string}
+         */
+        PaymentPurpose: "purchase" | "renewal" | "tariff_change";
+        /** PaymentRow */
+        PaymentRow: {
+            /** Id */
+            id: number;
+            state: components["schemas"]["PaymentState"];
+            /** Is Unknown */
+            is_unknown: boolean;
+            /** Amount Mismatch */
+            amount_mismatch: boolean;
+            purpose: components["schemas"]["PaymentPurpose"] | null;
+            /** Amount */
+            amount: string;
+            /** Currency */
+            currency: string;
+            /** Tariff Name */
+            tariff_name: string | null;
+            client: components["schemas"]["ClientRef"] | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Paid At */
+            paid_at: string | null;
+            /**
+             * Waiting Panel
+             * @default false
+             */
+            waiting_panel: boolean;
+        };
+        /** PaymentSettingsIn */
+        PaymentSettingsIn: {
+            /** Invoice Lifetime Minutes */
+            invoice_lifetime_minutes: number;
+        };
+        /** PaymentSettingsOut */
+        PaymentSettingsOut: {
+            /** Providers */
+            providers: components["schemas"]["ProviderOut"][];
+            /** Currency */
+            currency: string;
+            /** Invoice Lifetime Minutes */
+            invoice_lifetime_minutes: number;
+        };
+        /**
+         * PaymentState
+         * @description Состояния платежа (01-domain, 0033).
+         * @enum {string}
+         */
+        PaymentState: "pending" | "paid" | "applied" | "declined" | "expired" | "cancelled" | "paid_not_applied" | "resolved_manually" | "refunded" | "partially_refunded";
+        /** PaymentsOut */
+        PaymentsOut: {
+            /** Payments */
+            payments: components["schemas"]["PaymentRow"][];
+            /** Time Zone */
+            time_zone: string;
         };
         /**
          * Period
          * @enum {string}
          */
         Period: "today" | "7d" | "30d";
+        /** PrefixDetailsOut */
+        PrefixDetailsOut: {
+            /** Prefix */
+            prefix: string;
+            /** Locked */
+            locked: boolean;
+        };
+        /** PrefixLockedOut */
+        PrefixLockedOut: {
+            /**
+             * Reason
+             * @default locked
+             * @constant
+             */
+            reason: "locked";
+            /** Message */
+            message: string;
+        };
+        /** ProviderKeysIn */
+        ProviderKeysIn: {
+            /** Credentials */
+            credentials: {
+                [key: string]: string;
+            };
+        };
+        /** ProviderOut */
+        ProviderOut: {
+            /** Code */
+            code: string;
+            /** Title */
+            title: string;
+            state: components["schemas"]["ConnectionState"];
+            /** Currencies */
+            currencies: string[];
+            /** Webhook Url */
+            webhook_url: string;
+        };
+        /** ProviderRejectedOut */
+        ProviderRejectedOut: {
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "invalid_keys" | "rejected";
+            /** Message */
+            message: string;
+        };
         /**
          * RevenueOut
          * @description Выручка и число оплат — только владельцу (1.20).
@@ -839,6 +1459,19 @@ export interface components {
          * @enum {string}
          */
         ShopState: "not_opened" | "open" | "paused";
+        /** SnapshotOut */
+        SnapshotOut: {
+            /** Tariff Id */
+            tariff_id: number;
+            /** Name */
+            name: string;
+            /** Duration Days */
+            duration_days: number | null;
+            /** Price */
+            price: string;
+            /** Device Limit */
+            device_limit: number;
+        };
         /** SquadOut */
         SquadOut: {
             /**
@@ -869,6 +1502,15 @@ export interface components {
             expiring_soon: number;
             revenue: components["schemas"]["RevenueOut"] | null;
         };
+        /** SubscriptionRef */
+        SubscriptionRef: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Panel Username */
+            panel_username: string;
+        };
         /**
          * TariffIn
          * @description Тариф «срок + безлимит» (2.1); другие типы — в v1 (2.3).
@@ -891,6 +1533,18 @@ export interface components {
             device_limit: number;
             /** Squad Uuids */
             squad_uuids: string[];
+        };
+        /** TariffOptionOut */
+        TariffOptionOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Duration Days */
+            duration_days: number | null;
+            /** Price */
+            price: string;
+            state: components["schemas"]["TariffState"];
         };
         /** TariffOut */
         TariffOut: {
@@ -957,6 +1611,11 @@ export interface components {
          * @enum {string}
          */
         Usage: "subscriptions" | "payments" | "promo_codes" | "successor";
+        /** UsernamePrefixIn */
+        UsernamePrefixIn: {
+            /** Username Prefix */
+            username_prefix: string;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -969,6 +1628,22 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** WaitingRow */
+        WaitingRow: {
+            /** Task Id */
+            task_id: number;
+            /** Name */
+            name: string;
+            /** Key */
+            key: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Payment Id */
+            payment_id: number | null;
         };
         /** WebhookDetailsOut */
         WebhookDetailsOut: {
@@ -984,6 +1659,8 @@ export interface components {
         };
         _Contact: string;
         _Description: string;
+        /** @enum {string} */
+        _Filter: "pending" | "paid" | "applied" | "declined" | "expired" | "cancelled" | "paid_not_applied" | "resolved_manually" | "refunded" | "partially_refunded" | "unknown";
         _Welcome: string;
         remnabay__web__admin___brand___Name: string;
         remnabay__web__admin___tariffs___Name: string;
@@ -1510,6 +2187,48 @@ export interface operations {
             };
         };
     };
+    update_username_prefix_api_admin_settings_panel_username_prefix_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UsernamePrefixIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PanelSettingsOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrefixLockedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     stats_api_admin_stats_get: {
         parameters: {
             query?: {
@@ -1818,6 +2537,624 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TariffOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    payment_settings_api_admin_settings_payment_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentSettingsOut"];
+                };
+            };
+        };
+    };
+    update_payment_settings_api_admin_settings_payment_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentSettingsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentSettingsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    connect_provider_api_admin_settings_payment_providers__code__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderKeysIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentSettingsOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderRejectedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disconnect_provider_api_admin_settings_payment_providers__code__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentSettingsOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    attention_list_api_admin_attention_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttentionOut"];
+                };
+            };
+        };
+    };
+    payments_list_api_admin_payments_get: {
+        parameters: {
+            query?: {
+                state?: components["schemas"]["_Filter"] | null;
+                since?: string | null;
+                until?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    payment_details_api_admin_payments__payment_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                payment_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentCardOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_api_admin_payments__payment_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                payment_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentCardOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionRejectedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    apply_as_new_api_admin_payments__payment_id__apply_as_new_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                payment_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentCardOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionRejectedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_api_admin_payments__payment_id__resolve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                payment_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CommentIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentCardOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionRejectedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bind_api_admin_payments__payment_id__bind_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                payment_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BindIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentCardOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionRejectedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    tariff_options_api_admin_tariff_options_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TariffOptionOut"][];
+                };
+            };
+        };
+    };
+    client_by_telegram_api_admin_clients_by_telegram__telegram_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                telegram_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientLookupOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    operation_attempts_api_admin_operations__task_id__attempts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationAttemptsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_operation_api_admin_operations__task_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttentionOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionRejectedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_operation_api_admin_operations__task_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CommentIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttentionOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionRejectedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_operation_api_admin_operations__task_id__resolve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CommentIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttentionOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionRejectedOut"];
                 };
             };
             /** @description Validation Error */

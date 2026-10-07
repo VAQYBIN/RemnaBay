@@ -30,6 +30,7 @@ from remnabay.messaging import (
     notify_team,
     send_message,
     send_to_client,
+    tell_action_failed,
 )
 from remnabay.queue import (
     AttemptResult,
@@ -409,3 +410,14 @@ async def test_4_33_message_is_sent_once_after_refusals(queue_engine: AsyncEngin
         AttemptResult.REJECTED,
         AttemptResult.DONE,
     ]
+
+
+async def test_4_32_client_is_told_that_action_failed(db_session: AsyncSession) -> None:
+    """4.32: команда отменила проваленную операцию — клиент получает «Не удалось выполнить
+    действие, напишите в поддержку» с кнопкой «Главное меню»."""
+    client = await make_client(db_session, telegram_id=4242)
+    await tell_action_failed(db_session, client.id)
+    args = await db_session.scalar(select(QueueTask.args).where(QueueTask.name == "messages.send"))
+    message = SendArgs.model_validate(args)
+    assert message.text_key == "event.action_failed"
+    assert [b.text_key for b in message.buttons] == ["btn.main_menu"]

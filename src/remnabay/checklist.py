@@ -24,7 +24,9 @@ from remnabay.panel import (
     PanelUnavailableError,
     is_compatible_version,
 )
+from remnabay.panel_names import username_prefix
 from remnabay.panel_sync import webhook_received
+from remnabay.payments import Providers
 from remnabay.shop import (
     SHOP_STATE,
     SHOP_SUPPORT_CONTACT,
@@ -47,6 +49,8 @@ class ItemKey(StrEnum):
     PAYMENT = "payment"
     SUPPORT = "support"
     TRIAL = "trial"
+    # Префикс имён пользователей в панели: необязательный (решение 0057)
+    USERNAME_PREFIX = "username_prefix"
     MIGRATION = "migration"
 
 
@@ -55,7 +59,7 @@ class ItemStatus(StrEnum):
     TODO = "todo"
     # Лимит устройств выключен: предупреждение, открытие не блокирует (1.10)
     WARNING = "warning"
-    # Необязательный пункт: миграция (1.12)
+    # Необязательный пункт: миграция (1.12), префикс имён в панели (решение 0057)
     OPTIONAL = "optional"
 
 
@@ -145,11 +149,19 @@ def _device_limit_item(facts: _PanelFacts) -> ChecklistItem:
     return ChecklistItem(ItemKey.DEVICE_LIMIT, ItemStatus.WARNING)
 
 
-async def payment_methods_ready(session: AsyncSession) -> bool:
-    """Есть хотя бы один способ оплаты (1.14). Провайдеры и их ключи — блок 3:
-    до него способов оплаты нет."""
-    del session
-    return False
+def _prefix_item(prefix: str, locked: bool) -> ChecklistItem:
+    """Решение 0057: необязательный пункт; выполнен, когда префикс зафиксирован."""
+    return ChecklistItem(
+        ItemKey.USERNAME_PREFIX,
+        ItemStatus.DONE if locked else ItemStatus.OPTIONAL,
+        {"prefix": prefix, "locked": locked},
+    )
+
+
+async def payment_methods_ready(session: AsyncSession, providers: Providers) -> bool:
+    """Есть хотя бы один способ оплаты (1.14): провайдер подключён, его ключи
+    расшифровываются (0049) и он принимает валюту учёта (3.33)."""
+    return bool(await providers.available(session))
 
 
 async def build_checklist(
@@ -158,6 +170,8 @@ async def build_checklist(
     *,
     webhook_url: str,
     webhook_secret: str | None,
+    dev_mode: bool,
+    providers: Providers,
 ) -> Checklist:
     """Состояние каждого пункта (1.7). `webhook_secret` — только для владельца."""
     facts = await _panel_facts(panel)
@@ -185,7 +199,7 @@ async def build_checklist(
         ChecklistItem(ItemKey.TARIFFS, ItemStatus.DONE if on_sale else ItemStatus.TODO),
         ChecklistItem(
             ItemKey.PAYMENT,
-            ItemStatus.DONE if await payment_methods_ready(session) else ItemStatus.TODO,
+            ItemStatus.DONE if await payment_methods_ready(session, providers) else ItemStatus.TODO,
         ),
         ChecklistItem(ItemKey.SUPPORT, ItemStatus.DONE if support else ItemStatus.TODO),
         # 1.7: информационный пункт, всегда выполнен — оба варианта нормальны
@@ -194,6 +208,7 @@ async def build_checklist(
             ItemStatus.DONE,
             {"enabled": await get_setting(session, TRIAL_ENABLED)},
         ),
+        _prefix_item(*await username_prefix(session, dev_mode=dev_mode)),
         # 1.12: необязательный; ведёт к усыновлению или импорту (блок 9)
         ChecklistItem(ItemKey.MIGRATION, ItemStatus.OPTIONAL),
     ]

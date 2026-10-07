@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from remnabay.access import VIA_BOT, create_session
 from remnabay.config import load_settings
 from remnabay.domain.team import TeamMember
+from remnabay.payments import Providers
 from remnabay.web.admin import SESSION_COOKIE
 from remnabay.web.app import create_app
 from remnabay.web.deps import get_session
@@ -73,6 +74,11 @@ class Shop:
         )
         update = Update(update_id=next(self.updates), callback_query=query)
         await self.dispatcher.feed_update(self.bot, update)
+
+    def use_providers(self, providers: Providers) -> None:
+        """Платёжные провайдеры для API и бота (подставные в тестах)."""
+        self.app.state.providers = providers
+        self.dispatcher.workflow_data["providers"] = providers
 
     async def sign_in(self, member: TeamMember) -> None:
         """Сессия участника без прохождения входа — для тестов других разделов."""

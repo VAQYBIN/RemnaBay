@@ -7,7 +7,6 @@ from typing import Any
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from remnabay import checklist
 from remnabay.domain.panel_events import PanelEvent
 from remnabay.domain.tariffs import TariffState
 from remnabay.domain.team import TeamMember, TeamRole
@@ -16,6 +15,7 @@ from remnabay.queue._models import QueuePeriodicSlot
 from remnabay.shop import SHOP_STATE, ShopState
 from tests.brand_support import make_svg
 from tests.domain_support import add, make_tariff, make_team_member, put_setting
+from tests.payment_support import connect_fake, fake_providers
 from tests.web_support import Shop, running_shop
 
 ITEMS = [
@@ -27,6 +27,7 @@ ITEMS = [
     "payment",
     "support",
     "trial",
+    "username_prefix",
     "migration",
 ]
 
@@ -47,14 +48,10 @@ async def owner(shop: Shop) -> TeamMember:
 
 
 @pytest.fixture
-def payments_ready(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Способ оплаты подключён — провайдеры появятся в блоке 3."""
-
-    async def ready(session: AsyncSession) -> bool:
-        del session
-        return True
-
-    monkeypatch.setattr(checklist, "payment_methods_ready", ready)
+async def payments_ready(shop: Shop) -> None:
+    """Способ оплаты подключён: ключи тестового провайдера сохранены."""
+    shop.use_providers(fake_providers())
+    await connect_fake(shop.session)
 
 
 async def _items(shop: Shop) -> dict[str, Any]:
@@ -85,6 +82,7 @@ async def test_1_7_checklist_shows_every_item(shop: Shop, owner: TeamMember) -> 
         "payment": "todo",
         "support": "todo",
         "trial": "done",
+        "username_prefix": "optional",
         "migration": "optional",
     }
 

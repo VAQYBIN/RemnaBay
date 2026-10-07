@@ -23,8 +23,17 @@ from remnabay.config import Settings, load_settings
 from remnabay.crypto import SecretBox
 from remnabay.db import create_engine, create_session_factory
 from remnabay.panel import PanelClient
+from remnabay.payments import Providers
+from remnabay.payments.yookassa import YooKassaKind, yookassa_http
 from remnabay.shop_settings import TELEGRAM_WEBHOOK_SECRET, generated_secret
-from remnabay.web import admin, admin_static, brand_files, panel_webhook, telegram_webhook
+from remnabay.web import (
+    admin,
+    admin_static,
+    brand_files,
+    panel_webhook,
+    payment_webhook,
+    telegram_webhook,
+)
 from remnabay.web.admin import LOGIN_PAGE_PATH
 
 HEALTH_PATH = "/health"
@@ -58,7 +67,12 @@ def create_app(settings: Settings, *, startup: bool = False) -> FastAPI:
     oidc = TelegramOidc(settings.bot_id, settings.telegram_login_client_secret.get_secret_value())
     # Чек-лист проверяет панель из веба (1.8, 1.10)
     panel = PanelClient(str(settings.panel_url), settings.panel_token.get_secret_value())
-    dispatcher = create_dispatcher(sessions, admin_login_url=settings.public_link(LOGIN_PAGE_PATH))
+    # Платёжные провайдеры с ключами оператора из админки (3.27)
+    yookassa = yookassa_http()
+    providers = Providers(box, [YooKassaKind(yookassa)])
+    dispatcher = create_dispatcher(
+        sessions, admin_login_url=settings.public_link(LOGIN_PAGE_PATH), providers=providers
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
@@ -79,6 +93,7 @@ def create_app(settings: Settings, *, startup: bool = False) -> FastAPI:
             await polling.stop()
         await bot.session.close()
         await panel.aclose()
+        await yookassa.aclose()
         await oidc.aclose()
         await engine.dispose()
 
@@ -98,7 +113,9 @@ def create_app(settings: Settings, *, startup: bool = False) -> FastAPI:
     app.state.dispatcher = dispatcher
     app.state.panel = panel
     app.state.oidc = oidc
+    app.state.providers = providers
     app.include_router(panel_webhook.router)
+    app.include_router(payment_webhook.router)
     app.include_router(telegram_webhook.router)
     app.include_router(admin.build_router())
     app.include_router(admin_static.build_router())

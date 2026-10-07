@@ -4,7 +4,16 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, FastAPI
 
-from remnabay.web.admin import _about, _auth, _brand, _shop, _stats, _tariffs
+from remnabay.web.admin import (
+    _about,
+    _auth,
+    _brand,
+    _payment_settings,
+    _payments,
+    _shop,
+    _stats,
+    _tariffs,
+)
 from remnabay.web.admin._auth import (
     ADMIN_PATH,
     LOGIN_COOKIE,
@@ -25,6 +34,8 @@ def build_router() -> APIRouter:
     router.include_router(_shop.router)
     router.include_router(_stats.router)
     router.include_router(_tariffs.router)
+    router.include_router(_payment_settings.router)
+    router.include_router(_payments.router)
     router.include_router(_about.router)
     return router
 

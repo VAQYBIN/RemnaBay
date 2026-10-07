@@ -32,6 +32,10 @@ from remnabay.messaging._tasks import (
     send_message,
 )
 
+# «Главное меню» — на каждом событии (03-screens); нажатие разбирает бот
+MAIN_MENU_CALLBACK = "menu:main"
+MAIN_MENU_BUTTON = ButtonArgs(text_key="btn.main_menu", callback_data=MAIN_MENU_CALLBACK)
+
 
 async def send_to_client(
     session: AsyncSession,
@@ -61,6 +65,12 @@ async def send_to_client(
     await send_message.enqueue(session, args)
 
 
+async def tell_action_failed(session: AsyncSession, client_id: int) -> None:
+    """С17 «Не удалось выполнить действие»: команда отменила проваленную операцию
+    клиента (4.32). Вызывает обработчик отмены операции (`on_cancelled`)."""
+    await send_to_client(session, client_id, "event.action_failed", buttons=[MAIN_MENU_BUTTON])
+
+
 async def notify_team(
     session: AsyncSession, text_key: str, *, variables: dict[str, str] | None = None
 ) -> None:
@@ -80,6 +90,8 @@ async def notify_team(
 
 
 __all__ = [
+    "MAIN_MENU_BUTTON",
+    "MAIN_MENU_CALLBACK",
     "AmbiguousDeliveryError",
     "Button",
     "ButtonArgs",
@@ -95,4 +107,5 @@ __all__ = [
     "notify_team",
     "send_message",
     "send_to_client",
+    "tell_action_failed",
 ]

@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from remnabay import runtime
 from remnabay.attention import attention
 from remnabay.config import Settings
+from remnabay.crypto import SecretBox
 from remnabay.db import create_engine
 from remnabay.messaging import TelegramSender, notify_team, send_message
 from remnabay.panel import PanelClient, PanelUnavailableError
@@ -28,7 +29,15 @@ from remnabay.panel_sync import (
     reconcile_subscription,
     sync_page,
 )
-from remnabay.payments import NotReadyApplier, apply_payment, processing_notice
+from remnabay.payments import (
+    Providers,
+    ShopApplier,
+    apply_payment,
+    expire_invoice,
+    poll_invoice,
+    processing_notice,
+)
+from remnabay.payments.yookassa import YooKassaKind, yookassa_http
 from remnabay.queue import RetryPolicy, TaskRegistry, Worker, WorkerConfig
 from remnabay.shop_settings import (
     RETRY_MAX_ATTEMPTS,
@@ -52,6 +61,8 @@ TASKS = TaskRegistry(
         health_check,
         apply_payment,
         processing_notice,
+        expire_invoice,
+        poll_invoice,
     )
 )
 # Периодические задачи: сверка всех подписок с панелью (4.8), проверка связи с ней (4.13)
@@ -149,6 +160,7 @@ def run(settings: Settings) -> None:
         engine = create_engine(settings, pool_size=config.pool_size)
         sender = TelegramSender(settings.bot_token.get_secret_value())
         panel = PanelClient(str(settings.panel_url), settings.panel_token.get_secret_value())
+        yookassa = yookassa_http()
         try:
             queue = Worker(
                 engine,
@@ -159,12 +171,19 @@ def run(settings: Settings) -> None:
                 unavailable=UNAVAILABLE,
                 on_failed=notify_operation_failed,
             )
+            box = SecretBox(settings.encryption_key.get_secret_value())
             with runtime.use(
-                runtime.Runtime(sender=sender, panel=panel, payments=NotReadyApplier())
+                runtime.Runtime(
+                    sender=sender,
+                    panel=panel,
+                    payments=ShopApplier(dev_mode=settings.dev_mode),
+                    providers=Providers(box, [YooKassaKind(yookassa)]),
+                )
             ):
                 await run_worker(stop, queue=queue)
         finally:
             await panel.aclose()
+            await yookassa.aclose()
             await sender.close()
             await engine.dispose()
 

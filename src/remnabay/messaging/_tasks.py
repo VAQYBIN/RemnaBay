@@ -37,11 +37,14 @@ _SAFE_TO_SEND = (None, AttemptResult.REJECTED)
 
 
 class ButtonArgs(BaseModel):
-    """Кнопка: подпись по ключу текста, ссылка или текст для копирования."""
+    """Кнопка: подпись по ключу текста; ссылка, текст для копирования или нажатие,
+    которое разбирает бот; смысловой цвет."""
 
     text_key: str
     url: str | None = None
     copy_text: str | None = None
+    callback_data: str | None = None
+    style: str | None = None
 
 
 class SendArgs(BaseModel):
@@ -95,7 +98,13 @@ async def _render(session: AsyncSession, args: SendArgs) -> OutgoingMessage:
         )
     texts = await load_texts(session)
     buttons = tuple(
-        Button(texts.render(button.text_key, language), url=button.url, copy_text=button.copy_text)
+        Button(
+            texts.render(button.text_key, language),
+            url=button.url,
+            copy_text=button.copy_text,
+            callback_data=button.callback_data,
+            style=button.style,
+        )
         for button in args.buttons
     )
     return OutgoingMessage(texts.render(args.text_key, language, **args.variables), buttons)

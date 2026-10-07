@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from enum import StrEnum
+from uuid import UUID
 
 from sqlalchemy import (
     BigInteger,
@@ -16,6 +17,7 @@ from sqlalchemy import (
     false,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from remnabay.db import Base, str_enum_type
@@ -69,6 +71,8 @@ class Payment(Base):
         CheckConstraint("discount_amount >= 0", name="discount_not_negative"),
         CheckConstraint("bonus_amount >= 0", name="bonus_not_negative"),
         CheckConstraint("unused_value_amount >= 0", name="unused_value_not_negative"),
+        CheckConstraint("paid_amount >= 0", name="paid_amount_not_negative"),
+        CheckConstraint("(paid_amount IS NULL) = (paid_currency IS NULL)", name="paid_complete"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -106,10 +110,29 @@ class Payment(Base):
     # Повторное «Оплатить» на том же экране подтверждения не создаёт второй счёт (3.5)
     idempotency_key: Mapped[str | None] = mapped_column(String(64), unique=True)
 
+    # Сколько подтвердил провайдер. Не совпало со счётом — платёж не применяется
+    # автоматически (3.39, решение 0056)
+    paid_amount: Mapped[Money | None] = mapped_column(MONEY)
+    paid_currency: Mapped[str | None] = mapped_column(String(3))
+
+    # Одна операция — покупка или продление одной подписки: новый счёт за неё заменяет
+    # неоплаченный прежний (3.10), а если оплачены оба, вторая оплата продлевает
+    # подписку, созданную первой (3.11). Счета одной операции разделяют этот номер
+    operation_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), index=True)
+    # Команда решила применить платёж созданием новой подписки (4.22)
+    new_subscription: Mapped[bool] = mapped_column(Boolean, server_default=false())
+
     created_at: Mapped[CreatedAt]
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    @property
+    def amount_mismatch(self) -> bool:
+        """Провайдер подтвердил не ту сумму или валюту, что в счёте (3.39)."""
+        if self.paid_amount is None or self.is_unknown:
+            return False
+        return self.paid_amount != self.amount or self.paid_currency != self.currency
 
 
 class RefundMethod(StrEnum):

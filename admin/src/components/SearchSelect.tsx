@@ -47,7 +47,7 @@ export function SearchSelect({
       <PopoverContent className="glass-float w-(--radix-popover-trigger-width) min-w-64 p-0" align="start">
         <Command className="bg-transparent">
           <CommandInput placeholder={searchPlaceholder} />
-          <CommandList className="rb-scroll max-h-72 px-1 pb-1">
+          <CommandList className="max-h-72 px-1 pb-1">
             <CommandEmpty>{emptyText}</CommandEmpty>
             {options.map((option) => (
               <CommandItem
