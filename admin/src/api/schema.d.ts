@@ -367,6 +367,133 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/tariffs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Tariffs */
+        get: operations["tariffs_api_admin_tariffs_get"];
+        put?: never;
+        /**
+         * Create
+         * @description Новый тариф «срок + безлимит» в продаже (2.1–2.3).
+         */
+        post: operations["create_api_admin_tariffs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/panel/squads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Squads
+         * @description Сквады из панели — для выбора в форме тарифа (2.2).
+         */
+        get: operations["squads_api_admin_panel_squads_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/tariffs/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Order
+         * @description Порядок тарифов в продаже, который видит клиент (2.4).
+         */
+        put: operations["order_api_admin_tariffs_order_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/tariffs/{tariff_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update
+         * @description Новые параметры применяются при следующей покупке или продлении (2.5, 2.6).
+         */
+        put: operations["update_api_admin_tariffs__tariff_id__put"];
+        post?: never;
+        /**
+         * Delete
+         * @description Удалить тариф без подписок и платежей; иначе — только архив (2.8).
+         *
+         *     `confirm_last` — владелец видел предупреждение «последний тариф в продаже» (2.9).
+         */
+        delete: operations["delete_api_admin_tariffs__tariff_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/tariffs/{tariff_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive
+         * @description В архив (2.7); последний тариф в продаже — с подтверждением (2.9).
+         */
+        post: operations["archive_api_admin_tariffs__tariff_id__archive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/tariffs/{tariff_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore
+         * @description Вернуть в продажу (2.7).
+         */
+        post: operations["restore_api_admin_tariffs__tariff_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/about": {
         parameters: {
             query?: never;
@@ -435,7 +562,7 @@ export interface components {
         };
         /** BrandSettingsIn */
         BrandSettingsIn: {
-            name: components["schemas"]["_Name"];
+            name: components["schemas"]["remnabay__web__admin___brand___Name"];
             primary_color: components["schemas"]["Color"];
             secondary_color?: components["schemas"]["Color"] | null;
             welcome_text?: components["schemas"]["_Welcome"] | null;
@@ -472,6 +599,14 @@ export interface components {
             primary_color: components["schemas"]["Color"];
             secondary_color?: components["schemas"]["Color"] | null;
         };
+        /** ConfirmIn */
+        ConfirmIn: {
+            /**
+             * Confirm Last
+             * @default false
+             */
+            confirm_last: boolean;
+        };
         /** ExpiringOut */
         ExpiringOut: {
             /** Subscription Id */
@@ -501,6 +636,19 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** InUseOut */
+        InUseOut: {
+            /**
+             * Reason
+             * @default in_use
+             * @constant
+             */
+            reason: "in_use";
+            /** Message */
+            message: string;
+            /** Usage */
+            usage: components["schemas"]["Usage"][];
+        };
         /**
          * ItemKey
          * @enum {string}
@@ -523,6 +671,17 @@ export interface components {
          * @enum {string}
          */
         ItemStatus: "done" | "todo" | "warning" | "optional";
+        /** LastOnSaleOut */
+        LastOnSaleOut: {
+            /**
+             * Reason
+             * @default last_on_sale
+             * @constant
+             */
+            reason: "last_on_sale";
+            /** Message */
+            message: string;
+        };
         /** LoginPollOut */
         LoginPollOut: {
             /**
@@ -577,6 +736,11 @@ export interface components {
         NotReadyOut: {
             /** Missing */
             missing: components["schemas"]["ItemKey"][];
+        };
+        /** OrderIn */
+        OrderIn: {
+            /** Tariff Ids */
+            tariff_ids: number[];
         };
         /**
          * OverviewOut
@@ -675,6 +839,16 @@ export interface components {
          * @enum {string}
          */
         ShopState: "not_opened" | "open" | "paused";
+        /** SquadOut */
+        SquadOut: {
+            /**
+             * Uuid
+             * Format: uuid
+             */
+            uuid: string;
+            /** Name */
+            name: string;
+        };
         /** StatsOut */
         StatsOut: {
             period: components["schemas"]["Period"];
@@ -696,6 +870,68 @@ export interface components {
             revenue: components["schemas"]["RevenueOut"] | null;
         };
         /**
+         * TariffIn
+         * @description Тариф «срок + безлимит» (2.1); другие типы — в v1 (2.3).
+         */
+        TariffIn: {
+            /**
+             * Type
+             * @default term_unlimited
+             * @constant
+             */
+            type: "term_unlimited";
+            name: components["schemas"]["remnabay__web__admin___tariffs___Name"];
+            /** @default  */
+            description: components["schemas"]["_Description"];
+            /** Duration Days */
+            duration_days: number;
+            /** Price */
+            price: number | string;
+            /** Device Limit */
+            device_limit: number;
+            /** Squad Uuids */
+            squad_uuids: string[];
+        };
+        /** TariffOut */
+        TariffOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            type: components["schemas"]["TariffType"];
+            state: components["schemas"]["TariffState"];
+            /** Duration Days */
+            duration_days: number | null;
+            /** Price */
+            price: string;
+            /** Device Limit */
+            device_limit: number;
+            /** Squad Uuids */
+            squad_uuids: string[];
+            /** In Use */
+            in_use: boolean;
+        };
+        /**
+         * TariffState
+         * @enum {string}
+         */
+        TariffState: "on_sale" | "archived" | "closed";
+        /**
+         * TariffType
+         * @description Один из четырёх типов; свободная комбинация параметров не допускается (0009).
+         * @enum {string}
+         */
+        TariffType: "term_unlimited" | "term_quota" | "term_package" | "package_only";
+        /** TariffsOut */
+        TariffsOut: {
+            /** Currency */
+            currency: string;
+            /** Tariffs */
+            tariffs: components["schemas"]["TariffOut"][];
+        };
+        /**
          * TeamRole
          * @description Две фиксированные роли (0004).
          * @enum {string}
@@ -715,6 +951,12 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /**
+         * Usage
+         * @description Почему тариф нельзя удалить, только архивировать (2.8).
+         * @enum {string}
+         */
+        Usage: "subscriptions" | "payments" | "promo_codes" | "successor";
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -741,8 +983,10 @@ export interface components {
             webhook_secret: string;
         };
         _Contact: string;
-        _Name: string;
+        _Description: string;
         _Welcome: string;
+        remnabay__web__admin___brand___Name: string;
+        remnabay__web__admin___tariffs___Name: string;
     };
     responses: never;
     parameters: never;
@@ -1313,6 +1557,276 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExpiringOut"][];
+                };
+            };
+        };
+    };
+    tariffs_api_admin_tariffs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TariffsOut"];
+                };
+            };
+        };
+    };
+    create_api_admin_tariffs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TariffIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TariffOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    squads_api_admin_panel_squads_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SquadOut"][];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    order_api_admin_tariffs_order_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrderIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TariffsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_api_admin_tariffs__tariff_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tariff_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TariffIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TariffOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_api_admin_tariffs__tariff_id__delete: {
+        parameters: {
+            query?: {
+                confirm_last?: boolean;
+            };
+            header?: never;
+            path: {
+                tariff_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LastOnSaleOut"] | components["schemas"]["InUseOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archive_api_admin_tariffs__tariff_id__archive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tariff_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TariffOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LastOnSaleOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_api_admin_tariffs__tariff_id__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tariff_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TariffOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

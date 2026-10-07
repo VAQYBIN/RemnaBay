@@ -10,6 +10,7 @@ import { LoginSettingsPage } from '@/pages/settings/LoginSettingsPage'
 import { PanelSettingsPage } from '@/pages/settings/PanelSettingsPage'
 import { SettingsLayout } from '@/pages/settings/SettingsLayout'
 import { ShopSettingsPage } from '@/pages/settings/ShopSettingsPage'
+import { TariffsPage } from '@/pages/TariffsPage'
 
 /** Навигация админки (03-screens, «Навигация») — разделы этого этапа. */
 export const router = createBrowserRouter(
@@ -21,6 +22,7 @@ export const router = createBrowserRouter(
       children: [
         { index: true, Component: HomePage },
         { path: 'expiring', Component: ExpiringPage },
+        { path: 'tariffs', Component: TariffsPage },
         {
           path: 'settings',
           Component: SettingsLayout,

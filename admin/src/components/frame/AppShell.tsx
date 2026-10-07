@@ -1,4 +1,4 @@
-import { House, Info, LogOut, Settings, UserRound } from 'lucide-react'
+import { House, Info, LogOut, Settings, Tags, UserRound } from 'lucide-react'
 import { NavLink, Navigate, Outlet } from 'react-router'
 
 import { Button } from '@/components/ui/button'
@@ -23,6 +23,7 @@ type NavItem = { to: string; label: string; icon: typeof House; ownerOnly?: bool
  *  недоступное роли не показывается (03-screens, «Принципы админки»). */
 const NAV: NavItem[] = [
   { to: '/', label: 'Главная', icon: House },
+  { to: '/tariffs', label: 'Тарифы', icon: Tags, ownerOnly: true },
   { to: '/settings', label: 'Настройки', icon: Settings, ownerOnly: true },
   { to: '/about', label: 'О программе', icon: Info },
 ]
