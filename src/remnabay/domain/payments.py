@@ -83,7 +83,8 @@ class Payment(Base):
     )
     is_unknown: Mapped[bool] = mapped_column(Boolean, server_default=false())
 
-    tariff_id: Mapped[int | None] = mapped_column(ForeignKey("tariffs.id"))
+    # Индекс — для проверки «по тарифу были платежи» (2.8)
+    tariff_id: Mapped[int | None] = mapped_column(ForeignKey("tariffs.id"), index=True)
     # К одному платежу — не больше одного промокода (8.5)
     promo_code_id: Mapped[int | None] = mapped_column(ForeignKey("promo_codes.id"))
     # Параметры тарифа и цена на момент создания платежа (3.7, 3.37)

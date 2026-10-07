@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from remnabay.domain.payments import Payment
+from remnabay.domain.promo import PromoCode, PromoKind, promo_code_tariffs
 from remnabay.domain.tariffs import Tariff, TariffState, TariffType
 from remnabay.domain.team import TeamMember, TeamRole
 from remnabay.journal import ActorType, JournalEntry
@@ -106,7 +107,7 @@ async def test_2_1_owner_creates_term_unlimited_tariff(shop: Shop) -> None:
     assert tariff.duration_days == 30
     assert tariff.price == Decimal("199.00")
     assert tariff.device_limit == 3
-    assert [str(squad) for squad in tariff.squad_uuids] == [GERMANY, FINLAND]
+    assert {str(squad) for squad in tariff.squad_uuids} == {GERMANY, FINLAND}
     assert tariff.traffic_limit_bytes is None
     assert created["type"] == "term_unlimited"
     assert created["in_use"] is False
@@ -320,14 +321,53 @@ async def test_2_5_saving_unchanged_tariff_writes_nothing(shop: Shop) -> None:
 
 
 @pytest.mark.usefixtures("owner")
+async def test_2_5_same_values_written_differently_are_not_a_change(shop: Shop) -> None:
+    """4.25: «199» вместо «199.00» и сквады в другом порядке — не изменение, журнал молчит."""
+    created = await _create(shop, squad_uuids=[GERMANY, FINLAND])
+
+    response = await shop.http.put(
+        f"{TARIFFS}/{created['id']}", json=_body(price="199", squad_uuids=[FINLAND, GERMANY])
+    )
+
+    assert response.status_code == 200
+    assert response.json()["price"] == "199.00"
+    assert await _journal(shop.session, "tariff.changed") == []
+
+
+@pytest.mark.usefixtures("owner")
+async def test_2_1_price_is_stored_to_kopeck(shop: Shop) -> None:
+    """2.1: цена «199» сохраняется как 199.00 — до копейки."""
+    created = await _create(shop, price="199")
+
+    assert created["price"] == "199.00"
+
+
+@pytest.mark.usefixtures("owner")
 async def test_2_3_other_types_are_not_edited_in_mvp(shop: Shop) -> None:
     """2.3: тариф другого типа (данные — MVP) в админке MVP не редактируется."""
     package = make_tariff(type=TariffType.TERM_PACKAGE, traffic_limit_bytes=50 * GB)
     await add(shop.session, package)
 
+    # Ответ не зависит от панели: тип проверяется до запроса сквадов
+    shop.panel.down = True
+
     response = await shop.http.put(f"{TARIFFS}/{package.id}", json=_body())
 
     assert response.status_code == 422
+
+
+@pytest.mark.usefixtures("owner")
+async def test_2_3_other_types_do_not_return_to_sale_in_mvp(shop: Shop) -> None:
+    """2.3: архивный тариф другого типа в MVP в продажу не возвращается."""
+    package = make_tariff(
+        type=TariffType.TERM_PACKAGE, traffic_limit_bytes=50 * GB, state=TariffState.ARCHIVED
+    )
+    await add(shop.session, package)
+
+    response = await shop.http.post(f"{TARIFFS}/{package.id}/restore")
+
+    assert response.status_code == 422
+    assert await _names_on_sale(shop.session) == []
 
 
 # --- 2.7, 2.9: архив ---
@@ -432,6 +472,24 @@ async def test_2_8_tariff_with_invoice_is_only_archived(shop: Shop) -> None:
     assert response.status_code == 409
     assert response.json()["detail"]["usage"] == ["payments"]
     assert await shop.session.scalar(select(Payment.tariff_id)) == created["id"]
+
+
+@pytest.mark.usefixtures("owner")
+async def test_2_8_tariff_in_promo_code_is_only_archived(shop: Shop) -> None:
+    """2.8, 0055: тариф указан в промокоде — после удаления ограничение промокода пропало бы."""
+    created = await _create(shop)
+    await _create(shop, name="Год", duration_days=365)
+    promo = PromoCode(code="FIRST", kind=PromoKind.PERCENT_DISCOUNT, discount_percent=20)
+    await add(shop.session, promo)
+    await shop.session.execute(
+        promo_code_tariffs.insert().values(promo_code_id=promo.id, tariff_id=created["id"])
+    )
+
+    response = await shop.http.delete(f"{TARIFFS}/{created['id']}")
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["usage"] == ["promo_codes"]
+    assert {t["name"]: t["in_use"] for t in await _list(shop)} == {"Месяц": True, "Год": False}
 
 
 @pytest.mark.usefixtures("owner")

@@ -22,6 +22,7 @@ from remnabay.tariffs import (
     check_squads,
     create_tariff,
     delete_tariff,
+    ensure_editable,
     get_tariff,
     list_tariffs,
     reorder_tariffs,
@@ -77,11 +78,11 @@ class TariffIn(BaseModel):
     name: _Name
     description: _Description = ""
     duration_days: Annotated[int, Field(ge=1, le=MAX_DURATION_DAYS)]
-    # Цена больше нуля: бесплатный доступ — это триал (предложение, open-questions)
+    # Цена больше нуля: бесплатный доступ — это триал (0055)
     price: Annotated[Decimal, Field(gt=0, max_digits=14, decimal_places=2)]
     # Лимит устройств обязателен, не меньше 1 (0054)
     device_limit: Annotated[int, Field(ge=1, le=MAX_DEVICE_LIMIT)]
-    # Хотя бы один сквад (предложение, open-questions)
+    # Хотя бы один сквад, как у триала (0055)
     squad_uuids: Annotated[list[UUID], Field(min_length=1, max_length=MAX_SQUADS)]
 
     def params(self) -> TariffParams:
@@ -91,7 +92,7 @@ class TariffIn(BaseModel):
             duration_days=self.duration_days,
             price=self.price,
             device_limit=self.device_limit,
-            squad_uuids=tuple(dict.fromkeys(self.squad_uuids)),
+            squad_uuids=tuple(self.squad_uuids),
         )
 
 
@@ -228,6 +229,8 @@ async def update(
     """Новые параметры применяются при следующей покупке или продлении (2.5, 2.6)."""
     try:
         current = await get_tariff(session, tariff_id)
+        # Тип — до обращения к панели: ответ не зависит от того, доступна ли она
+        ensure_editable(current)
         await _check_squads(request, body, already=list(current.squad_uuids))
         tariff = await update_tariff(session, tariff_id, body.params(), member_id=owner.id)
     except TariffError as error:

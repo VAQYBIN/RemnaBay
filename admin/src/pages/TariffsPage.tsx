@@ -74,6 +74,10 @@ function isLastOnSale(error: unknown): boolean {
   return typeof detail === 'object' && detail !== null && 'reason' in detail && detail.reason === 'last_on_sale'
 }
 
+function editable(tariff: Tariff): boolean {
+  return tariff.type === 'term_unlimited'
+}
+
 function moved(ids: number[], id: number, to: number): number[] {
   const next = ids.filter((other) => other !== id)
   next.splice(Math.max(0, Math.min(to, next.length)), 0, id)
@@ -302,7 +306,15 @@ function TariffForm({
 type Confirm = { kind: 'archive' | 'delete'; tariff: Tariff; last: boolean }
 
 /** Подтверждение: архивация последнего тарифа в продаже (2.9), удаление (2.8). */
-function ConfirmDialog({ confirm, onClose }: { confirm: Confirm | null; onClose: () => void }) {
+function ConfirmDialog({
+  confirm,
+  onClose,
+  onLastOnSale,
+}: {
+  confirm: Confirm | null
+  onClose: () => void
+  onLastOnSale: () => void
+}) {
   const queryClient = useQueryClient()
   const archive = $api.useMutation('post', '/api/admin/tariffs/{tariff_id}/archive')
   const remove = $api.useMutation('delete', '/api/admin/tariffs/{tariff_id}')
@@ -317,7 +329,20 @@ function ConfirmDialog({ confirm, onClose }: { confirm: Confirm | null; onClose:
     if (!confirm) return
     const path = { tariff_id: confirm.tariff.id }
     if (confirm.kind === 'archive') archive.mutate({ params: { path }, body: { confirm_last: true } }, done)
-    else remove.mutate({ params: { path, query: { confirm_last: confirm.last } } }, done)
+    else
+      remove.mutate(
+        { params: { path, query: { confirm_last: confirm.last } } },
+        {
+          ...done,
+          // Другие тарифы успели уйти из продажи — показать предупреждение (2.9)
+          onError: (error) => {
+            if (isLastOnSale(error)) {
+              remove.reset()
+              onLastOnSale()
+            }
+          },
+        },
+      )
   }
   const close = (open: boolean) => {
     if (open) return
@@ -433,6 +458,7 @@ export function TariffsPage() {
   }
 
   const menu = (tariff: Tariff) => (
+    // Тарифы других типов (данные — MVP) в админке MVP не меняются и не возвращаются в продажу (2.3)
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon-sm" aria-label={`Действия с тарифом ${tariff.name}`}>
@@ -440,21 +466,30 @@ export function TariffsPage() {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="glass-float w-56">
-        <DropdownMenuItem onSelect={() => setEditing(tariff)}>
-          <Pencil />
-          Изменить
-        </DropdownMenuItem>
+        {editable(tariff) && (
+          <DropdownMenuItem onSelect={() => setEditing(tariff)}>
+            <Pencil />
+            Изменить
+          </DropdownMenuItem>
+        )}
         {tariff.state === 'on_sale' ? (
           <DropdownMenuItem onSelect={() => startArchive(tariff)}>
             <Archive />В архив
           </DropdownMenuItem>
         ) : (
-          tariff.state === 'archived' && (
+          tariff.state === 'archived' &&
+          editable(tariff) && (
             <DropdownMenuItem onSelect={() => startRestore(tariff)}>
               <ArchiveRestore />
               Вернуть в продажу
             </DropdownMenuItem>
           )
+        )}
+        {tariff.in_use && (
+          <DropdownMenuItem disabled className="whitespace-normal">
+            <Trash2 />
+            Удалить нельзя: по тарифу были подписки или платежи — только архив
+          </DropdownMenuItem>
         )}
         {!tariff.in_use && (
           <DropdownMenuItem
@@ -482,12 +517,15 @@ export function TariffsPage() {
     onDragOver: (event: DragEvent<HTMLLIElement>) => {
       if (dragged === null) return
       event.preventDefault()
+      event.dataTransfer.dropEffect = 'move'
       if (dragged !== tariff.id) setPreview(moved(ids, dragged, index))
     },
     onDrop: (event: DragEvent<HTMLLIElement>) => event.preventDefault(),
-    onDragEnd: () => {
+    onDragEnd: (event: DragEvent<HTMLLIElement>) => {
       setDragged(null)
-      saveOrder(ids)
+      // Escape или отпустили мимо списка — перетаскивание отменено, порядок прежний
+      if (event.dataTransfer.dropEffect === 'none') setPreview(null)
+      else saveOrder(ids)
     },
   })
 
@@ -605,7 +643,11 @@ export function TariffsPage() {
         </DialogContent>
       </Dialog>
 
-      <ConfirmDialog confirm={confirm} onClose={() => setConfirm(null)} />
+      <ConfirmDialog
+        confirm={confirm}
+        onClose={() => setConfirm(null)}
+        onLastOnSale={() => setConfirm((current) => current && { ...current, last: true })}
+      />
     </>
   )
 }

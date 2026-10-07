@@ -7,12 +7,14 @@
 """
 
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
+from decimal import Decimal
 from enum import StrEnum
 from uuid import UUID
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import ColumnElement, Exists, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from remnabay.domain._types import Money
 from remnabay.domain.payments import Payment
@@ -23,6 +25,8 @@ from remnabay.journal import Actor, JsonValue, Outcome, Subject, record
 from remnabay.panel import PanelClient
 
 JOURNAL_SUBJECT = "tariff"
+# Цена — до копейки (04-operator-settings, «Округление денежных расчётов»)
+KOPECK = Decimal("0.01")
 
 
 class TariffError(Exception):
@@ -68,40 +72,55 @@ class UnknownSquadsError(TariffError):
 
 @dataclass(frozen=True)
 class TariffParams:
-    """Параметры тарифа «срок + безлимит» (2.1)."""
+    """Параметры тарифа «срок + безлимит» (2.1).
+
+    Сквады хранятся в одном порядке, а цена сравнивается как число: «199» и «199.00»,
+    [A, B] и [B, A] — одни и те же параметры, а не изменение.
+    """
 
     name: str
     description: str
-    duration_days: int
+    duration_days: int | None
     price: Money
     device_limit: int
     squad_uuids: tuple[UUID, ...]
+
+    def __post_init__(self) -> None:
+        squads = tuple(sorted(set(self.squad_uuids), key=str))
+        object.__setattr__(self, "squad_uuids", squads)
+        object.__setattr__(self, "price", self.price.quantize(KOPECK))
+
+    @classmethod
+    def of(cls, tariff: Tariff) -> TariffParams:
+        return cls(
+            name=tariff.name,
+            description=tariff.description,
+            duration_days=tariff.duration_days,
+            price=tariff.price,
+            device_limit=tariff.device_limit,
+            squad_uuids=tuple(tariff.squad_uuids),
+        )
+
+    def to_json(self) -> dict[str, JsonValue]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "duration_days": self.duration_days,
+            "price": str(self.price),
+            "device_limit": self.device_limit,
+            "squad_uuids": [str(squad) for squad in self.squad_uuids],
+        }
 
 
 def _actor(member_id: int) -> Actor:
     return Actor.team_member(member_id)
 
 
-def _params_json(params: TariffParams) -> dict[str, JsonValue]:
-    return {
-        "name": params.name,
-        "description": params.description,
-        "duration_days": params.duration_days,
-        "price": str(params.price),
-        "device_limit": params.device_limit,
-        "squad_uuids": [str(squad) for squad in params.squad_uuids],
-    }
-
-
-def _tariff_json(tariff: Tariff) -> dict[str, JsonValue]:
-    return {
-        "name": tariff.name,
-        "description": tariff.description,
-        "duration_days": tariff.duration_days,
-        "price": str(tariff.price),
-        "device_limit": tariff.device_limit,
-        "squad_uuids": [str(squad) for squad in tariff.squad_uuids],
-    }
+def ensure_editable(tariff: Tariff) -> None:
+    """2.3: в MVP в админке доступен только тип «срок + безлимит» — правка и возврат в
+    продажу тарифов других типов (данные — MVP) появятся в v1."""
+    if tariff.type != TariffType.TERM_UNLIMITED:
+        raise TariffError("В этой версии в админке доступны только тарифы «срок + безлимит»")
 
 
 async def _journal(
@@ -186,7 +205,7 @@ async def create_tariff(session: AsyncSession, params: TariffParams, *, member_i
     )
     session.add(tariff)
     await session.flush()
-    await _journal(session, tariff.id, "tariff.created", member_id, _params_json(params))
+    await _journal(session, tariff.id, "tariff.created", member_id, params.to_json())
     return tariff
 
 
@@ -195,15 +214,16 @@ async def update_tariff(
 ) -> Tariff:
     """Новые параметры тарифа. Действующие подписки и созданные счета не меняются (2.5, 2.6)."""
     tariff = await get_tariff(session, tariff_id)
-    if tariff.type != TariffType.TERM_UNLIMITED:
-        raise TariffError("В этой версии редактируются только тарифы «срок + безлимит»")
-    old = _tariff_json(tariff)
-    new = _params_json(params)
-    changed: dict[str, JsonValue] = {
-        key: [old[key], new[key]] for key in new if old[key] != new[key]
-    }
-    if not changed:
+    ensure_editable(tariff)
+    old = TariffParams.of(tariff)
+    if old == params:
         return tariff
+    old_json, new_json = old.to_json(), params.to_json()
+    changed: dict[str, JsonValue] = {
+        field.name: [old_json[field.name], new_json[field.name]]
+        for field in fields(TariffParams)
+        if getattr(old, field.name) != getattr(params, field.name)
+    }
     tariff.name = params.name
     tariff.description = params.description
     tariff.duration_days = params.duration_days
@@ -253,6 +273,7 @@ async def restore_tariff(session: AsyncSession, tariff_id: int, *, member_id: in
         return tariff
     if tariff.state != TariffState.ARCHIVED:
         raise TariffError("Вернуть в продажу можно только тариф из архива")
+    ensure_editable(tariff)
     tariff.sort_order = await _next_sort_order(session)
     tariff.state = TariffState.ON_SALE
     await session.flush()
@@ -260,29 +281,28 @@ async def restore_tariff(session: AsyncSession, tariff_id: int, *, member_id: in
     return tariff
 
 
-async def tariff_usage(session: AsyncSession, tariff_id: int) -> set[Usage]:
-    """Чем тариф уже занят. Пусто — тариф можно удалить (2.8)."""
-    checks = {
+def _usage_checks(tariff_id: ColumnElement[int] | int) -> dict[Usage, Exists]:
+    """Чем тариф уже занят (2.8): подписки, платежи, промокоды, преемник (v1)."""
+    other = aliased(Tariff)
+    return {
         Usage.SUBSCRIPTIONS: exists().where(Subscription.tariff_id == tariff_id),
         Usage.PAYMENTS: exists().where(Payment.tariff_id == tariff_id),
         Usage.PROMO_CODES: exists().where(promo_code_tariffs.c.tariff_id == tariff_id),
-        Usage.SUCCESSOR: exists().where(Tariff.successor_id == tariff_id),
+        Usage.SUCCESSOR: exists().where(other.successor_id == tariff_id),
     }
-    return {usage for usage, check in checks.items() if await session.scalar(select(check))}
+
+
+async def tariff_usage(session: AsyncSession, tariff_id: int) -> set[Usage]:
+    """Чем тариф уже занят. Пусто — тариф можно удалить (2.8)."""
+    checks = _usage_checks(tariff_id)
+    row = (await session.execute(select(*checks.values()))).one()
+    return {usage for usage, used in zip(checks, row, strict=True) if used}
 
 
 async def used_tariffs(session: AsyncSession) -> set[int]:
-    """Тарифы, которые нельзя удалить (2.8), — для списка в админке одним проходом."""
-    queries = [
-        select(Subscription.tariff_id),
-        select(Payment.tariff_id),
-        select(promo_code_tariffs.c.tariff_id),
-        select(Tariff.successor_id),
-    ]
-    used: set[int] = set()
-    for query in queries:
-        used.update(tariff_id for tariff_id in await session.scalars(query.distinct()) if tariff_id)
-    return used
+    """Тарифы, которые нельзя удалить (2.8), — для списка в админке одним запросом."""
+    checks = _usage_checks(Tariff.id.expression)
+    return set(await session.scalars(select(Tariff.id).where(or_(*checks.values()))))
 
 
 async def delete_tariff(
@@ -290,15 +310,19 @@ async def delete_tariff(
 ) -> None:
     """Удалить тариф, который ещё не использовался (2.8); иначе — только архив.
 
-    Подписка, созданная параллельно, не даст удалить тариф: база держит внешний ключ.
+    Тариф блокируется до конца транзакции: подписка, платёж или промокод, которые
+    ссылаются на него, не появятся между проверкой и удалением — их запись ждёт
+    блокировку и после удаления не пройдёт по внешнему ключу.
     """
-    tariff = await get_tariff(session, tariff_id)
+    tariff = await session.get(Tariff, tariff_id, with_for_update=True)
+    if tariff is None:
+        raise TariffNotFoundError(tariff_id)
     usage = await tariff_usage(session, tariff_id)
     if usage:
         raise TariffInUseError(usage)
     if not confirm_last and await is_last_on_sale(session, tariff):
         raise LastOnSaleError
-    details = {"type": tariff.type.value, **_tariff_json(tariff)}
+    details = {"type": tariff.type.value, **TariffParams.of(tariff).to_json()}
     await session.delete(tariff)
     await session.flush()
     await _journal(session, tariff_id, "tariff.deleted", member_id, details)
