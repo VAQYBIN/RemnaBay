@@ -118,6 +118,7 @@ async def test_2_3_tariff_stores_one_of_four_types(
         {"type": TariffType.TERM_UNLIMITED, "duration_days": None},
         {"duration_days": 0},
         {"price": Decimal("-1")},
+        {"device_limit": 0},
         {"name": ""},
     ],
     ids=[
@@ -129,13 +130,15 @@ async def test_2_3_tariff_stores_one_of_four_types(
         "term_without_duration",
         "zero_duration",
         "negative_price",
+        "no_device_limit",
         "empty_name",
     ],
 )
 async def test_2_3_free_combination_of_tariff_parameters_is_rejected(
     db_session: AsyncSession, overrides: dict[str, object]
 ) -> None:
-    """0009: свободная комбинация параметров тарифа не допускается."""
+    """0009: свободная комбинация параметров тарифа не допускается; лимит устройств — не меньше
+    1 (0054)."""
     await assert_rejected(db_session, make_tariff(**overrides))
 
 
