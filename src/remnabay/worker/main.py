@@ -37,6 +37,7 @@ from remnabay.payments import (
     poll_invoice,
     processing_notice,
 )
+from remnabay.payments.yookassa import YooKassaKind, yookassa_http
 from remnabay.queue import RetryPolicy, TaskRegistry, Worker, WorkerConfig
 from remnabay.shop_settings import (
     RETRY_MAX_ATTEMPTS,
@@ -159,6 +160,7 @@ def run(settings: Settings) -> None:
         engine = create_engine(settings, pool_size=config.pool_size)
         sender = TelegramSender(settings.bot_token.get_secret_value())
         panel = PanelClient(str(settings.panel_url), settings.panel_token.get_secret_value())
+        yookassa = yookassa_http()
         try:
             queue = Worker(
                 engine,
@@ -175,12 +177,13 @@ def run(settings: Settings) -> None:
                     sender=sender,
                     panel=panel,
                     payments=ShopApplier(dev_mode=settings.dev_mode),
-                    providers=Providers(box, []),
+                    providers=Providers(box, [YooKassaKind(yookassa)]),
                 )
             ):
                 await run_worker(stop, queue=queue)
         finally:
             await panel.aclose()
+            await yookassa.aclose()
             await sender.close()
             await engine.dispose()
 

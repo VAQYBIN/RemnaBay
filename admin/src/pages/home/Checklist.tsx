@@ -113,7 +113,17 @@ function Body({ item, isOwner }: { item: Item; isOwner: boolean }) {
         </p>
       )
     case 'payment':
-      return <p>{item.status === 'done' ? 'Способ оплаты подключён.' : 'Нужен хотя бы один способ оплаты.'}</p>
+      if (item.status === 'done') return <p>Способ оплаты подключён.</p>
+      return (
+        <p>
+          Нужен хотя бы один способ оплаты.{' '}
+          {isOwner && (
+            <Link to="/settings/payment" className="text-brand-text underline-offset-4 hover:underline">
+              Настройки оплаты
+            </Link>
+          )}
+        </p>
+      )
     case 'support':
       if (item.status === 'done') return <p>Контакт поддержки указан.</p>
       return (

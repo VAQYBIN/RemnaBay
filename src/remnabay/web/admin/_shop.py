@@ -130,6 +130,7 @@ async def _checklist(
         webhook_url=settings.public_link(PANEL_WEBHOOK_PATH),
         webhook_secret=secret,
         dev_mode=settings.dev_mode,
+        providers=request.app.state.providers,
     )
     await session.commit()
     return checklist

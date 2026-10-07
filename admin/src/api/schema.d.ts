@@ -514,6 +514,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/settings/payment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Payment Settings */
+        get: operations["payment_settings_api_admin_settings_payment_get"];
+        /**
+         * Update Payment Settings
+         * @description Время жизни счёта (3.8).
+         */
+        put: operations["update_payment_settings_api_admin_settings_payment_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/settings/payment/providers/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Connect Provider
+         * @description Подключить провайдера: ключи проверяются у провайдера, затем сохраняются.
+         */
+        put: operations["connect_provider_api_admin_settings_payment_providers__code__put"];
+        post?: never;
+        /**
+         * Disconnect Provider
+         * @description Отключить провайдера: новые счета через него не создаются. Уже созданные счета
+         *     опрашиваются, пока ключи есть, — без ключей оплату найдёт команда.
+         */
+        delete: operations["disconnect_provider_api_admin_settings_payment_providers__code__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/about": {
         parameters: {
             query?: never;
@@ -627,6 +673,11 @@ export interface components {
              */
             confirm_last: boolean;
         };
+        /**
+         * ConnectionState
+         * @enum {string}
+         */
+        ConnectionState: "not_connected" | "ready" | "keys_lost" | "currency_unsupported";
         /** ExpiringOut */
         ExpiringOut: {
             /** Subscription Id */
@@ -820,6 +871,20 @@ export interface components {
             /** Username Prefix Locked */
             username_prefix_locked: boolean;
         };
+        /** PaymentSettingsIn */
+        PaymentSettingsIn: {
+            /** Invoice Lifetime Minutes */
+            invoice_lifetime_minutes: number;
+        };
+        /** PaymentSettingsOut */
+        PaymentSettingsOut: {
+            /** Providers */
+            providers: components["schemas"]["ProviderOut"][];
+            /** Currency */
+            currency: string;
+            /** Invoice Lifetime Minutes */
+            invoice_lifetime_minutes: number;
+        };
         /**
          * Period
          * @enum {string}
@@ -840,6 +905,35 @@ export interface components {
              * @constant
              */
             reason: "locked";
+            /** Message */
+            message: string;
+        };
+        /** ProviderKeysIn */
+        ProviderKeysIn: {
+            /** Credentials */
+            credentials: {
+                [key: string]: string;
+            };
+        };
+        /** ProviderOut */
+        ProviderOut: {
+            /** Code */
+            code: string;
+            /** Title */
+            title: string;
+            state: components["schemas"]["ConnectionState"];
+            /** Currencies */
+            currencies: string[];
+            /** Webhook Url */
+            webhook_url: string;
+        };
+        /** ProviderRejectedOut */
+        ProviderRejectedOut: {
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "invalid_keys" | "rejected";
             /** Message */
             message: string;
         };
@@ -1909,6 +2003,148 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["TariffOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    payment_settings_api_admin_settings_payment_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentSettingsOut"];
+                };
+            };
+        };
+    };
+    update_payment_settings_api_admin_settings_payment_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentSettingsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentSettingsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    connect_provider_api_admin_settings_payment_providers__code__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderKeysIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentSettingsOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderRejectedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disconnect_provider_api_admin_settings_payment_providers__code__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentSettingsOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

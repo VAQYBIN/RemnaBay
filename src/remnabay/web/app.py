@@ -24,6 +24,7 @@ from remnabay.crypto import SecretBox
 from remnabay.db import create_engine, create_session_factory
 from remnabay.panel import PanelClient
 from remnabay.payments import Providers
+from remnabay.payments.yookassa import YooKassaKind, yookassa_http
 from remnabay.shop_settings import TELEGRAM_WEBHOOK_SECRET, generated_secret
 from remnabay.web import (
     admin,
@@ -67,7 +68,8 @@ def create_app(settings: Settings, *, startup: bool = False) -> FastAPI:
     # Чек-лист проверяет панель из веба (1.8, 1.10)
     panel = PanelClient(str(settings.panel_url), settings.panel_token.get_secret_value())
     # Платёжные провайдеры с ключами оператора из админки (3.27)
-    providers = Providers(box, [])
+    yookassa = yookassa_http()
+    providers = Providers(box, [YooKassaKind(yookassa)])
     dispatcher = create_dispatcher(sessions, admin_login_url=settings.public_link(LOGIN_PAGE_PATH))
 
     @asynccontextmanager
@@ -89,6 +91,7 @@ def create_app(settings: Settings, *, startup: bool = False) -> FastAPI:
             await polling.stop()
         await bot.session.close()
         await panel.aclose()
+        await yookassa.aclose()
         await oidc.aclose()
         await engine.dispose()
 

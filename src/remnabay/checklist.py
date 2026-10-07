@@ -26,6 +26,7 @@ from remnabay.panel import (
 )
 from remnabay.panel_names import username_prefix
 from remnabay.panel_sync import webhook_received
+from remnabay.payments import Providers
 from remnabay.shop import (
     SHOP_STATE,
     SHOP_SUPPORT_CONTACT,
@@ -157,11 +158,10 @@ def _prefix_item(prefix: str, locked: bool) -> ChecklistItem:
     )
 
 
-async def payment_methods_ready(session: AsyncSession) -> bool:
-    """Есть хотя бы один способ оплаты (1.14). Провайдеры и их ключи — блок 3:
-    до него способов оплаты нет."""
-    del session
-    return False
+async def payment_methods_ready(session: AsyncSession, providers: Providers) -> bool:
+    """Есть хотя бы один способ оплаты (1.14): провайдер подключён, его ключи
+    расшифровываются (0049) и он принимает валюту учёта (3.33)."""
+    return bool(await providers.available(session))
 
 
 async def build_checklist(
@@ -171,6 +171,7 @@ async def build_checklist(
     webhook_url: str,
     webhook_secret: str | None,
     dev_mode: bool,
+    providers: Providers,
 ) -> Checklist:
     """Состояние каждого пункта (1.7). `webhook_secret` — только для владельца."""
     facts = await _panel_facts(panel)
@@ -198,7 +199,7 @@ async def build_checklist(
         ChecklistItem(ItemKey.TARIFFS, ItemStatus.DONE if on_sale else ItemStatus.TODO),
         ChecklistItem(
             ItemKey.PAYMENT,
-            ItemStatus.DONE if await payment_methods_ready(session) else ItemStatus.TODO,
+            ItemStatus.DONE if await payment_methods_ready(session, providers) else ItemStatus.TODO,
         ),
         ChecklistItem(ItemKey.SUPPORT, ItemStatus.DONE if support else ItemStatus.TODO),
         # 1.7: информационный пункт, всегда выполнен — оба варианта нормальны

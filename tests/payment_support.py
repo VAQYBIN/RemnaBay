@@ -1,10 +1,13 @@
-"""Поддельный платёжный провайдер для тестов: реализует контракт провайдера (3.27)."""
+"""Поддельные платёжные провайдеры для тестов: контракт провайдера в памяти (3.27) и
+поддельный API ЮКассы."""
 
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
+from typing import Any
 
+import httpx2
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +22,7 @@ from remnabay.payments import (
     ProviderStatus,
     ProviderUnavailableError,
 )
+from remnabay.payments.yookassa import YOOKASSA, YooKassaCredentials, yookassa_http
 from remnabay.shop_settings import ShopSettingValue
 from tests.conftest import REQUIRED_ENV
 
@@ -117,4 +121,89 @@ async def connect_fake(session: AsyncSession, box: SecretBox | None = None) -> N
     """Ключи поддельного провайдера сохранены, будто их ввёл оператор."""
     stored = (box or shop_box()).encrypt(FakeCredentials(account="test").model_dump_json())
     await session.merge(ShopSettingValue(key=f"payments.{FAKE}.credentials", value=stored))
+    await session.flush()
+
+
+# --- Поддельный API ЮКассы ---
+
+YOOKASSA_SHOP_ID = "123456"
+YOOKASSA_SECRET = "test_secret"  # noqa: S105 — ключ поддельной ЮКассы
+
+
+@dataclass
+class FakeYooKassa:
+    """API ЮКассы v3 в памяти: платежи, идемпотентность, проверка ключей."""
+
+    payments: dict[str, dict[str, Any]] = field(default_factory=dict[str, dict[str, Any]])
+    by_key: dict[str, str] = field(default_factory=dict[str, str])
+    requests: list[httpx2.Request] = field(default_factory=list[httpx2.Request])
+    down: bool = False
+    status_code: int | None = None
+
+    def handle(self, request: httpx2.Request) -> httpx2.Response:
+        self.requests.append(request)
+        if self.down:
+            raise httpx2.ConnectError("ЮКасса недоступна", request=request)
+        if self.status_code is not None:
+            return httpx2.Response(self.status_code, json={"type": "error", "code": "x"})
+        expected = httpx2.BasicAuth(YOOKASSA_SHOP_ID, YOOKASSA_SECRET)
+        auth_header = next(expected.auth_flow(httpx2.Request("GET", "https://x"))).headers[
+            "Authorization"
+        ]
+        if request.headers.get("Authorization") != auth_header:
+            return httpx2.Response(401, json={"type": "error", "code": "invalid_credentials"})
+        path = request.url.path
+        if path == "/v3/me":
+            return httpx2.Response(200, json={"account_id": YOOKASSA_SHOP_ID, "test": True})
+        if path == "/v3/payments" and request.method == "POST":
+            key = request.headers["Idempotence-Key"]
+            if key not in self.by_key:
+                body = json.loads(request.content)
+                payment_id = f"yk-{len(self.payments) + 1}"
+                self.payments[payment_id] = {
+                    "id": payment_id,
+                    "status": "pending",
+                    "amount": body["amount"],
+                    "description": body.get("description"),
+                    "metadata": body.get("metadata"),
+                    "confirmation": {
+                        "type": "redirect",
+                        "confirmation_url": f"https://yoomoney.example/pay/{payment_id}",
+                        "return_url": body["confirmation"]["return_url"],
+                    },
+                    "paid": False,
+                    "test": True,
+                }
+                self.by_key[key] = payment_id
+            return httpx2.Response(200, json=self.payments[self.by_key[key]])
+        if path.startswith("/v3/payments/") and request.method == "GET":
+            payment = self.payments.get(path.removeprefix("/v3/payments/"))
+            if payment is None:
+                return httpx2.Response(404, json={"type": "error", "code": "not_found"})
+            return httpx2.Response(200, json=payment)
+        return httpx2.Response(404, json={"type": "error", "code": "not_found"})
+
+    def succeed(self, payment_id: str, amount: str | None = None) -> None:
+        payment = self.payments[payment_id]
+        payment["status"] = "succeeded"
+        payment["paid"] = True
+        if amount is not None:
+            payment["amount"] = {**payment["amount"], "value": amount}
+
+    def cancel(self, payment_id: str, reason: str) -> None:
+        self.payments[payment_id]["status"] = "canceled"
+        self.payments[payment_id]["cancellation_details"] = {
+            "party": "yoo_kassa",
+            "reason": reason,
+        }
+
+    def http(self) -> httpx2.AsyncClient:
+        return yookassa_http(httpx2.MockTransport(self.handle))
+
+
+async def connect_yookassa(session: AsyncSession, box: SecretBox | None = None) -> None:
+    """Ключи ЮКассы сохранены, будто их ввёл оператор."""
+    credentials = YooKassaCredentials(shop_id=YOOKASSA_SHOP_ID, secret_key=YOOKASSA_SECRET)
+    stored = (box or shop_box()).encrypt(credentials.model_dump_json())
+    await session.merge(ShopSettingValue(key=f"payments.{YOOKASSA}.credentials", value=stored))
     await session.flush()
