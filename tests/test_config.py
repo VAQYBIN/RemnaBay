@@ -122,3 +122,26 @@ def test_1_1_encryption_key_must_have_valid_format(monkeypatch: pytest.MonkeyPat
     [problem] = exc_info.value.problems
     assert problem.startswith("ENCRYPTION_KEY: неверный формат ключа")
     assert "remnabay generate-key" in problem
+
+
+@pytest.mark.usefixtures("valid_env")
+def test_0051_dev_mode_is_off_by_default() -> None:
+    """0051: без DEV_MODE магазин работает в рабочем режиме."""
+    assert load_settings(env_file=None).dev_mode is False
+
+
+@pytest.mark.usefixtures("valid_env")
+def test_0051_dev_mode_can_be_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEV_MODE", "true")
+
+    assert load_settings(env_file=None).dev_mode is True
+
+
+@pytest.mark.usefixtures("valid_env")
+def test_0051_dev_mode_invalid_value_is_named(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEV_MODE", "maybe")
+
+    with pytest.raises(ConfigError) as exc_info:
+        load_settings(env_file=None)
+
+    assert exc_info.value.problems == ["DEV_MODE: ожидается true или false"]

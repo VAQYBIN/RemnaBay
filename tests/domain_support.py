@@ -14,6 +14,7 @@ from remnabay.domain.payments import Payment, PaymentPurpose, PaymentState
 from remnabay.domain.subscriptions import Subscription
 from remnabay.domain.tariffs import Tariff, TariffType
 from remnabay.domain.team import TeamMember, TeamRole
+from remnabay.shop_settings import ShopSetting, ShopSettingValue
 
 NOW = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
 GB = 1024**3
@@ -88,3 +89,9 @@ def make_payment(client: Client | None, tariff: Tariff | None, **overrides: obje
 
 def make_team_member(telegram_id: int = 500, role: TeamRole = TeamRole.OWNER) -> TeamMember:
     return TeamMember(telegram_id=telegram_id, role=role)
+
+
+async def put_setting[T](session: AsyncSession, setting: ShopSetting[T], value: T) -> None:
+    """Значение настройки, будто его сохранил оператор (без журнала и участника)."""
+    await session.merge(ShopSettingValue(key=setting.key, value=setting.dump(value)))
+    await session.flush()

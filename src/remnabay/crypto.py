@@ -6,6 +6,8 @@ Fernet: AES с проверкой целостности, подделанный
 расшифруется.
 """
 
+from datetime import timedelta
+
 from cryptography.fernet import Fernet, InvalidToken
 
 
@@ -35,9 +37,11 @@ class SecretBox:
     def encrypt(self, secret: str) -> str:
         return self._fernet.encrypt(secret.encode()).decode()
 
-    def decrypt(self, token: str) -> str:
+    def decrypt(self, token: str, *, max_age: timedelta | None = None) -> str:
+        """`max_age` — шифротекст старше этого тоже не расшифровывается (срок жизни)."""
+        ttl = int(max_age.total_seconds()) if max_age is not None else None
         try:
-            return self._fernet.decrypt(token).decode()
+            return self._fernet.decrypt(token, ttl=ttl).decode()
         except InvalidToken as error:
             raise SecretDecryptionError(
                 "Секрет не расшифровывается ключом из ENCRYPTION_KEY"

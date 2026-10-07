@@ -62,6 +62,9 @@ class FakePanel:
     # Панель на связи, но отвечает этой ошибкой (например, 401 — неверный токен)
     error_status: int | None = None
     requests: list[str] = field(default_factory=list[str])
+    version: str = "3.4.4"
+    # Лимит устройств в панели (HWID): None — не настроен
+    hwid_enabled: bool | None = True
 
     def handle(self, request: httpx2.Request) -> httpx2.Response:
         self.requests.append(f"{request.method} {request.url.path}")
@@ -70,7 +73,10 @@ class FakePanel:
         if self.error_status is not None:
             return httpx2.Response(self.error_status, json={"message": "ошибка"})
         if request.url.path == "/api/system/metadata":
-            return httpx2.Response(200, json={"response": {"version": "3.4.4"}})
+            return httpx2.Response(200, json={"response": {"version": self.version}})
+        if request.url.path == "/api/subscription-settings":
+            hwid = None if self.hwid_enabled is None else {"enabled": self.hwid_enabled}
+            return httpx2.Response(200, json={"response": {"hwidSettings": hwid}})
         match = _USER_PATH.match(request.url.path)
         if request.method == "GET" and match:
             user = self.users.get(int(match.group(1)))

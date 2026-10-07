@@ -10,11 +10,13 @@ import logging
 import signal
 import tempfile
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from remnabay import runtime
+from remnabay.attention import attention
 from remnabay.config import Settings
 from remnabay.db import create_engine
 from remnabay.messaging import TelegramSender, notify_team, send_message
@@ -28,7 +30,12 @@ from remnabay.panel_sync import (
 )
 from remnabay.payments import NotReadyApplier, apply_payment, processing_notice
 from remnabay.queue import RetryPolicy, TaskRegistry, Worker, WorkerConfig
-from remnabay.shop_settings import RETRY_MAX_ATTEMPTS, RETRY_WINDOW, get_setting
+from remnabay.shop_settings import (
+    RETRY_MAX_ATTEMPTS,
+    RETRY_WINDOW,
+    claim_interval,
+    get_setting,
+)
 
 DEFAULT_HEARTBEAT_PATH = Path(tempfile.gettempdir()) / "remnabay-worker.heartbeat"
 HEARTBEAT_INTERVAL_SECONDS = 10.0
@@ -52,12 +59,26 @@ PERIODIC = (SYNC_ALL, HEALTH_CHECK)
 # Ошибки «внешний сервис недоступен»: задача ждёт, а не проваливается (4.30)
 UNAVAILABLE: tuple[type[Exception], ...] = (PanelUnavailableError,)
 
+# Не чаще одного уведомления «Операция не выполнена» в 10 минут (0049)
+OPERATION_FAILED_EVERY = timedelta(minutes=10)
+OPERATION_FAILED_MARK = "team.operation_failed.notified_at"
+
 logger = logging.getLogger(__name__)
 
 
 async def notify_operation_failed(session: AsyncSession, _task_id: int, _name: str) -> None:
-    """Операция без своих последствий провала — команда получает уведомление (4.31)."""
-    await notify_team(session, "team.operation_failed")
+    """Операция без своих последствий провала — команда получает уведомление (4.31).
+
+    Не чаще одного в 10 минут, с числом ждущих разбора (0049): при массовом сбое
+    уведомлений не столько же, сколько операций.
+    """
+    now = datetime.now(UTC)
+    if not await claim_interval(
+        session, OPERATION_FAILED_MARK, now=now, every=OPERATION_FAILED_EVERY
+    ):
+        return
+    waiting = (await attention(session, TASKS)).count
+    await notify_team(session, "team.operation_failed", variables={"count": str(waiting)})
 
 
 async def retry_policy(session: AsyncSession) -> RetryPolicy:

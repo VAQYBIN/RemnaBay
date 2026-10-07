@@ -1,6 +1,7 @@
 """Команда `remnabay`: один образ, роль задаётся командой запуска (0026)."""
 
 import argparse
+import json
 import logging
 import sys
 from collections.abc import Sequence
@@ -43,6 +44,8 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     check.add_argument("role", choices=["web", "worker"])
 
     roles.add_parser("generate-key", help="создать ключ шифрования для ENCRYPTION_KEY в .env")
+    roles.add_parser("openapi", help="вывести схему API админки (для клиента админки)")
+    roles.add_parser("default-brand-css", help="вывести токены бренда RemnaBay для админки")
 
     return parser.parse_args(argv)
 
@@ -58,6 +61,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "generate-key":
         # Ключ нужен до заполнения .env, поэтому команда не читает настройки
         print(generate_key())
+        return 0
+
+    if args.command == "openapi":
+        # Схема нужна при сборке, без .env и базы (0049)
+        from remnabay.web.admin import openapi_schema
+
+        print(json.dumps(openapi_schema(), ensure_ascii=False, indent=2))
+        return 0
+
+    if args.command == "default-brand-css":
+        from remnabay.brand import default_brand_css
+
+        print(default_brand_css(), end="")
         return 0
 
     try:

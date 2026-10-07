@@ -5,7 +5,7 @@ import json
 import socket
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from aiohttp import web
@@ -42,8 +42,13 @@ from remnabay.queue import (
     attempts_of,
 )
 from remnabay.queue._models import QueueTask
+from remnabay.shop_settings import claim_interval
 from remnabay.texts import BotTextOverride
-from remnabay.worker.main import notify_operation_failed
+from remnabay.worker.main import (
+    OPERATION_FAILED_EVERY,
+    OPERATION_FAILED_MARK,
+    notify_operation_failed,
+)
 from tests.conftest import journaled_in_test
 from tests.domain_support import add, make_client
 from tests.panel_support import FakeSender, fake_runtime
@@ -337,13 +342,41 @@ async def test_team_notification_goes_to_active_owners(db_session: AsyncSession)
 
 
 async def test_4_31_failed_operation_notifies_team(db_session: AsyncSession) -> None:
-    """4.31: операция без своих последствий провалилась — команда получает уведомление."""
+    """4.31: операция без своих последствий провалилась — команда получает уведомление
+    с числом ждущих разбора (0049)."""
     await add(db_session, TeamMember(telegram_id=1, role=TeamRole.OWNER))
 
     await notify_operation_failed(db_session, 5, "trial.create")
 
     queued = await _queued(db_session)
-    assert [(a.chat_id, a.text_key) for a in queued] == [(1, "team.operation_failed")]
+    assert [(a.chat_id, a.text_key, a.variables) for a in queued] == [
+        (1, "team.operation_failed", {"count": "0"})
+    ]
+
+
+async def test_0049_mass_failure_sends_one_notification(db_session: AsyncSession) -> None:
+    """0049: при массовом провале — одно уведомление, а не по одному на операцию."""
+    await add(db_session, TeamMember(telegram_id=1, role=TeamRole.OWNER))
+
+    for task_id in range(5):
+        await notify_operation_failed(db_session, task_id, "trial.create")
+
+    assert len(await _queued(db_session)) == 1
+
+
+async def test_0049_notification_window_is_ten_minutes(db_session: AsyncSession) -> None:
+    """0049: следующее уведомление — не раньше чем через 10 минут после прошлого."""
+    start = datetime(2026, 10, 6, 12, 0, tzinfo=UTC)
+
+    async def claim(at: datetime) -> bool:
+        return await claim_interval(
+            db_session, OPERATION_FAILED_MARK, now=at, every=OPERATION_FAILED_EVERY
+        )
+
+    assert await claim(start) is True
+    assert await claim(start + timedelta(minutes=9, seconds=59)) is False
+    assert await claim(start + timedelta(minutes=10)) is True
+    assert await claim(start + timedelta(minutes=15)) is False
 
 
 async def test_4_33_message_is_sent_once_after_refusals(queue_engine: AsyncEngine) -> None:
@@ -352,7 +385,8 @@ async def test_4_33_message_is_sent_once_after_refusals(queue_engine: AsyncEngin
     sender = FakeSender(errors=[NotAcceptedError("429"), NotAcceptedError("429")])
     async with AsyncSession(queue_engine) as session, session.begin():
         task_id = await send_message.enqueue(
-            session, SendArgs(chat_id=100, text_key="team.operation_failed")
+            session,
+            SendArgs(chat_id=100, text_key="team.operation_failed", variables={"count": "1"}),
         )
     worker = Worker(
         queue_engine,

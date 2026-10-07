@@ -44,6 +44,7 @@ from remnabay.queue._worker import (
     TaskTimeoutError,
     Worker,
     WorkerConfig,
+    last_periodic_start,
 )
 
 __all__ = [
@@ -69,6 +70,7 @@ __all__ = [
     "attempts_of",
     "cancel_failed",
     "failed_tasks",
+    "last_periodic_start",
     "resolve_failed",
     "retry_failed",
     "task",

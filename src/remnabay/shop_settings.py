@@ -11,13 +11,14 @@
 
 import logging
 import secrets
+import string
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Annotated
 from zoneinfo import ZoneInfo, available_timezones
 
 from pydantic import AfterValidator, Field, PositiveInt, TypeAdapter, ValidationError
-from sqlalchemy import DateTime, ForeignKey, String, func, select
+from sqlalchemy import DateTime, ForeignKey, String, func, literal_column, select
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -29,8 +30,12 @@ from remnabay.journal import Actor, JsonValue, Outcome, Subject, record
 logger = logging.getLogger(__name__)
 
 JOURNAL_SUBJECT = "setting"
-# Длина секрета вебхука: 32 случайных байта в base64url
-_WEBHOOK_SECRET_BYTES = 32
+# Секрет вебхука: только латинские буквы и цифры, не короче 32 символов — так его
+# требует панель (WEBHOOK_SECRET_HEADER в Remnawave 3.4); такой принимает и Telegram
+WEBHOOK_SECRET_MIN_LENGTH = 32
+WEBHOOK_SECRET_MAX_LENGTH = 256
+_GENERATED_SECRET_LENGTH = 48
+_SECRET_ALPHABET = string.ascii_letters + string.digits
 
 
 class SettingError(Exception):
@@ -106,6 +111,8 @@ RETRY_WINDOW = ShopSetting("retry.window", _DURATION, timedelta(hours=1))
 PANEL_SYNC_INTERVAL = ShopSetting("panel.sync_interval", _DURATION, timedelta(minutes=15))
 PANEL_OUTAGE_ALERT_AFTER = ShopSetting("panel.outage_alert_after", _DURATION, timedelta(minutes=5))
 PANEL_WEBHOOK_SECRET = SecretSetting("panel.webhook_secret")
+# Секрет вебхука Telegram: бот получает обновления только с ним (0051)
+TELEGRAM_WEBHOOK_SECRET = SecretSetting("telegram.webhook_secret")
 
 
 async def _stored(session: AsyncSession, key: str) -> tuple[JsonValue] | None:
@@ -166,16 +173,62 @@ async def set_setting[T](
     )
 
 
+def new_webhook_secret() -> str:
+    return "".join(secrets.choice(_SECRET_ALPHABET) for _ in range(_GENERATED_SECRET_LENGTH))
+
+
+def check_webhook_secret(value: str) -> str:
+    """Секрет вебхука панели по правилам панели; `SettingError` с понятным текстом иначе."""
+    if len(value) < WEBHOOK_SECRET_MIN_LENGTH:
+        raise SettingError(f"Секрет — не короче {WEBHOOK_SECRET_MIN_LENGTH} символов")
+    if len(value) > WEBHOOK_SECRET_MAX_LENGTH:
+        raise SettingError(f"Секрет — не длиннее {WEBHOOK_SECRET_MAX_LENGTH} символов")
+    if any(char not in _SECRET_ALPHABET for char in value):
+        raise SettingError("Секрет — только латинские буквы и цифры, как требует панель")
+    return value
+
+
+async def set_webhook_secret(
+    session: AsyncSession, box: SecretBox, value: str, *, member_id: int
+) -> None:
+    """Свой секрет вебхука панели (1.9, решение 0052): например, уже заданный в панели
+    для прежнего бота. Хранится зашифрованным; в журнал — факт смены, без значения."""
+    secret = check_webhook_secret(value)
+    stored = box.encrypt(secret)
+    await session.execute(
+        insert(ShopSettingValue)
+        .values(key=PANEL_WEBHOOK_SECRET.key, value=stored, updated_by_id=member_id)
+        .on_conflict_do_update(
+            index_elements=[ShopSettingValue.key],
+            set_={"value": stored, "updated_by_id": member_id, "updated_at": func.now()},
+        )
+    )
+    await record(
+        session,
+        actor=Actor.team_member(member_id),
+        action="setting.changed",
+        outcome=Outcome.SUCCESS,
+        subject=Subject(JOURNAL_SUBJECT, PANEL_WEBHOOK_SECRET.key),
+        details={"key": PANEL_WEBHOOK_SECRET.key},
+    )
+
+
 async def webhook_secret(session: AsyncSession, box: SecretBox) -> str:
-    """Секрет вебхука панели (1.9). При первом обращении магазин генерирует его сам.
+    """Секрет вебхука панели (1.9). При первом обращении магазин генерирует его сам."""
+    return await generated_secret(session, box, PANEL_WEBHOOK_SECRET)
+
+
+async def generated_secret(session: AsyncSession, box: SecretBox, setting: SecretSetting) -> str:
+    """Секрет, который магазин генерирует сам при первом обращении.
 
     Одновременные первые обращения получают один и тот же секрет: вставка без
     перезаписи. Не расшифровывается (сменили ENCRYPTION_KEY) — `SecretDecryptionError`.
+    Символы — только латинские буквы и цифры: такой секрет принимают и панель, и Telegram.
     """
-    key = PANEL_WEBHOOK_SECRET.key
+    key = setting.key
     generated = await session.scalar(
         insert(ShopSettingValue)
-        .values(key=key, value=box.encrypt(secrets.token_urlsafe(_WEBHOOK_SECRET_BYTES)))
+        .values(key=key, value=box.encrypt(new_webhook_secret()))
         .on_conflict_do_nothing()
         .returning(ShopSettingValue.key)
     )
@@ -191,3 +244,27 @@ async def webhook_secret(session: AsyncSession, box: SecretBox) -> str:
     if stored is None or not isinstance(stored[0], str):
         raise SettingError(f"Секрет {key} не сохранён")
     return box.decrypt(stored[0])
+
+
+async def claim_interval(
+    session: AsyncSession, key: str, *, now: datetime, every: timedelta
+) -> bool:
+    """Отметка «не чаще раза в `every`»: `True` — если прошлая была раньше окна
+    (или её не было), и тогда отметка ставится на `now`. Атомарно: из двух
+    одновременных вызовов отметку получает один."""
+    stamp: JsonValue = now.isoformat()
+    claimed = await session.scalar(
+        insert(ShopSettingValue)
+        .values(key=key, value=stamp)
+        .on_conflict_do_update(
+            index_elements=[ShopSettingValue.key],
+            set_={"value": stamp, "updated_at": func.now()},
+            # Значение — строка JSON: #>> '{}' достаёт её как текст
+            where=ShopSettingValue.value.op("#>>")(literal_column("'{}'::text[]")).cast(
+                DateTime(timezone=True)
+            )
+            <= now - every,
+        )
+        .returning(ShopSettingValue.key)
+    )
+    return claimed is not None

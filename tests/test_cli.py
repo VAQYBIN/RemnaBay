@@ -1,5 +1,6 @@
 """Критерий 1.1 на уровне запуска: каждая роль без параметров .env не стартует."""
 
+import json
 import logging
 
 import pytest
@@ -42,3 +43,23 @@ def test_request_per_line_libraries_log_only_warnings() -> None:
     configure_logging()
 
     assert logging.getLogger("httpx2").level == logging.WARNING
+
+
+@pytest.mark.usefixtures("clean_env")
+def test_0051_openapi_without_env(capsys: pytest.CaptureFixture[str]) -> None:
+    """0051: схема API админки выгружается без .env и базы — её берут при сборке."""
+    assert main(["openapi"]) == 0
+
+    schema = json.loads(capsys.readouterr().out)
+    assert "/api/admin/auth/me" in schema["paths"]
+    assert not [path for path in schema["paths"] if path.startswith("/webhooks")]
+
+
+@pytest.mark.usefixtures("clean_env")
+def test_1_23_default_brand_css_without_env(capsys: pytest.CaptureFixture[str]) -> None:
+    """1.23: токены бренда RemnaBay для админки выгружаются без .env — при сборке."""
+    assert main(["default-brand-css"]) == 0
+
+    css = capsys.readouterr().out
+    assert ':root[data-theme="light"]' in css
+    assert "--rb-primary: #1fa4a0;" in css

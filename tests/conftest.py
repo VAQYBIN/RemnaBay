@@ -15,6 +15,7 @@ from tests import queue_support
 
 REQUIRED_ENV = {
     "BOT_TOKEN": "123456:test-bot-token",
+    "TELEGRAM_LOGIN_CLIENT_SECRET": "test-oidc-client-secret",
     "PANEL_URL": "https://panel.example.com",
     "PANEL_TOKEN": "test-panel-token",
     "DATABASE_URL": os.environ.get(
@@ -27,11 +28,14 @@ REQUIRED_ENV = {
     "ENCRYPTION_KEY": "dGVzdC1rZXktdGVzdC1rZXktdGVzdC1rZXktdGVzdC0=",
 }
 
+# Необязательные параметры: убираются из окружения теста, чтобы не влиял `.env` разработчика
+OPTIONAL_ENV = ("DEV_MODE",)
+
 
 @pytest.fixture
 def clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Окружение без параметров магазина и без чужого `.env` в рабочей папке."""
-    for name in REQUIRED_ENV:
+    for name in (*REQUIRED_ENV, *OPTIONAL_ENV):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.chdir(tmp_path)
 
