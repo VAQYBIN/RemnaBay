@@ -8,7 +8,6 @@ from typing import Any
 import httpx2
 import pytest
 from aiogram.methods import EditMessageText, SendMessage, SendRichMessage
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,7 +22,7 @@ from remnabay.panel import parse_event
 from remnabay.panel_sync import ReconcileArgs, Source, receive_event, reconcile
 from remnabay.panel_sync._outage import PanelOutage
 from remnabay.shop import SHOP_STATE, ShopState
-from tests.bot_support import telegram_user
+from tests.bot_support import AnyButton, screen_buttons, telegram_user
 from tests.domain_support import add, make_client, make_subscription, put_setting
 from tests.guide_support import queued, run_queued
 from tests.panel_support import device_json, fake_runtime, user_json
@@ -58,15 +57,11 @@ async def _subscription(
 
 
 def _labels(screen: Screen) -> list[str]:
-    markup = screen.reply_markup
-    assert isinstance(markup, InlineKeyboardMarkup)
-    return [button.text for row in markup.inline_keyboard for button in row]
+    return [button.text for button in screen_buttons(screen)]
 
 
-def _buttons(screen: Screen) -> list[InlineKeyboardButton]:
-    markup = screen.reply_markup
-    assert isinstance(markup, InlineKeyboardMarkup)
-    return [button for row in markup.inline_keyboard for button in row]
+def _buttons(screen: Screen) -> list[AnyButton]:
+    return screen_buttons(screen)
 
 
 def _text(screen: Screen) -> str:

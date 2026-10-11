@@ -19,7 +19,7 @@ from aiogram.types import (
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from remnabay.bot._common import Card, Guide, GuideApps
+from remnabay.bot._common import Card, Guide, GuideApps, GuideBack, GuideHere
 from remnabay.domain.clients import Client
 from remnabay.domain.subscriptions import PanelUserStatus, Subscription
 from remnabay.domain.team import TeamMember, TeamRole
@@ -36,13 +36,15 @@ from remnabay.messaging import guide_button
 from remnabay.panel_sync._outage import PanelOutage
 from remnabay.shop import SHOP_STATE, SHOP_SUPPORT_CONTACT, TRIAL_ENABLED, ShopState
 from remnabay.trial import TRIAL_SQUADS
-from tests.bot_support import telegram_user
+from tests.bot_support import screen_buttons, telegram_user
 from tests.domain_support import add, make_client, make_subscription, put_setting
 from tests.guide_support import SQUAD_CONFIG, guide_config, run_queued
 from tests.panel_support import DEFAULT_CONFIG, fake_runtime
 from tests.web_support import Shop, running_shop
 
 USER = telegram_user(777)
+# 0060: /help перечисляет команды бота
+COMMANDS = "Команды:\n/start — главное меню\n/help — помощь и инструкция по подключению"
 USER_EN = telegram_user(777, language_code="en")
 USER_DE = telegram_user(777, language_code="de")
 SHOP = "https://shop.example.com"
@@ -293,7 +295,8 @@ async def test_12_card_has_how_to_connect(shop: Shop) -> None:
     """З3: в карточке подписки — «Как подключить»."""
     subscription = await _subscription(shop)
     await shop.press(USER, Card(subscription_id=subscription.id).pack())
-    assert "Как подключить" in _labels(shop.telegram.last())
+    labels = [button.text for button in screen_buttons(shop.telegram.last())]
+    assert "Как подключить" in labels
 
 
 # --- 12.7, 12.17. Обновление конфига, админка ---
@@ -369,9 +372,9 @@ async def test_help_one_subscription(shop: Shop) -> None:
     assert isinstance(screen, SendMessage)
     assert _text(screen) == (
         "Инструкция по подключению — по кнопке ниже. Если что-то не получается, напишите "
-        "в поддержку: @support."
+        f"в поддержку: @support.\n\n{COMMANDS}"
     )
-    assert _labels(screen) == ["Как подключить"]
+    assert _labels(screen) == ["Как подключить", "Главное меню"]
 
 
 async def test_help_several_subscriptions(shop: Shop) -> None:
@@ -381,8 +384,8 @@ async def test_help_several_subscriptions(shop: Shop) -> None:
     assert client is not None
     await _subscription(shop, client=client, user_id=8, name="Ноутбук")
     screen = await _help(shop)
-    assert _text(screen) == "Инструкция по подключению — по кнопке ниже."
-    assert _labels(screen) == ["Основная", "Ноутбук"]
+    assert _text(screen) == f"Инструкция по подключению — по кнопке ниже.\n\n{COMMANDS}"
+    assert _labels(screen) == ["Основная", "Ноутбук", "Главное меню"]
 
 
 async def test_help_without_subscription_offers_purchase_and_trial(shop: Shop) -> None:
@@ -390,11 +393,15 @@ async def test_help_without_subscription_offers_purchase_and_trial(shop: Shop) -
     триал доступен — ещё «Попробовать бесплатно»."""
     screen = await _help(shop)
     assert _text(screen).startswith("Подписки пока нет.")
-    assert _labels(screen) == ["Купить подписку"]
+    assert _labels(screen) == ["Купить подписку", "Главное меню"]
 
     await put_setting(shop.session, TRIAL_ENABLED, True)
     await put_setting(shop.session, TRIAL_SQUADS, [UUID(int=1)])
-    assert _labels(await _help(shop)) == ["Попробовать бесплатно", "Купить подписку"]
+    assert _labels(await _help(shop)) == [
+        "Попробовать бесплатно",
+        "Купить подписку",
+        "Главное меню",
+    ]
 
 
 async def test_12_8_panel_outage_does_not_block_guide(shop: Shop) -> None:
@@ -418,3 +425,57 @@ async def test_12_7_stale_assigned_config_does_not_stop_refresh(shop: Shop) -> N
 
     assert response.status_code == 200
     assert response.json()["guide_refreshed_at"] is not None
+
+
+# --- Решение 0060: инструкция на месте ---
+
+
+async def test_0060_guide_from_card_opens_in_place_with_back(shop: Shop) -> None:
+    """0060: «Как подключить» в карточке открывает инструкцию в том же сообщении, с
+    «Назад» в карточку; «Главное меню» правит то же сообщение."""
+    subscription = await _subscription(shop)
+    await shop.press(USER, Card(subscription_id=subscription.id).pack())
+    [guide] = [b for b in screen_buttons(shop.telegram.last()) if b.text == "Как подключить"]
+    assert guide.callback_data is not None
+    await shop.press(USER, guide.callback_data)
+
+    screen = shop.telegram.last()
+    assert isinstance(screen, EditMessageText)
+    assert set(_platforms(screen)) == {"iOS", "Linux"}
+    markup = screen.reply_markup
+    assert isinstance(markup, InlineKeyboardMarkup)
+    data = {button.text: button.callback_data for row in markup.inline_keyboard for button in row}
+    assert data["Назад"] == Card(subscription_id=subscription.id).pack()
+    assert data["Главное меню"] == "menu:back"
+
+    # «Другие приложения» сохраняет «Назад»
+    await shop.press(
+        USER,
+        GuideApps(subscription_id=subscription.id, platform="ios", back=GuideBack.CARD).pack(),
+    )
+    assert "Назад" in _labels(shop.telegram.last())
+
+
+async def test_0060_guide_from_event_is_new_message(shop: Shop) -> None:
+    """0060: на событиях со ссылкой (С1, С3, С15) инструкция — новым сообщением, без
+    «Назад»; «Главное меню» в ней правит то же сообщение."""
+    subscription = await _subscription(shop)
+    screen = await _guide(shop, subscription)
+    assert isinstance(screen, SendRichMessage)
+    markup = screen.reply_markup
+    assert isinstance(markup, InlineKeyboardMarkup)
+    data = {button.text: button.callback_data for row in markup.inline_keyboard for button in row}
+    assert "Назад" not in data
+    assert data["Главное меню"] == "menu:back"
+
+
+async def test_0060_guide_from_help_returns_to_help(shop: Shop) -> None:
+    """0060: инструкция из /help — в том же сообщении, «Назад» возвращает /help."""
+    subscription = await _subscription(shop)
+    await _help(shop)
+    await shop.press(USER, GuideHere(subscription_id=subscription.id, back=GuideBack.HELP).pack())
+    assert isinstance(shop.telegram.last(), EditMessageText)
+    await shop.press(USER, "help")
+    back = shop.telegram.last()
+    assert isinstance(back, EditMessageText)
+    assert (back.text or "").startswith("Инструкция по подключению — по кнопке ниже.")

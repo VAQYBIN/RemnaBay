@@ -7,7 +7,6 @@ from uuid import UUID
 
 import pytest
 from aiogram.methods import EditMessageText, SendMessage, SendRichMessage
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,7 +29,7 @@ from remnabay.trial import (
     create_trial,
     trial_processing_notice,
 )
-from tests.bot_support import telegram_user
+from tests.bot_support import AnyButton, screen_buttons, telegram_user
 from tests.domain_support import add, make_client, make_payment, make_subscription, put_setting
 from tests.guide_support import queued, run_queued
 from tests.panel_support import fake_runtime
@@ -58,15 +57,11 @@ async def _enable(shop: Shop) -> None:
 
 
 def _labels(screen: Screen) -> list[str]:
-    markup = screen.reply_markup
-    assert isinstance(markup, InlineKeyboardMarkup)
-    return [button.text for row in markup.inline_keyboard for button in row]
+    return [button.text for button in screen_buttons(screen)]
 
 
-def _button(screen: Screen, text: str) -> InlineKeyboardButton:
-    markup = screen.reply_markup
-    assert isinstance(markup, InlineKeyboardMarkup)
-    [button] = [b for row in markup.inline_keyboard for b in row if b.text == text]
+def _button(screen: Screen, text: str) -> AnyButton:
+    [button] = [b for b in screen_buttons(screen) if b.text == text]
     return button
 
 

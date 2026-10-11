@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.methods import (
+    SetMyCommands,
     SetMyDescription,
     SetMyName,
     SetMyProfilePhoto,
@@ -101,7 +102,13 @@ async def test_1_27_apply_sets_name_descriptions_and_avatar(shop: Shop, owner: T
     assert (telegram["ok"], telegram["background"], telegram["error"]) == (True, "white", None)
     [entry] = await entries_for(shop.session, Subject("telegram_bot", "profile"))
     assert entry.action == "brand.applied_to_telegram"
-    assert entry.details["done"] == ["name", "description", "short_description", "photo"]
+    assert entry.details["done"] == [
+        "name",
+        "commands",
+        "description",
+        "short_description",
+        "photo",
+    ]
 
 
 async def test_1_27_empty_fields_do_not_change_telegram(shop: Shop, owner: TeamMember) -> None:
@@ -161,3 +168,14 @@ def test_1_27_avatar_is_square_jpeg(data: bytes, message: str) -> None:
     """1.27, 0058: Telegram принимает аватар только в JPG; аватар квадратный."""
     with pytest.raises(TelegramApplyError, match=message):
         check_avatar(data)
+
+
+async def test_0060_apply_sets_command_menu(shop: Shop, owner: TeamMember) -> None:
+    """1.27, 0060: «Применить в Telegram» задаёт меню команд — /start и /help, без /admin."""
+    await _brand(shop, owner)
+    await _apply(shop, make_jpeg())
+    [commands] = [r for r in shop.telegram.requests if isinstance(r, SetMyCommands)]
+    assert [(c.command, c.description) for c in commands.commands] == [
+        ("start", "Главное меню"),
+        ("help", "Помощь и инструкция по подключению"),
+    ]

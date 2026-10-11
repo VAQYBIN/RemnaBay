@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import timedelta
+from enum import StrEnum
 
 from aiogram.filters.callback_data import CallbackData
 from aiogram.types import CallbackQuery, InaccessibleMessage
@@ -22,6 +23,8 @@ SUBSCRIPTIONS = "subs"
 # «Попробовать бесплатно» (5.2, 5.4)
 TRY_FREE = "trial"
 BACK_TO_MENU = "menu:back"
+# /help в живом меню — например, «Назад» из инструкции, открытой из /help
+HELP = "help"
 # Сколько ждать панель, пока клиент смотрит на экран: дальше — последние известные данные
 PANEL_TIMEOUT = timedelta(seconds=5)
 
@@ -31,9 +34,26 @@ class Card(CallbackData, prefix="sub"):
 
 
 class Guide(CallbackData, prefix=GUIDE_CALLBACK_PREFIX):
-    """«Как подключить» — инструкция по подключению подписки (С2)."""
+    """«Как подключить» на событии со ссылкой (С1, С3, С15): инструкция (С2) приходит
+    новым сообщением, чтобы ссылка не пропала (0060)."""
 
     subscription_id: int
+
+
+class GuideBack(StrEnum):
+    """Куда ведёт «Назад» из инструкции, открытой на месте (0060). Пусто — инструкция
+    пришла отдельным сообщением, «Назад» нет."""
+
+    NONE = ""
+    CARD = "card"
+    HELP = "help"
+
+
+class GuideHere(CallbackData, prefix="guidein"):
+    """«Как подключить» в карточке подписки и в /help — инструкция в том же сообщении (0060)."""
+
+    subscription_id: int
+    back: GuideBack
 
 
 class GuideApps(CallbackData, prefix="apps"):
@@ -41,6 +61,7 @@ class GuideApps(CallbackData, prefix="apps"):
 
     subscription_id: int
     platform: str
+    back: GuideBack = GuideBack.NONE
 
 
 class DevicesScreen(CallbackData, prefix="devs"):

@@ -7,8 +7,10 @@
 - Rich-сообщения — карточка подписки и выбор тарифа (0017).
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
+from itertools import batched
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
@@ -16,8 +18,10 @@ from aiogram.types import (
     CopyTextButton,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    InputRichBlockButtons,
     InputRichMessage,
     MessageEntity,
+    RichMessageButton,
     RichTextDateTime,
 )
 
@@ -29,6 +33,8 @@ from remnabay.shop_settings import shop_time_zone
 SUCCESS = "success"
 # Разрушительное действие — красная («Удалить устройство», 03-screens)
 DANGER = "danger"
+# Сколько осталось до даты — относительно, «через 21 день» (решение 0060)
+RELATIVE_FORMAT = "r"
 
 
 def message_entities(dates: Dates, text: str) -> tuple[str, list[MessageEntity]]:
@@ -58,6 +64,33 @@ def rich_date(value: DateValue) -> RichTextDateTime:
     return RichTextDateTime(
         text=value.fallback, unix_time=int(value.moment.timestamp()), date_time_format=DATE_FORMAT
     )
+
+
+def rich_relative(moment: datetime, fallback: str) -> RichTextDateTime:
+    """«Через 21 день» в часовом поясе клиента; запасной текст — число дней (0060)."""
+    return RichTextDateTime(
+        text=fallback, unix_time=int(moment.timestamp()), date_time_format=RELATIVE_FORMAT
+    )
+
+
+def rich_action(text: str, data: str, *, style: str | None = None) -> RichMessageButton:
+    """Кнопка внутри rich-сообщения (0044): нажатие разбирает бот."""
+    return RichMessageButton(text=text, callback_data=data, style=style)
+
+
+def rich_link(text: str, url: str) -> RichMessageButton:
+    return RichMessageButton(text=text, url=url)
+
+
+def rich_copy(text: str, value: str) -> RichMessageButton:
+    return RichMessageButton(text=text, copy_text=CopyTextButton(text=value))
+
+
+def button_rows(buttons: Iterable[RichMessageButton], per_row: int) -> list[InputRichBlockButtons]:
+    """Кнопки внутри rich-сообщения рядами по `per_row` (не больше 8 — Bot API)."""
+    return [
+        InputRichBlockButtons(buttons=list(row)) for row in batched(buttons, per_row, strict=False)
+    ]
 
 
 @dataclass

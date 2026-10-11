@@ -28,7 +28,18 @@ from aiogram.types import (
     RichTextBold,
 )
 
-from remnabay.bot._common import PANEL_TIMEOUT, Guide, GuideApps, own_subscription, show
+from remnabay.bot._common import (
+    BACK_TO_MENU,
+    HELP,
+    PANEL_TIMEOUT,
+    Card,
+    Guide,
+    GuideApps,
+    GuideBack,
+    GuideHere,
+    own_subscription,
+    show,
+)
 from remnabay.bot._context import BotContext
 from remnabay.bot._screens import Keyboard, Screen
 from remnabay.bot._shop import main_menu
@@ -48,7 +59,6 @@ from remnabay.guide import (
     stored_config,
     webpage_allowed,
 )
-from remnabay.messaging import MAIN_MENU_CALLBACK
 from remnabay.panel import PanelError
 from remnabay.shop_settings import SHOP_LANGUAGE, get_setting
 
@@ -88,8 +98,14 @@ class _Builder:
     """Собирает rich-инструкцию одной подписки."""
 
     def __init__(
-        self, ctx: BotContext, subscription: Subscription, config: GuideConfig, language: Language
+        self,
+        ctx: BotContext,
+        subscription: Subscription,
+        config: GuideConfig,
+        language: Language,
+        back: GuideBack,
     ) -> None:
+        self._back = back
         self._ctx = ctx
         self._subscription = subscription
         self._config = config
@@ -152,7 +168,9 @@ class _Builder:
                 for app in others:
                     content.extend(await self.app(key, app))
             elif others:
-                more = GuideApps(subscription_id=self._subscription.id, platform=key)
+                more = GuideApps(
+                    subscription_id=self._subscription.id, platform=key, back=self._back
+                )
                 content.append(
                     InputRichBlockButtons(
                         buttons=[
@@ -173,22 +191,40 @@ class _Builder:
         return InputRichMessage(blocks=blocks)
 
 
+def _back(subscription: Subscription, back: GuideBack) -> str | None:
+    """«Назад» из инструкции, открытой на месте: в карточку или в /help (0060)."""
+    match back:
+        case GuideBack.CARD:
+            return Card(subscription_id=subscription.id).pack()
+        case GuideBack.HELP:
+            return HELP
+        case _:
+            return None
+
+
 async def guide_screen(
-    ctx: BotContext, subscription: Subscription, expanded: str | None = None
+    ctx: BotContext,
+    subscription: Subscription,
+    expanded: str | None = None,
+    back: GuideBack = GuideBack.NONE,
 ) -> Screen:
-    """С2 или, если конфиг ни разу не получен, `guide.unavailable` (12.8)."""
+    """С2 или, если конфиг ни разу не получен, `guide.unavailable` (12.8). «Главное меню»
+    правит то же сообщение (0060)."""
     # Сначала конфиг: вместе с ним панель отвечает, пускает ли она браузер (12.16)
     config = await _config(ctx, subscription)
     browser = await webpage_allowed(ctx.session)
     keyboard = Keyboard().copy(ctx.render("btn.copy_link"), subscription.subscription_url)
     if browser:
         keyboard.link(ctx.render("btn.open_in_browser"), subscription.subscription_url)
-    keyboard.action(ctx.render("btn.main_menu"), MAIN_MENU_CALLBACK)
+    back_data = _back(subscription, back)
+    if back_data is not None:
+        keyboard.action(ctx.render("btn.back"), back_data)
+    keyboard.action(ctx.render("btn.main_menu"), BACK_TO_MENU)
     rich = None
     if config is not None:
         default = await get_setting(ctx.session, SHOP_LANGUAGE)
         language = Language(config, ctx.client.language_code, default)
-        rich = await _Builder(ctx, subscription, config, language).message(expanded)
+        rich = await _Builder(ctx, subscription, config, language, back).message(expanded)
     if rich is None:
         key = "guide.unavailable" if browser else "guide.unavailable_no_browser"
         return Screen.plain(ctx.render(key), keyboard)
@@ -196,7 +232,8 @@ async def guide_screen(
 
 
 async def open_guide(query: CallbackQuery, callback_data: Guide, ctx: BotContext) -> None:
-    """«Как подключить» — инструкция отдельным сообщением: событие не перезаписывает меню."""
+    """«Как подключить» на событии со ссылкой (С1, С3, С15) — инструкция новым
+    сообщением: событие со ссылкой не пропадает (0060)."""
     await query.answer()
     subscription = await own_subscription(ctx, callback_data.subscription_id)
     if subscription is None:
@@ -205,17 +242,29 @@ async def open_guide(query: CallbackQuery, callback_data: Guide, ctx: BotContext
     await (await guide_screen(ctx, subscription)).send(ctx.bot, query.from_user.id)
 
 
+async def open_guide_here(query: CallbackQuery, callback_data: GuideHere, ctx: BotContext) -> None:
+    """«Как подключить» в карточке подписки и в /help — в том же сообщении (0060)."""
+    subscription = await own_subscription(ctx, callback_data.subscription_id)
+    if subscription is None:
+        await show(query, ctx, await main_menu(ctx))
+        return
+    screen = await guide_screen(ctx, subscription, back=callback_data.back)
+    await show(query, ctx, screen)
+
+
 async def other_apps(query: CallbackQuery, callback_data: GuideApps, ctx: BotContext) -> None:
     """«Другие приложения» — та же инструкция с раскрытой платформой (12.3)."""
     subscription = await own_subscription(ctx, callback_data.subscription_id)
     if subscription is None:
         await query.answer()
         return
-    await show(query, ctx, await guide_screen(ctx, subscription, callback_data.platform))
+    screen = await guide_screen(ctx, subscription, callback_data.platform, callback_data.back)
+    await show(query, ctx, screen)
 
 
 def build_router() -> Router:
     router = Router(name="guide")
     router.callback_query.register(open_guide, Guide.filter())
+    router.callback_query.register(open_guide_here, GuideHere.filter())
     router.callback_query.register(other_apps, GuideApps.filter())
     return router

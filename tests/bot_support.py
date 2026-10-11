@@ -16,6 +16,7 @@ from aiogram.methods import (
     GetMe,
     SendMessage,
     SendRichMessage,
+    SetMyCommands,
     SetMyDescription,
     SetMyName,
     SetMyProfilePhoto,
@@ -23,7 +24,19 @@ from aiogram.methods import (
     SetWebhook,
     TelegramMethod,
 )
-from aiogram.types import CallbackQuery, Chat, Message, Update, User
+from aiogram.types import (
+    CallbackQuery,
+    Chat,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputRichBlockButtons,
+    InputRichBlockDetails,
+    InputRichBlockUnion,
+    Message,
+    RichMessageButton,
+    Update,
+    User,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from remnabay.bot import SessionFactory, create_bot, create_dispatcher
@@ -81,7 +94,13 @@ class FakeTelegram(BaseSession):
                 )
             case AnswerCallbackQuery() | SetWebhook() | DeleteWebhook():
                 return True
-            case SetMyName() | SetMyDescription() | SetMyShortDescription() | SetMyProfilePhoto():
+            case (
+                SetMyName()
+                | SetMyCommands()
+                | SetMyDescription()
+                | SetMyShortDescription()
+                | SetMyProfilePhoto()
+            ):
                 return True
             case _:
                 raise AssertionError(f"Запрос не поддержан в тестах: {type(method).__name__}")
@@ -185,3 +204,48 @@ async def bot_harness(session: AsyncSession) -> AsyncGenerator[BotHarness]:
         shop_url=REQUIRED_ENV["PUBLIC_URL"],
     )
     yield BotHarness(bot=bot, dispatcher=dispatcher, telegram=telegram)
+
+
+@dataclass(frozen=True)
+class AnyButton:
+    """Кнопка экрана — внутри rich-сообщения или под сообщением, в одном виде."""
+
+    text: str
+    style: str | None = None
+    url: str | None = None
+    callback_data: str | None = None
+    copy_text: str | None = None
+
+
+def _view(button: InlineKeyboardButton | RichMessageButton) -> AnyButton:
+    text = button.text
+    assert isinstance(text, str)
+    return AnyButton(
+        text=text,
+        style=button.style,
+        url=button.url,
+        callback_data=button.callback_data,
+        copy_text=button.copy_text.text if button.copy_text is not None else None,
+    )
+
+
+def _rich_buttons(blocks: list[InputRichBlockUnion]) -> list[RichMessageButton]:
+    found: list[RichMessageButton] = []
+    for block in blocks:
+        if isinstance(block, InputRichBlockButtons):
+            found.extend(block.buttons)
+        elif isinstance(block, InputRichBlockDetails):
+            found.extend(_rich_buttons(block.blocks))
+    return found
+
+
+def screen_buttons(screen: SendMessage | SendRichMessage | EditMessageText) -> list[AnyButton]:
+    """Кнопки экрана: сначала внутри rich-сообщения (0044), затем под сообщением."""
+    buttons: list[InlineKeyboardButton | RichMessageButton] = []
+    rich = None if isinstance(screen, SendMessage) else screen.rich_message
+    if rich is not None:
+        buttons.extend(_rich_buttons(rich.blocks or []))
+    markup = screen.reply_markup
+    if isinstance(markup, InlineKeyboardMarkup):
+        buttons.extend(button for row in markup.inline_keyboard for button in row)
+    return [_view(button) for button in buttons]

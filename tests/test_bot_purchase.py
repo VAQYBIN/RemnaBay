@@ -9,10 +9,13 @@ from decimal import Decimal
 import pytest
 from aiogram.methods import EditMessageText, SendMessage, SendRichMessage
 from aiogram.types import (
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
+    InputRichBlockButtons,
+    InputRichBlockDetails,
+    InputRichBlockSectionHeading,
+    InputRichBlockTable,
     InputRichMessage,
     MessageEntity,
+    RichTextDateTime,
 )
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,7 +33,7 @@ from remnabay.payments import ProviderStatus, ShopApplier, apply_payment, paymen
 from remnabay.queue import TaskContext
 from remnabay.queue._models import QueueTask
 from remnabay.shop import SHOP_STATE, SHOP_TESTERS, ShopState
-from tests.bot_support import BOT_NAME, BOT_USERNAME, telegram_user
+from tests.bot_support import BOT_NAME, BOT_USERNAME, AnyButton, screen_buttons, telegram_user
 from tests.domain_support import add, make_client, make_subscription, make_tariff, put_setting
 from tests.panel_support import fake_runtime
 from tests.payment_support import (
@@ -109,17 +112,15 @@ async def _subscription(
     return subscription
 
 
-def _buttons(screen: Screen) -> list[InlineKeyboardButton]:
-    markup = screen.reply_markup
-    assert isinstance(markup, InlineKeyboardMarkup)
-    return [button for row in markup.inline_keyboard for button in row]
+def _buttons(screen: Screen) -> list[AnyButton]:
+    return screen_buttons(screen)
 
 
 def _labels(screen: Screen) -> list[str]:
     return [button.text for button in _buttons(screen)]
 
 
-def _button(screen: Screen, text: str) -> InlineKeyboardButton:
+def _button(screen: Screen, text: str) -> AnyButton:
     [button] = [b for b in _buttons(screen) if b.text == text]
     return button
 
@@ -145,7 +146,7 @@ def _rich_text(screen: Screen) -> str:
     return _rich(screen).model_dump_json()
 
 
-async def _press(shop: Shop, button: InlineKeyboardButton) -> Screen:
+async def _press(shop: Shop, button: AnyButton) -> Screen:
     assert button.callback_data is not None
     await shop.press(USER, button.callback_data)
     return shop.telegram.last()
@@ -174,7 +175,9 @@ async def test_3_1_3_2_buy_shows_tariffs_on_sale_in_owner_order(shop: Shop) -> N
     choice = await _press(shop, _button(menu, "Купить подписку"))
 
     assert isinstance(choice, EditMessageText)
-    assert _labels(choice) == ["Год — 1\xa0990,00\xa0₽", "Месяц — 199,00\xa0₽", "Назад"]
+    # 0044, 0060: кнопки тарифов — внутри сообщения, с названием; цена — в таблице
+    assert _labels(choice) == ["Год", "Месяц", "Назад"]
+    assert "1\xa0990,00\xa0₽" in _rich_text(choice)
     content = _rich_text(choice)
     assert "Старый" not in content
     assert "30 дней" in content
@@ -333,11 +336,12 @@ async def test_3_23_3_20_single_subscription_renews_with_its_tariff(
     card = await _press(shop, _button(menu, "Моя подписка"))
     assert isinstance(card, EditMessageText)
     assert "Месяц" in _rich_text(card)
+    # 0044, 0060: действия — внутри карточки, под ней — «Назад»
     assert _labels(card) == [
         "Продлить",
-        "Скопировать ссылку",
-        "Как подключить",
         "Устройства",
+        "Как подключить",
+        "Скопировать ссылку",
         "Назад",
     ]
     assert _button(card, "Скопировать ссылку").copy_text is not None
@@ -409,8 +413,8 @@ async def test_3_24_several_subscriptions_each_shown_separately(
     assert _labels(menu) == ["Мои подписки"]
     listing = await _press(shop, _button(menu, "Мои подписки"))
     labels = _labels(listing)
-    assert any(label.startswith("Основная — до") for label in labels)
-    assert any(label.startswith("Для мамы — до") for label in labels)
+    assert any(label.startswith("Основная — активна до") for label in labels)
+    assert any(label.startswith("Для мамы — активна до") for label in labels)
 
     await shop.press(USER, Card(subscription_id=second.id).pack())
     card = shop.telegram.last()
@@ -584,3 +588,73 @@ async def test_3_6_end_to_end_purchase_from_bot_to_panel(
     assert "event.subscription_ready" in keys
     actions = [e.action for e in await entries_for(shop.session, payment_subject(payment.id))]
     assert actions == ["payment.created", "payment.paid", "payment.applied"]
+
+
+# --- Решение 0060: карточка, сводка, выбор тарифа ---
+
+
+async def test_0060_card_rows_link_and_buttons_inside(shop: Shop, tariffs: list[Tariff]) -> None:
+    """0044, 0060: карточка — «Подписка «название»», таблица с рамкой без закрашенных
+    подписей, строки «Осталось» (date_time «r») и «Трафик», блок «Ссылка на подписку»;
+    кнопки действий — внутри сообщения."""
+    subscription = await _subscription(shop, tariffs[0], expires_in=timedelta(days=10, hours=1))
+    subscription.traffic_limit_bytes = 50 * 1024**3
+    subscription.traffic_used_bytes = int(12.4 * 1024**3)
+    await shop.session.flush()
+    await shop.press(USER, Card(subscription_id=subscription.id).pack())
+    card = _rich(shop.telegram.last())
+
+    blocks = card.blocks or []
+    heading, table = blocks[0], blocks[1]
+    assert isinstance(heading, InputRichBlockSectionHeading)
+    assert heading.text == "Подписка «Основная»"
+    assert isinstance(table, InputRichBlockTable)
+    assert table.is_bordered
+    rows = {row[0].text: row[1].text for row in table.cells}
+    assert not any(cell.is_header for row in table.cells for cell in row)
+    remaining = rows["Осталось"]
+    assert isinstance(remaining, RichTextDateTime)
+    assert (remaining.date_time_format, remaining.text) == ("r", "11 дней")
+    assert rows["Трафик"] == "12,4 ГБ из 50 ГБ"
+    [link] = [b for b in blocks if isinstance(b, InputRichBlockDetails)]
+    assert link.summary == "Ссылка на подписку"
+    assert subscription.subscription_url in link.model_dump_json()
+    inside = [b for b in blocks if isinstance(b, InputRichBlockButtons)]
+    assert [[button.text for button in row.buttons] for row in inside] == [
+        ["Продлить", "Устройства"],
+        ["Как подключить", "Скопировать ссылку"],
+    ]
+
+
+async def test_0060_unlimited_traffic(shop: Shop, tariffs: list[Tariff]) -> None:
+    """0060: безлимит — «без ограничения»."""
+    subscription = await _subscription(shop, tariffs[0])
+    subscription.traffic_limit_bytes = 0
+    await shop.session.flush()
+    await shop.press(USER, Card(subscription_id=subscription.id).pack())
+    assert "без ограничения" in _rich_text(shop.telegram.last())
+
+
+async def test_0060_menu_summary_status_and_days_left(shop: Shop, tariffs: list[Tariff]) -> None:
+    """0060: строка подписки в главном меню — статус, дата и сколько осталось."""
+    await _subscription(shop, tariffs[0], expires_in=timedelta(days=2, hours=5))
+    text = _text(await _menu(shop))
+    assert "Основная — активна до " in text
+    assert text.endswith("осталось 3 дня")
+
+
+async def test_0060_tariff_table_bordered_header_row_only(
+    shop: Shop, tariffs: list[Tariff]
+) -> None:
+    """0044, 0060: в выборе тарифа таблица с рамкой; заголовок — только строка названий
+    столбцов; кнопки тарифов — внутри сообщения."""
+    del tariffs
+    await _menu(shop)
+    await shop.press(USER, BUY)
+    choice = _rich(shop.telegram.last())
+    [table] = [b for b in choice.blocks or [] if isinstance(b, InputRichBlockTable)]
+    assert table.is_bordered
+    assert all(cell.is_header for cell in table.cells[0])
+    assert not any(cell.is_header for row in table.cells[1:] for cell in row)
+    inside = [b for b in choice.blocks or [] if isinstance(b, InputRichBlockButtons)]
+    assert [button.text for row in inside for button in row.buttons] == ["Год", "Месяц"]
