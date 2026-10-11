@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { FlipHorizontal2, FlipVertical2, RotateCcw, RotateCw } from 'lucide-react'
+import { type KeyboardEvent, type PointerEvent, useEffect, useRef, useState } from 'react'
 
 import { errorMessage, fetchClient, type Schemas } from '@/api/client'
 import { Button } from '@/components/ui/button'
@@ -12,6 +13,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Slider } from '@/components/ui/slider'
+import { Toggle } from '@/components/ui/toggle'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { formatDateTime } from '@/lib/format'
 
@@ -21,10 +23,33 @@ type Background = Schemas['AvatarBackground']
 // Сторона аватара: Telegram принимает квадратный JPG
 const SIZE = 640
 // Масштаб знака — доля стороны аватара, %. По умолчанию знак целиком внутри круга
-// с отступом: сторона квадрата, вписанного в круг, — 71 % диаметра
+// с отступом: сторона квадрата, вписанного в круг, — 71 % диаметра. Больше 100 % —
+// чтобы круглый знак закрыл круг аватара целиком (решение 0060)
 const DEFAULT_SCALE = 58
 const MIN_SCALE = 20
-const MAX_SCALE = 100
+const MAX_SCALE = 150
+// Знак растрируется с запасом под наибольший масштаб — без размытия
+const MARK_PIXELS = (SIZE * MAX_SCALE) / 100
+// Сдвиг знака — не дальше, чем на сторону аватара от центра: знак не теряется
+const MAX_SHIFT = SIZE
+// Шаг сдвига стрелками, пикселей аватара; с Shift — крупнее
+const KEY_STEP = 4
+const KEY_STEP_LARGE = 20
+
+/** Положение знака на аватаре: масштаб, сдвиг от центра, поворот, отражение. */
+type Placement = { scale: number; x: number; y: number; rotation: number; flipX: boolean; flipY: boolean }
+
+const INITIAL: Placement = { scale: DEFAULT_SCALE, x: 0, y: 0, rotation: 0, flipX: false, flipY: false }
+
+function clampShift(value: number): number {
+  return Math.max(-MAX_SHIFT, Math.min(MAX_SHIFT, value))
+}
+
+/** Поворот в пределах −180…180°. */
+function normalizeAngle(degrees: number): number {
+  const turned = ((degrees % 360) + 360) % 360
+  return turned > 180 ? turned - 360 : turned
+}
 const BACKGROUNDS: { value: Background; label: string }[] = [
   { value: 'brand', label: 'Фирменный цвет' },
   { value: 'white', label: 'Белый' },
@@ -51,8 +76,8 @@ async function loadMark(url: string): Promise<HTMLImageElement> {
       const height = Number.parseFloat(svg.getAttribute('height') ?? '')
       if (width > 0 && height > 0) svg.setAttribute('viewBox', `0 0 ${width} ${height}`)
     }
-    svg.setAttribute('width', String(SIZE))
-    svg.setAttribute('height', String(SIZE))
+    svg.setAttribute('width', String(MARK_PIXELS))
+    svg.setAttribute('height', String(MARK_PIXELS))
     blob = new Blob([new XMLSerializer().serializeToString(svg)], { type: 'image/svg+xml' })
   }
   const source = URL.createObjectURL(blob)
@@ -66,14 +91,18 @@ async function loadMark(url: string): Promise<HTMLImageElement> {
   }
 }
 
-function draw(canvas: HTMLCanvasElement, mark: HTMLImageElement, background: string, scale: number): void {
+function draw(canvas: HTMLCanvasElement, mark: HTMLImageElement, background: string, placement: Placement): void {
   const context = canvas.getContext('2d')
   if (!context) return
   context.fillStyle = background
   context.fillRect(0, 0, SIZE, SIZE)
-  const side = (SIZE * scale) / 100
-  const offset = (SIZE - side) / 2
-  context.drawImage(mark, offset, offset, side, side)
+  const side = (SIZE * placement.scale) / 100
+  context.save()
+  context.translate(SIZE / 2 + placement.x, SIZE / 2 + placement.y)
+  context.rotate((placement.rotation * Math.PI) / 180)
+  context.scale(placement.flipX ? -1 : 1, placement.flipY ? -1 : 1)
+  context.drawImage(mark, -side / 2, -side / 2, side, side)
+  context.restore()
 }
 
 function toJpeg(canvas: HTMLCanvasElement): Promise<Blob> {
@@ -99,8 +128,9 @@ export function TelegramResult({ settings, timeZone }: { settings: Settings; tim
 }
 
 /** «Применить в Telegram» (1.27, решения 0058–0060): имя, описания, меню команд и аватар
- *  бота. Аватар — квадратный знак в выбранном масштабе на выбранном фоне; предпросмотр —
- *  квадратная рамка с круглым ориентиром. JPG собирается из того же холста. */
+ *  бота. Аватар — квадратный знак на выбранном фоне: оператор масштабирует его до 150 %,
+ *  перетаскивает, поворачивает и отражает; предпросмотр — квадратная рамка с круглым
+ *  ориентиром. JPG собирается из того же холста. */
 export function TelegramApplyDialog({
   open,
   onOpenChange,
@@ -114,7 +144,9 @@ export function TelegramApplyDialog({
 }) {
   const canvas = useRef<HTMLCanvasElement>(null)
   const [background, setBackground] = useState<Background>('brand')
-  const [scale, setScale] = useState(DEFAULT_SCALE)
+  const [placement, setPlacement] = useState<Placement>(INITIAL)
+  const drag = useRef<{ pointer: number; x: number; y: number } | null>(null)
+  const change = (patch: Partial<Placement>) => setPlacement((current) => ({ ...current, ...patch }))
   const [mark, setMark] = useState<HTMLImageElement | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
@@ -133,8 +165,44 @@ export function TelegramApplyDialog({
   }, [open, markUrl])
 
   useEffect(() => {
-    if (canvas.current && mark) draw(canvas.current, mark, fill(background, settings.primary_color), scale)
-  }, [mark, background, settings.primary_color, scale])
+    if (canvas.current && mark) draw(canvas.current, mark, fill(background, settings.primary_color), placement)
+  }, [mark, background, settings.primary_color, placement])
+
+  // Перетаскивание знака мышью или пальцем: сдвиг на экране — в пиксели аватара
+  const startDrag = (event: PointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId)
+    drag.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY }
+  }
+  const moveDrag = (event: PointerEvent<HTMLDivElement>) => {
+    const start = drag.current
+    if (!start || start.pointer !== event.pointerId) return
+    const ratio = SIZE / event.currentTarget.getBoundingClientRect().width
+    const dx = (event.clientX - start.x) * ratio
+    const dy = (event.clientY - start.y) * ratio
+    drag.current = { ...start, x: event.clientX, y: event.clientY }
+    setPlacement((current) => ({ ...current, x: clampShift(current.x + dx), y: clampShift(current.y + dy) }))
+  }
+  const endDrag = () => {
+    drag.current = null
+  }
+  // Стрелки — то же перемещение с клавиатуры
+  const moveByKey = (event: KeyboardEvent<HTMLDivElement>) => {
+    const step = event.shiftKey ? KEY_STEP_LARGE : KEY_STEP
+    const shifts: Record<string, [number, number]> = {
+      ArrowLeft: [-step, 0],
+      ArrowRight: [step, 0],
+      ArrowUp: [0, -step],
+      ArrowDown: [0, step],
+    }
+    const shift = shifts[event.key]
+    if (!shift) return
+    event.preventDefault()
+    setPlacement((current) => ({
+      ...current,
+      x: clampShift(current.x + shift[0]),
+      y: clampShift(current.y + shift[1]),
+    }))
+  }
 
   const apply = async () => {
     if (!canvas.current || !mark) return
@@ -175,13 +243,24 @@ export function TelegramApplyDialog({
         </DialogHeader>
         <div className="flex flex-col items-center gap-4">
           {/* Квадрат — картинка, которая уйдёт в Telegram; круг — то, что клиенты
-              увидят как аватар: углы за кругом затемнены (решение 0060) */}
-          <div className="relative size-48 overflow-hidden rounded-md shadow-sm ring-1 ring-border">
+              увидят как аватар: углы за кругом затемнены (решение 0060). Знак
+              перетаскивается мышью, пальцем или стрелками */}
+          <div
+            className="relative size-48 cursor-grab touch-none overflow-hidden rounded-md shadow-sm ring-1 ring-border outline-none select-none focus-visible:ring-3 focus-visible:ring-ring/50 active:cursor-grabbing"
+            tabIndex={0}
+            role="group"
+            aria-label="Положение знака: перетащите или двигайте стрелками"
+            onPointerDown={startDrag}
+            onPointerMove={moveDrag}
+            onPointerUp={endDrag}
+            onPointerCancel={endDrag}
+            onKeyDown={moveByKey}
+          >
             <canvas
               ref={canvas}
               width={SIZE}
               height={SIZE}
-              className="size-full"
+              className="pointer-events-none size-full"
               role="img"
               aria-label="Предпросмотр аватара"
             />
@@ -190,19 +269,75 @@ export function TelegramApplyDialog({
               <circle cx="50" cy="50" r="49.5" fill="none" stroke="white" strokeOpacity="0.8" strokeWidth="0.6" strokeDasharray="2 1.5" />
             </svg>
           </div>
-          <div className="flex w-full max-w-64 flex-col gap-2">
-            <div className="flex items-center justify-between text-sm">
-              <span id="avatar-scale">Размер знака</span>
-              <span className="tabular text-muted-foreground">{scale}%</span>
+          <div className="flex items-center gap-1" role="toolbar" aria-label="Знак">
+            <Toggle
+              variant="outline"
+              size="sm"
+              pressed={placement.flipX}
+              onPressedChange={(flipX) => change({ flipX })}
+              aria-label="Отразить по горизонтали"
+              title="Отразить по горизонтали"
+            >
+              <FlipHorizontal2 />
+            </Toggle>
+            <Toggle
+              variant="outline"
+              size="sm"
+              pressed={placement.flipY}
+              onPressedChange={(flipY) => change({ flipY })}
+              aria-label="Отразить по вертикали"
+              title="Отразить по вертикали"
+            >
+              <FlipVertical2 />
+            </Toggle>
+            <Button
+              variant="outline"
+              size="icon-sm"
+              onClick={() => change({ rotation: normalizeAngle(placement.rotation + 90) })}
+              aria-label="Повернуть на 90°"
+              title="Повернуть на 90°"
+            >
+              <RotateCw />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setPlacement(INITIAL)}
+              disabled={placement === INITIAL}
+            >
+              <RotateCcw />
+              Сбросить
+            </Button>
+          </div>
+          <div className="flex w-full max-w-64 flex-col gap-4">
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between text-sm">
+                <span id="avatar-scale">Размер знака</span>
+                <span className="tabular text-muted-foreground">{placement.scale}%</span>
+              </div>
+              <Slider
+                aria-labelledby="avatar-scale"
+                min={MIN_SCALE}
+                max={MAX_SCALE}
+                step={1}
+                value={[placement.scale]}
+                onValueChange={([scale]) => scale !== undefined && change({ scale })}
+              />
             </div>
-            <Slider
-              aria-labelledby="avatar-scale"
-              min={MIN_SCALE}
-              max={MAX_SCALE}
-              step={1}
-              value={[scale]}
-              onValueChange={([value]) => value !== undefined && setScale(value)}
-            />
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between text-sm">
+                <span id="avatar-rotation">Поворот</span>
+                <span className="tabular text-muted-foreground">{placement.rotation}°</span>
+              </div>
+              <Slider
+                aria-labelledby="avatar-rotation"
+                min={-180}
+                max={180}
+                step={1}
+                value={[placement.rotation]}
+                onValueChange={([rotation]) => rotation !== undefined && change({ rotation })}
+              />
+            </div>
           </div>
           <ToggleGroup
             type="single"
@@ -219,8 +354,8 @@ export function TelegramApplyDialog({
             ))}
           </ToggleGroup>
           <p className="text-center text-xs text-muted-foreground">
-            Квадрат — картинка для Telegram, круг — то, что клиенты увидят как аватар бота. Подберите размер
-            знака и фон, на котором он хорошо виден.
+            Квадрат — картинка для Telegram, круг — то, что клиенты увидят как аватар бота. Перетащите знак,
+            подберите размер, поворот и фон, на котором он хорошо виден.
           </p>
         </div>
         {error && <p className="text-sm text-danger-text">{error}</p>}
