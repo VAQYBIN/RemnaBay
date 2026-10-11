@@ -1,11 +1,12 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { RefreshCw } from 'lucide-react'
+import { AlertTriangle, RefreshCw } from 'lucide-react'
 import { useState } from 'react'
 
 import { $api, errorMessage } from '@/api/client'
 import { CopyField } from '@/components/CopyField'
 import { Field } from '@/components/Field'
 import { Module } from '@/components/frame/Module'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -17,6 +18,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { formatDateTime } from '@/lib/format'
 
 /** «Панель»: адрес и секрет вебхука (1.9). Секрет — созданный магазином или свой,
  *  если в панели он уже задан, например для прежнего бота (решение 0052). Префикс имён
@@ -53,7 +55,12 @@ export function PanelSettingsPage() {
       refresh()
     },
   })
+  const refreshGuide = $api.useMutation('post', '/api/admin/settings/panel/guide/refresh', {
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['get', '/api/admin/settings/panel'] }),
+  })
+  const shop = $api.useQuery('get', '/api/admin/settings/shop')
   if (!data) return null
+  const timeZone = shop.data?.time_zone ?? 'Europe/Moscow'
   const ownValid = /^[A-Za-z0-9]{32,256}$/.test(own.trim())
   const prefixValid = /^[A-Za-z0-9-]{1,16}$/.test(prefix.trim())
 
@@ -82,6 +89,47 @@ export function PanelSettingsPage() {
             <RefreshCw />
             Создать новый секрет
           </Button>
+        </div>
+      </Module>
+
+      <Module title="Инструкция по подключению">
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-muted-foreground">
+            Бот собирает инструкцию из конфига Subscription Page, назначенного подписке в панели, и обновляет
+            его раз в час. Править инструкцию нужно в панели — после правки нажмите «Обновить сейчас».
+          </p>
+          {data.webpage_allowed === false && (
+            <Alert className="border-warning-text/40 bg-warning-soft">
+              <AlertTriangle className="text-warning-text" />
+              <AlertDescription className="text-foreground">
+                Панель не пускает браузер на страницу подписки, поэтому клиенты не видят кнопку «Открыть в
+                браузере»: по ссылке подписки браузер получил бы ошибку. Если страница подписки нужна клиентам,
+                разрешите её браузерам в правилах ответов панели.
+              </AlertDescription>
+            </Alert>
+          )}
+          <p className="text-sm">
+            {data.guide_refreshed_at
+              ? `Конфиг получен ${formatDateTime(data.guide_refreshed_at, timeZone)}.`
+              : 'Конфиг ещё не получен — бот получит его при первом открытии инструкции.'}
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              variant="outline"
+              className="w-fit"
+              onClick={() => refreshGuide.mutate({})}
+              disabled={refreshGuide.isPending}
+            >
+              <RefreshCw />
+              Обновить сейчас
+            </Button>
+            {refreshGuide.isError && (
+              <p className="text-sm text-danger-text">
+                {errorMessage(refreshGuide.error as unknown, 'Не удалось обновить')}
+              </p>
+            )}
+            {refreshGuide.isSuccess && <p className="text-sm text-muted-foreground">Обновлено</p>}
+          </div>
         </div>
       </Module>
 

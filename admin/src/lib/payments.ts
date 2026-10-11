@@ -25,6 +25,8 @@ export const PURPOSES: Record<NonNullable<Schemas['PaymentRow']['purpose']>, str
 /** Операции очереди, которые видит команда; неизвестные показываются по имени. */
 const OPERATIONS: Record<string, string> = {
   'payments.apply': 'Применение платежа',
+  'trials.create': 'Создание триала',
+  'devices.delete': 'Удаление устройства',
 }
 
 export function operationName(name: string): string {
