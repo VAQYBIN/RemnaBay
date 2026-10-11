@@ -7,7 +7,6 @@
 - Rich-сообщения — карточка подписки и выбор тарифа (0017).
 """
 
-import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -23,66 +22,29 @@ from aiogram.types import (
 )
 
 from remnabay.bot._context import BotContext
+from remnabay.messaging import DATE_FORMAT, Dates, DateValue
 from remnabay.shop_settings import shop_time_zone
 
-# Формат даты для клиента: длинная дата и время («1 ноября 2026, 23:00»)
-DATE_FORMAT = "Dt"
-# Метка места даты в тексте: символы из области для частного использования, в
-# текстах оператора их не бывает
-_DATE_MARK = "{}"
-_DATE_MARK_PATTERN = re.compile("(\\d+)")
 # Кнопка целевого действия — зелёная, не больше одной на экране (03-screens)
 SUCCESS = "success"
+# Разрушительное действие — красная («Удалить устройство», 03-screens)
+DANGER = "danger"
 
 
-def _utf16(text: str) -> int:
-    """Длина в единицах UTF-16 — так Telegram считает смещения сущностей."""
-    return len(text.encode("utf-16-le")) // 2
-
-
-@dataclass(frozen=True)
-class DateValue:
-    moment: datetime
-    # Запасной текст: во времени магазина с подписью пояса (`date.fallback`)
-    fallback: str
-
-
-class Dates:
-    """Даты экрана: в текст подставляется метка, при сборке — запасной текст и сущность."""
-
-    def __init__(self) -> None:
-        self._values: list[DateValue] = []
-
-    def mark(self, value: DateValue) -> str:
-        self._values.append(value)
-        return _DATE_MARK.format(len(self._values) - 1)
-
-    def entities(self, text: str) -> tuple[str, list[MessageEntity]]:
-        """Текст с запасными датами и сущности date_time на их местах."""
-        parts: list[str] = []
-        entities: list[MessageEntity] = []
-        position = 0
-        offset = 0
-        for match in _DATE_MARK_PATTERN.finditer(text):
-            before = text[position : match.start()]
-            parts.append(before)
-            offset += _utf16(before)
-            value = self._values[int(match.group(1))]
-            parts.append(value.fallback)
-            length = _utf16(value.fallback)
-            entities.append(
-                MessageEntity(
-                    type="date_time",
-                    offset=offset,
-                    length=length,
-                    unix_time=int(value.moment.timestamp()),
-                    date_time_format=DATE_FORMAT,
-                )
-            )
-            offset += length
-            position = match.end()
-        parts.append(text[position:])
-        return "".join(parts), entities
+def message_entities(dates: Dates, text: str) -> tuple[str, list[MessageEntity]]:
+    """Текст с запасными датами и сущности date_time на их местах."""
+    rendered, found = dates.render(text)
+    entities = [
+        MessageEntity(
+            type="date_time",
+            offset=date.offset,
+            length=date.length,
+            unix_time=date.unix_time,
+            date_time_format=DATE_FORMAT,
+        )
+        for date in found
+    ]
+    return rendered, entities
 
 
 async def date_value(ctx: BotContext, moment: datetime) -> DateValue:
@@ -133,7 +95,7 @@ class Screen:
     def plain(cls, text: str, keyboard: Keyboard, dates: Dates | None = None) -> Screen:
         if dates is None:
             return cls(keyboard=keyboard, text=text)
-        rendered, entities = dates.entities(text)
+        rendered, entities = message_entities(dates, text)
         return cls(keyboard=keyboard, text=rendered, entities=entities or None)
 
     async def send(self, bot: Bot, chat_id: int) -> None:

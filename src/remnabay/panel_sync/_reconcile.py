@@ -26,7 +26,7 @@ from remnabay.domain.subscriptions import (
 )
 from remnabay.domain.tariffs import TrafficResetStrategy
 from remnabay.journal import Actor, JsonValue, Outcome, Subject, record
-from remnabay.messaging import ButtonArgs, send_to_client
+from remnabay.messaging import MAIN_MENU_BUTTON, ButtonArgs, guide_button, send_to_client
 from remnabay.panel import TrafficStrategy, User, UserStatus
 from remnabay.queue import TaskContext, task
 
@@ -164,7 +164,11 @@ async def _apply_link(
                 "subscription_name": subscription.name,
                 "subscription_link": user.subscription_url,
             },
-            buttons=[ButtonArgs(text_key="btn.copy_link", copy_text=user.subscription_url)],
+            buttons=[
+                ButtonArgs(text_key="btn.copy_link", copy_text=user.subscription_url),
+                guide_button(subscription.id),
+                MAIN_MENU_BUTTON,
+            ],
         )
     return changes
 

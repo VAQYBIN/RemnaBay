@@ -188,8 +188,10 @@ async def test_3_6_client_gets_subscription_link(
     assert message.text_key == "event.subscription_ready"
     link = message.variables["subscription_link"]
     assert link.startswith("https://sub.example.com/")
+    # 3.6, 12.4: ссылка копируется кнопкой, инструкция — по «Как подключить» (С1)
     assert [(b.text_key, b.copy_text) for b in message.buttons] == [
         ("btn.copy_link", link),
+        ("btn.how_to_connect", None),
         ("btn.main_menu", None),
     ]
 

@@ -20,15 +20,10 @@ from sqlalchemy.orm import Mapped, mapped_column
 from remnabay import runtime
 from remnabay.db import Base
 from remnabay.journal import Actor, Outcome, record
-from remnabay.messaging import load_texts, notify_team
+from remnabay.messaging import notify_team
 from remnabay.panel import PanelError, PanelUnavailableError
 from remnabay.queue import Periodic, TaskContext, task
-from remnabay.shop_settings import (
-    PANEL_OUTAGE_ALERT_AFTER,
-    SHOP_LANGUAGE,
-    get_setting,
-    shop_time_zone,
-)
+from remnabay.shop_settings import PANEL_OUTAGE_ALERT_AFTER, get_setting
 
 HEALTH_CHECK_EVERY = timedelta(minutes=1)
 # Проверки связи идут строго по одной: если несколько скопились в очереди, вторая
@@ -84,17 +79,8 @@ async def _alert_if_long(session: AsyncSession, outage: PanelOutage) -> None:
     now = datetime.now(UTC)
     if now - outage.started_at < await get_setting(session, PANEL_OUTAGE_ALERT_AFTER):
         return
-    since = await _shop_time(session, outage.started_at)
-    await notify_team(session, "team.panel_unavailable", variables={"since": since})
+    await notify_team(session, "team.panel_unavailable", dates={"since": outage.started_at})
     outage.notified_at = now
-
-
-async def _shop_time(session: AsyncSession, moment: datetime) -> str:
-    """Момент для текста уведомления: во времени магазина, месяц словом (0044)."""
-    texts = await load_texts(session)
-    return texts.date_fallback(
-        moment, await get_setting(session, SHOP_LANGUAGE), await shop_time_zone(session)
-    )
 
 
 async def _ended(session: AsyncSession, outage: PanelOutage) -> None:
@@ -112,10 +98,7 @@ async def _ended(session: AsyncSession, outage: PanelOutage) -> None:
         await notify_team(
             session,
             "team.panel_available_again",
-            variables={
-                "since": await _shop_time(session, outage.started_at),
-                "until": await _shop_time(session, ended_at),
-            },
+            dates={"since": outage.started_at, "until": ended_at},
         )
 
 

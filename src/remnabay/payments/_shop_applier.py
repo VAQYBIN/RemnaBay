@@ -35,7 +35,6 @@ from remnabay.payments._applier import Applied
 from remnabay.payments._apply import money
 from remnabay.payments._catalog import live_subscriptions, trial_for_purchase
 from remnabay.payments._snapshot import TariffSnapshot
-from remnabay.shop_settings import SHOP_LANGUAGE, get_setting, shop_time_zone
 
 SUBSCRIPTION_SUBJECT = "subscription"
 # Панель хранит дату с точностью до миллисекунд: даты ближе секунды — одна и та же
@@ -157,8 +156,10 @@ class ShopApplier:
             variables={
                 "amount": await money(session, payment),
                 "subscription_name": subscription.name,
-                "end_date": await _shop_date(session, subscription.expires_at),
+                # Подменяется датой из `dates`; пусто — если срока нет
+                "end_date": "",
             },
+            dates=_end_date(subscription),
         )
 
     async def _extend(
@@ -214,8 +215,9 @@ class ShopApplier:
                 variables={
                     "amount": await money(session, payment),
                     "subscription_name": subscription.name,
-                    "end_date": await _shop_date(session, subscription.expires_at),
+                    "end_date": "",
                 },
+                dates=_end_date(subscription),
             )
         return Applied(subscription_id=subscription.id, created=False, purchase=from_trial)
 
@@ -380,11 +382,6 @@ class ShopApplier:
         )
 
 
-async def _shop_date(session: AsyncSession, moment: datetime | None) -> str:
-    """Дата для текста — в часовом поясе магазина («1 ноября 2026, 23:00 (МСК)»)."""
-    if moment is None:
-        return ""
-    texts = await load_texts(session)
-    return texts.date_fallback(
-        moment, await get_setting(session, SHOP_LANGUAGE), await shop_time_zone(session)
-    )
+def _end_date(subscription: Subscription) -> dict[str, datetime]:
+    """`{end_date}` уведомления — сущностью date_time (0044)."""
+    return {"end_date": subscription.expires_at} if subscription.expires_at else {}
