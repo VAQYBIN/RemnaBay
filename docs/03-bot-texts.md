@@ -160,6 +160,7 @@
 | `card.status.disabled` | Отключена |
 | `card.status.limited` | Трафик исчерпан |
 | `card.tariff.none` | Не выбран |
+| `card.tariff.trial` | Пробный период |
 
 `card.note.archived`
 ```

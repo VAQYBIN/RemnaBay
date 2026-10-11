@@ -10,7 +10,7 @@ from aiogram.methods import EditMessageText, SendMessage, SendRichMessage
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from remnabay.bot._common import BUY, TRY_FREE
+from remnabay.bot._common import BUY, TRY_FREE, Card
 from remnabay.domain.clients import Client, TelegramAccount
 from remnabay.domain.payments import PaymentState
 from remnabay.domain.subscriptions import PanelUserStatus, SegmentKind, Subscription, TermSegment
@@ -395,3 +395,15 @@ async def test_5_3_payment_while_trial_waits_skips_trial(shop: Shop) -> None:
 
     assert not [write for write in shop.panel.writes if write[0] == "POST /api/users"]
     assert await shop.session.get(Trial, client.id) is None
+
+
+async def test_0060_trial_card_shows_trial_as_tariff(shop: Shop) -> None:
+    """0060: у триальной подписки в карточке «Тариф» — «Пробный период»."""
+    subscription = await _trial_subscription(shop.session)
+    await shop.press(USER, Card(subscription_id=subscription.id).pack())
+    screen = shop.telegram.last()
+    assert isinstance(screen, EditMessageText)
+    assert screen.rich_message is not None
+    content = screen.rich_message.model_dump_json()
+    assert "Пробный период" in content
+    assert "Не выбран" not in content

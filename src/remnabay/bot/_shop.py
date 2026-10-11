@@ -299,11 +299,15 @@ async def subscription_card(ctx: BotContext, subscription: Subscription) -> Scre
     tariff = (
         await ctx.session.get(Tariff, subscription.tariff_id) if subscription.tariff_id else None
     )
+    if tariff is not None:
+        tariff_name = tariff.name
+    else:
+        # Триал — тоже условия подписки, а не «тариф не выбран» (0060)
+        tariff_name = ctx.render(
+            "card.tariff.trial" if subscription.is_trial else "card.tariff.none"
+        )
     rows = [
-        _row(
-            ctx.render("card.field.tariff"),
-            tariff.name if tariff is not None else ctx.render("card.tariff.none"),
-        ),
+        _row(ctx.render("card.field.tariff"), tariff_name),
         _row(ctx.render("card.field.status"), ctx.render(f"card.status.{state}")),
     ]
     if subscription.expires_at is not None:
