@@ -129,19 +129,57 @@ function toJpeg(canvas: HTMLCanvasElement): Promise<Blob> {
   })
 }
 
-/** Итог последнего применения: когда и с какой ошибкой Telegram (1.27). */
+type Applied = NonNullable<Settings['telegram']>
+type Step = Applied['done'][number]
+
+const STEPS: Record<Step, string> = {
+  name: 'имя',
+  commands: 'меню команд',
+  description: 'описание',
+  short_description: '«Коротко о боте»',
+  photo: 'аватар',
+}
+
+function stepList(steps: Step[]): string {
+  return steps.map((step) => STEPS[step]).join(', ')
+}
+
+/** «через 22 ч 26 мин» — когда Telegram снова разрешит изменение. */
+function waitText(seconds: number): string {
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.ceil((seconds % 3600) / 60)
+  if (hours === 0) return `через ${Math.max(minutes, 1)} мин`
+  return minutes > 0 ? `через ${hours} ч ${minutes} мин` : `через ${hours} ч`
+}
+
+/** Что не удалось и почему — по шагам (0060). */
+function failureLines(result: Applied): string[] {
+  return result.failed.map((failure) => {
+    const what = STEPS[failure.step]
+    if (failure.retry_after != null) {
+      return `Не изменено: ${what} — Telegram ограничивает частоту изменений, повторить можно ${waitText(failure.retry_after)}.`
+    }
+    return `Не изменено: ${what} — Telegram ответил ошибкой: ${failure.error}`
+  })
+}
+
+/** Итог последнего применения: что изменено, что совпадало, что не удалось (1.27, 0060). */
 export function TelegramResult({ settings, timeZone }: { settings: Settings; timeZone: string }) {
   const result = settings.telegram
   if (!result) return null
-  if (result.ok) {
-    return (
-      <p className="text-sm text-muted-foreground">Применено в Telegram {formatDateTime(result.at, timeZone)}.</p>
-    )
-  }
   return (
-    <p className="text-sm text-danger-text">
-      {formatDateTime(result.at, timeZone)} Telegram ответил ошибкой: {result.error}
-    </p>
+    <div className="flex flex-col gap-1 text-sm">
+      <p className="text-muted-foreground">
+        Применено в Telegram {formatDateTime(result.at, timeZone)}.
+        {result.done.length > 0 && ` Изменено: ${stepList(result.done)}.`}
+        {result.unchanged.length > 0 && ` Без изменений: ${stepList(result.unchanged)}.`}
+      </p>
+      {failureLines(result).map((line) => (
+        <p key={line} className="text-danger-text">
+          {line}
+        </p>
+      ))}
+    </div>
   )
 }
 
@@ -256,7 +294,7 @@ export function TelegramApplyDialog({
       if (data) {
         onApplied(data)
         if (data.telegram?.ok) onOpenChange(false)
-        else setError(`Telegram ответил ошибкой: ${data.telegram?.error ?? 'неизвестно'}`)
+        else if (data.telegram) setError(failureLines(data.telegram).join(' '))
       } else setError(errorMessage(failure, 'Не удалось применить'))
     } catch {
       setError('Не удалось собрать аватар')
@@ -275,7 +313,8 @@ export function TelegramApplyDialog({
           <DialogDescription>
             Бот получит имя «{settings.name}», меню команд, аватар из квадратного знака
             {description ? ', описание' : ''}
-            {short ? ' и «Коротко о боте»' : ''}. Пустые поля в Telegram не меняются.
+            {short ? ' и «Коротко о боте»' : ''}. Меняется только то, что отличается от заданного в Telegram;
+            пустые поля в Telegram не меняются.
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col items-center gap-4">

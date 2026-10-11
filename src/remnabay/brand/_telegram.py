@@ -12,13 +12,15 @@
 - Результат и ошибка Telegram видны в настройках и пишутся в журнал.
 """
 
+import hashlib
 import struct
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Annotated
 
 from aiogram import Bot
-from aiogram.exceptions import AiogramError
+from aiogram.exceptions import AiogramError, TelegramRetryAfter
 from aiogram.types import BotCommand, BufferedInputFile, InputProfilePhotoStatic
 from pydantic import BaseModel, Field, TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -75,6 +77,25 @@ class AvatarPlacement(BaseModel):
     flip_y: bool = False
 
 
+class ApplyStep(StrEnum):
+    """Что «Применить в Telegram» задаёт боту — шаги независимы друг от друга."""
+
+    NAME = "name"
+    COMMANDS = "commands"
+    DESCRIPTION = "description"
+    SHORT_DESCRIPTION = "short_description"
+    PHOTO = "photo"
+
+
+class StepFailure(BaseModel):
+    """Шаг не удался: текст ошибки Telegram и, если Telegram ограничил частоту
+    изменений, через сколько секунд можно повторить."""
+
+    step: ApplyStep
+    error: str
+    retry_after: int | None = None
+
+
 class TelegramApplied(BaseModel):
     """Итог последнего «Применить в Telegram» — виден в настройках; фон и положение
     знака — начальные значения окна применения в следующий раз."""
@@ -83,7 +104,14 @@ class TelegramApplied(BaseModel):
     ok: bool
     background: AvatarBackground
     placement: AvatarPlacement = AvatarPlacement()
-    # Ошибка Telegram, если применить не удалось
+    # Что изменено, что уже совпадало с Telegram и что не удалось (0060)
+    done: list[ApplyStep] = []
+    unchanged: list[ApplyStep] = []
+    failed: list[StepFailure] = []
+    # SHA-256 аватара, который Telegram последним принял: тот же аватар второй раз
+    # не загружается
+    avatar_sha256: str | None = None
+    # Первая ошибка Telegram — кратко
     error: str | None = None
 
 
@@ -134,6 +162,20 @@ async def _commands(session: AsyncSession) -> list[BotCommand]:
     ]
 
 
+async def _matches[T](read: Awaitable[T], expected: Callable[[T], bool]) -> bool:
+    """Совпадает ли то, что уже задано у бота. Telegram не ответил — считаем, что нет:
+    тогда значение просто задаётся."""
+    try:
+        return expected(await read)
+    except AiogramError:
+        return False
+
+
+def _failure(step: ApplyStep, error: AiogramError) -> StepFailure:
+    retry_after = error.retry_after if isinstance(error, TelegramRetryAfter) else None
+    return StepFailure(step=step, error=str(error), retry_after=retry_after)
+
+
 async def apply_to_telegram(
     session: AsyncSession,
     bot: Bot,
@@ -143,48 +185,115 @@ async def apply_to_telegram(
     *,
     member_id: int,
 ) -> TelegramApplied:
-    """Задаёт боту имя, описания и аватар. Кнопка доступна, когда заданы название и
-    квадратный знак (1.27). Ошибка Telegram не исключение: она в итоге и в журнале."""
+    """Задаёт боту имя, меню команд, описания и аватар (1.27).
+
+    Меняется только то, что отличается (0060): имя, описания и команды сверяются с
+    тем, что уже задано у бота в Telegram, аватар — с последним принятым. У Telegram
+    жёсткие ограничения частоты изменений (имя — несколько раз в сутки), и
+    оператор, который поменял только логотип, не должен упираться в лимит имени.
+    Шаги независимы: ошибка одного не мешает остальным. Ошибка Telegram не
+    исключение: она в итоге и в журнале."""
     name = await brand_name(session)
     if not name or AssetKind.MARK not in await asset_versions(session):
         raise TelegramApplyError("Сначала задайте название и квадратный знак")
     check_avatar(avatar)
     description = (await get_setting(session, BOT_DESCRIPTION)).strip()
     short = (await get_setting(session, BOT_SHORT_DESCRIPTION)).strip()
-    done: list[str] = []
-    error: str | None = None
-    try:
-        await bot.set_my_name(name=name)
-        done.append("name")
-        # Меню команд: /start и /help; /admin скрыта (03-screens, решение 0060)
-        await bot.set_my_commands(commands=await _commands(session))
-        done.append("commands")
-        # Пустое поле в Telegram не меняется
-        if description:
-            await bot.set_my_description(description=description)
-            done.append("description")
-        if short:
-            await bot.set_my_short_description(short_description=short)
-            done.append("short_description")
-        photo = InputProfilePhotoStatic(photo=BufferedInputFile(avatar, filename="avatar.jpg"))
-        await bot.set_my_profile_photo(photo=photo)
-        done.append("photo")
-    except AiogramError as failure:
-        error = str(failure)
+    commands = await _commands(session)
+    previous = await get_setting(session, TELEGRAM_APPLIED)
+    avatar_sha256 = hashlib.sha256(avatar).hexdigest()
+    last_avatar = previous.avatar_sha256 if previous is not None else None
+
+    steps: list[tuple[ApplyStep, Awaitable[bool], Callable[[], Awaitable[object]]]] = [
+        (
+            ApplyStep.NAME,
+            _matches(bot.get_my_name(), lambda current: current.name == name),
+            lambda: bot.set_my_name(name=name),
+        ),
+        (
+            ApplyStep.COMMANDS,
+            _matches(
+                bot.get_my_commands(),
+                lambda current: (
+                    [(c.command, c.description) for c in current]
+                    == [(c.command, c.description) for c in commands]
+                ),
+            ),
+            lambda: bot.set_my_commands(commands=commands),
+        ),
+    ]
+    # Пустое поле в Telegram не меняется
+    if description:
+        steps.append(
+            (
+                ApplyStep.DESCRIPTION,
+                _matches(
+                    bot.get_my_description(), lambda current: current.description == description
+                ),
+                lambda: bot.set_my_description(description=description),
+            )
+        )
+    if short:
+        steps.append(
+            (
+                ApplyStep.SHORT_DESCRIPTION,
+                _matches(
+                    bot.get_my_short_description(),
+                    lambda current: current.short_description == short,
+                ),
+                lambda: bot.set_my_short_description(short_description=short),
+            )
+        )
+    photo = InputProfilePhotoStatic(photo=BufferedInputFile(avatar, filename="avatar.jpg"))
+    steps.append(
+        (
+            ApplyStep.PHOTO,
+            _already(avatar_sha256 == last_avatar),
+            lambda: bot.set_my_profile_photo(photo=photo),
+        )
+    )
+
+    done: list[ApplyStep] = []
+    unchanged: list[ApplyStep] = []
+    failed: list[StepFailure] = []
+    for step, matches, apply in steps:
+        if await matches:
+            unchanged.append(step)
+            continue
+        try:
+            await apply()
+        except AiogramError as error:
+            failed.append(_failure(step, error))
+        else:
+            done.append(step)
+    photo_set = ApplyStep.PHOTO in done or ApplyStep.PHOTO in unchanged
     result = TelegramApplied(
         at=datetime.now(UTC),
-        ok=error is None,
+        ok=not failed,
         background=background,
         placement=placement,
-        error=error,
+        done=done,
+        unchanged=unchanged,
+        failed=failed,
+        avatar_sha256=avatar_sha256 if photo_set else last_avatar,
+        error=failed[0].error if failed else None,
     )
     await remember_setting(session, TELEGRAM_APPLIED, result)
     await record(
         session,
         actor=Actor.team_member(member_id),
         action="brand.applied_to_telegram",
-        outcome=Outcome.SUCCESS if error is None else Outcome.FAILURE,
+        outcome=Outcome.SUCCESS if not failed else Outcome.FAILURE,
         subject=Subject(JOURNAL_SUBJECT, "profile"),
-        details={"background": background.value, "done": list(done), "error": error},
+        details={
+            "background": background.value,
+            "done": [step.value for step in done],
+            "unchanged": [step.value for step in unchanged],
+            "failed": [failure.model_dump(mode="json") for failure in failed],
+        },
     )
     return result
+
+
+async def _already(value: bool) -> bool:
+    return value

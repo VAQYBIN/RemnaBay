@@ -939,6 +939,12 @@ export interface components {
          */
         ActorType: "team_member" | "client" | "system" | "panel" | "provider";
         /**
+         * ApplyStep
+         * @description Что «Применить в Telegram» задаёт боту — шаги независимы друг от друга.
+         * @enum {string}
+         */
+        ApplyStep: "name" | "commands" | "description" | "short_description" | "photo";
+        /**
          * AssetKind
          * @enum {string}
          */
@@ -1621,6 +1627,18 @@ export interface components {
             expiring_soon: number;
             revenue: components["schemas"]["RevenueOut"] | null;
         };
+        /**
+         * StepFailure
+         * @description Шаг не удался: текст ошибки Telegram и, если Telegram ограничил частоту
+         *     изменений, через сколько секунд можно повторить.
+         */
+        StepFailure: {
+            step: components["schemas"]["ApplyStep"];
+            /** Error */
+            error: string;
+            /** Retry After */
+            retry_after?: number | null;
+        };
         /** SubscriptionRef */
         SubscriptionRef: {
             /** Id */
@@ -1735,6 +1753,23 @@ export interface components {
              *     }
              */
             placement: components["schemas"]["AvatarPlacement"];
+            /**
+             * Done
+             * @default []
+             */
+            done: components["schemas"]["ApplyStep"][];
+            /**
+             * Unchanged
+             * @default []
+             */
+            unchanged: components["schemas"]["ApplyStep"][];
+            /**
+             * Failed
+             * @default []
+             */
+            failed: components["schemas"]["StepFailure"][];
+            /** Avatar Sha256 */
+            avatar_sha256?: string | null;
             /** Error */
             error?: string | null;
         };

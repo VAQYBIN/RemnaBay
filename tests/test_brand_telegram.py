@@ -5,7 +5,7 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 import pytest
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramRetryAfter
 from aiogram.methods import (
     SetMyCommands,
     SetMyDescription,
@@ -121,17 +121,45 @@ async def test_1_27_empty_fields_do_not_change_telegram(shop: Shop, owner: TeamM
 
 
 async def test_1_27_telegram_error_is_shown_and_journaled(shop: Shop, owner: TeamMember) -> None:
-    """1.27: ошибка Telegram видна в настройках и записана в журнал."""
+    """1.27, 0060: ошибка Telegram видна в настройках и записана в журнал; лимит на одном
+    шаге (смена имени) не мешает остальным — аватар всё равно применяется, а в итоге
+    видно, через сколько можно повторить."""
     await _brand(shop, owner)
-    shop.telegram.fail_with = TelegramBadRequest(
-        method=SetMyName(name="Енот VPN"), message="Bad Request: too many requests"
+    shop.telegram.failures[SetMyName] = TelegramRetryAfter(
+        method=SetMyName(name="Енот VPN"),
+        message="Flood control exceeded on method 'SetMyName'",
+        retry_after=80760,
     )
     settings = await _apply(shop, make_jpeg())
     telegram: dict[str, Any] = settings["telegram"]
     assert telegram["ok"] is False
-    assert "too many requests" in telegram["error"]
+    [failure] = telegram["failed"]
+    assert (failure["step"], failure["retry_after"]) == ("name", 80760)
+    assert "photo" in telegram["done"]
+    assert [r for r in shop.telegram.requests if isinstance(r, SetMyProfilePhoto)]
     [entry] = await entries_for(shop.session, Subject("telegram_bot", "profile"))
     assert entry.outcome == "failure"
+
+
+async def test_0060_apply_changes_only_what_differs(shop: Shop, owner: TeamMember) -> None:
+    """0060: повторное «Применить» без изменений ничего не задаёт заново — имя, описания
+    и команды сверяются с Telegram, аватар — с последним принятым; поменялся только
+    аватар — меняется только он."""
+    await _brand(shop, owner, bot_description="Быстрый VPN", bot_short_description="VPN")
+    await _apply(shop, make_jpeg())
+    sent = len(shop.telegram.requests)
+
+    again = await _apply(shop, make_jpeg())
+    setters = (SetMyName, SetMyCommands, SetMyDescription, SetMyShortDescription, SetMyProfilePhoto)
+    assert not [r for r in shop.telegram.requests[sent:] if isinstance(r, setters)]
+    assert again["telegram"]["done"] == []
+    assert again["telegram"]["ok"] is True
+
+    sent = len(shop.telegram.requests)
+    changed = await _apply(shop, make_jpeg(800, 800))
+    changes = [r for r in shop.telegram.requests[sent:] if isinstance(r, setters)]
+    assert [type(r) for r in changes] == [SetMyProfilePhoto]
+    assert changed["telegram"]["done"] == ["photo"]
 
 
 async def test_1_27_needs_name_and_mark(shop: Shop, owner: TeamMember) -> None:

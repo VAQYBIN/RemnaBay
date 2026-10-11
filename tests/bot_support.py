@@ -14,6 +14,10 @@ from aiogram.methods import (
     DeleteWebhook,
     EditMessageText,
     GetMe,
+    GetMyCommands,
+    GetMyDescription,
+    GetMyName,
+    GetMyShortDescription,
     SendMessage,
     SendRichMessage,
     SetMyCommands,
@@ -25,6 +29,10 @@ from aiogram.methods import (
     TelegramMethod,
 )
 from aiogram.types import (
+    BotCommand,
+    BotDescription,
+    BotName,
+    BotShortDescription,
     CallbackQuery,
     Chat,
     InlineKeyboardButton,
@@ -58,8 +66,13 @@ class FakeTelegram(BaseSession):
     def __init__(self) -> None:
         super().__init__()
         self.requests: list[TelegramMethod[Any]] = []
-        # Ошибка Telegram на следующий запрос (например, при «Применить в Telegram», 1.27)
-        self.fail_with: Exception | None = None
+        # Ошибка Telegram на следующий запрос этого вида (например, лимит на смену имени, 1.27)
+        self.failures: dict[type[TelegramMethod[Any]], Exception] = {}
+        # Профиль бота в Telegram: что задали «Применить в Telegram» (1.27)
+        self.name = ""
+        self.description = ""
+        self.short_description = ""
+        self.commands: list[BotCommand] = []
 
     async def close(self) -> None:
         pass
@@ -72,9 +85,9 @@ class FakeTelegram(BaseSession):
     ) -> Any:
         del timeout
         self.requests.append(method)
-        if self.fail_with is not None:
-            error, self.fail_with = self.fail_with, None
-            raise error
+        failure = self.failures.pop(type(method), None)
+        if failure is not None:
+            raise failure
         match method:
             case GetMe():
                 return User(id=bot.id, is_bot=True, first_name=BOT_NAME, username=BOT_USERNAME)
@@ -94,13 +107,27 @@ class FakeTelegram(BaseSession):
                 )
             case AnswerCallbackQuery() | SetWebhook() | DeleteWebhook():
                 return True
-            case (
-                SetMyName()
-                | SetMyCommands()
-                | SetMyDescription()
-                | SetMyShortDescription()
-                | SetMyProfilePhoto()
-            ):
+            case GetMyName():
+                return BotName(name=self.name)
+            case GetMyDescription():
+                return BotDescription(description=self.description)
+            case GetMyShortDescription():
+                return BotShortDescription(short_description=self.short_description)
+            case GetMyCommands():
+                return self.commands
+            case SetMyName():
+                self.name = method.name or ""
+                return True
+            case SetMyDescription():
+                self.description = method.description or ""
+                return True
+            case SetMyShortDescription():
+                self.short_description = method.short_description or ""
+                return True
+            case SetMyCommands():
+                self.commands = list(method.commands)
+                return True
+            case SetMyProfilePhoto():
                 return True
             case _:
                 raise AssertionError(f"Запрос не поддержан в тестах: {type(method).__name__}")
