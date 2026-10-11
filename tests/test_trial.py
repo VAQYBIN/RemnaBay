@@ -383,3 +383,20 @@ async def test_1_22_paused_shop_keeps_trial_traffic_message(shop: Shop) -> None:
     subscription = await _trial_subscription(shop.session)
     await _reconcile_limited(shop, subscription)
     assert await _messages(shop) == []
+
+
+async def test_5_3_payment_while_trial_waits_skips_trial(shop: Shop) -> None:
+    """5.3, 5.6: пока создание триала ждало панель, клиент оплатил покупку — триал не
+    создаётся, второй подписки нет."""
+    await _enable(shop)
+    await _menu(shop)
+    await shop.press(USER, TRY_FREE)
+    client = await _client(shop)
+    payment = make_payment(client, None, state=PaymentState.APPLIED)
+    payment.paid_at = datetime.now(UTC)
+    await add(shop.session, payment)
+
+    await _issue(shop)
+
+    assert not [write for write in shop.panel.writes if write[0] == "POST /api/users"]
+    assert await shop.session.get(Trial, client.id) is None

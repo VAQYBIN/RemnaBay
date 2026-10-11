@@ -125,21 +125,26 @@ async def _creating(session: AsyncSession, client_id: int) -> bool:
     return key in await unfinished_keys(session, create_trial.name, [key])
 
 
+async def _subscribed_or_paid(session: AsyncSession, client_id: int) -> bool:
+    """Клиент хотя бы раз платил или у него есть подписка — триал не предлагается (5.3)."""
+    paid = await session.scalar(
+        select(exists().where(Payment.client_id == client_id, Payment.paid_at.is_not(None)))
+    )
+    subscribed = await session.scalar(
+        select(
+            exists().where(Subscription.client_id == client_id, Subscription.deleted_at.is_(None))
+        )
+    )
+    return bool(paid or subscribed)
+
+
 async def trial_available(session: AsyncSession, client: Client) -> bool:
     """5.2, 5.3: триал включён, клиент его ещё не получал (и не ждёт), ни разу не
     платил, не усыновлён и подписок у него нет."""
     if not await get_setting(session, TRIAL_ENABLED) or client.adopted_at is not None:
         return False
     used = await session.scalar(select(exists().where(Trial.client_id == client.id)))
-    paid = await session.scalar(
-        select(exists().where(Payment.client_id == client.id, Payment.paid_at.is_not(None)))
-    )
-    subscribed = await session.scalar(
-        select(
-            exists().where(Subscription.client_id == client.id, Subscription.deleted_at.is_(None))
-        )
-    )
-    if used or paid or subscribed:
+    if used or await _subscribed_or_paid(session, client.id):
         return False
     return not await _creating(session, client.id)
 
@@ -186,6 +191,18 @@ async def create_trial(context: TaskContext, args: TrialArgs) -> None:
     session = context.session
     client = await session.get(Client, args.client_id, with_for_update=True)
     if client is None or await session.get(Trial, args.client_id) is not None:
+        return
+    if await _subscribed_or_paid(session, client.id):
+        # Пока создание ждало панель, клиент купил подписку: триал ему больше не
+        # положен (5.3), а вторая подписка не нужна
+        await record(
+            session,
+            actor=Actor.SYSTEM,
+            action="trial.skipped",
+            outcome=Outcome.SUCCESS,
+            subject=Subject(CLIENT_SUBJECT, client.id),
+            details={"reason": "subscribed_or_paid"},
+        )
         return
     params = args.params
     access = Access(
