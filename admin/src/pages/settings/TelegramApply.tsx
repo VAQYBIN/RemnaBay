@@ -41,6 +41,24 @@ type Placement = { scale: number; x: number; y: number; rotation: number; flipX:
 
 const INITIAL: Placement = { scale: DEFAULT_SCALE, x: 0, y: 0, rotation: 0, flipX: false, flipY: false }
 
+/** Положение, сохранённое при прошлом применении (0060), — окно начинает с него. */
+function savedPlacement(settings: Settings): Placement {
+  const saved = settings.telegram?.placement
+  if (!saved) return INITIAL
+  return {
+    scale: saved.scale ?? DEFAULT_SCALE,
+    x: saved.x ?? 0,
+    y: saved.y ?? 0,
+    rotation: saved.rotation ?? 0,
+    flipX: saved.flip_x ?? false,
+    flipY: saved.flip_y ?? false,
+  }
+}
+
+function isInitial(placement: Placement): boolean {
+  return (Object.keys(INITIAL) as (keyof Placement)[]).every((key) => placement[key] === INITIAL[key])
+}
+
 function clampShift(value: number): number {
   return Math.max(-MAX_SHIFT, Math.min(MAX_SHIFT, value))
 }
@@ -152,6 +170,15 @@ export function TelegramApplyDialog({
   const [pending, setPending] = useState(false)
   const markUrl = settings.mark?.url
 
+  // Окно открывается с фоном и положением знака прошлого применения
+  useEffect(() => {
+    if (!open) return
+    setPlacement(savedPlacement(settings))
+    setBackground(settings.telegram?.background ?? 'brand')
+    setError(null)
+    // Только при открытии окна: иначе ответ сервера сбивал бы правку на ходу
+  }, [open])
+
   useEffect(() => {
     if (!open || !markUrl) return
     let cancelled = false
@@ -211,7 +238,17 @@ export function TelegramApplyDialog({
     try {
       const avatar = await toJpeg(canvas.current)
       const { data, error: failure } = await fetchClient.PUT('/api/admin/settings/brand/telegram', {
-        params: { query: { background } },
+        params: {
+          query: {
+            background,
+            scale: placement.scale,
+            x: Math.round(placement.x),
+            y: Math.round(placement.y),
+            rotation: placement.rotation,
+            flip_x: placement.flipX,
+            flip_y: placement.flipY,
+          },
+        },
         body: avatar as unknown as never,
         bodySerializer: (body: unknown) => body as Blob,
         headers: { 'Content-Type': 'image/jpeg' },
@@ -303,7 +340,7 @@ export function TelegramApplyDialog({
               variant="ghost"
               size="sm"
               onClick={() => setPlacement(INITIAL)}
-              disabled={placement === INITIAL}
+              disabled={isInitial(placement)}
             >
               <RotateCcw />
               Сбросить

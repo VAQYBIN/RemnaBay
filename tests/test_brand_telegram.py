@@ -179,3 +179,46 @@ async def test_0060_apply_sets_command_menu(shop: Shop, owner: TeamMember) -> No
         ("start", "Главное меню"),
         ("help", "Помощь и инструкция по подключению"),
     ]
+
+
+async def test_0060_avatar_placement_is_kept_for_next_time(shop: Shop, owner: TeamMember) -> None:
+    """1.27, 0060: фон и положение знака сохраняются — в следующий раз окно начинает с них."""
+    await _brand(shop, owner)
+    response = await shop.http.put(
+        URL,
+        params={
+            "background": "black",
+            "scale": 132,
+            "x": -12,
+            "y": 40,
+            "rotation": -90,
+            "flip_x": "true",
+            "flip_y": "false",
+        },
+        content=make_jpeg(),
+        headers={"Content-Type": "image/jpeg"},
+    )
+    assert response.status_code == 200
+
+    settings = (await shop.http.get("/api/admin/settings/brand")).json()
+    assert settings["telegram"]["background"] == "black"
+    assert settings["telegram"]["placement"] == {
+        "scale": 132,
+        "x": -12,
+        "y": 40,
+        "rotation": -90,
+        "flip_x": True,
+        "flip_y": False,
+    }
+
+
+async def test_0060_avatar_placement_out_of_range(shop: Shop, owner: TeamMember) -> None:
+    """0060: масштаб — не больше 150 %."""
+    await _brand(shop, owner)
+    response = await shop.http.put(
+        URL,
+        params={"background": "brand", "scale": 151},
+        content=make_jpeg(),
+        headers={"Content-Type": "image/jpeg"},
+    )
+    assert response.status_code == 422

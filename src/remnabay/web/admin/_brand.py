@@ -4,7 +4,7 @@ from functools import lru_cache
 from typing import Annotated
 
 from aiogram import Bot
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
 from remnabay.brand import (
@@ -23,6 +23,7 @@ from remnabay.brand import (
     AssetError,
     AssetKind,
     AvatarBackground,
+    AvatarPlacement,
     BrandPalette,
     Semantic,
     TelegramApplied,
@@ -268,16 +269,26 @@ async def remove_asset(kind: AssetKind, session: DbSession, owner: Owner) -> Bra
     return await _settings_out(session)
 
 
+class AvatarIn(AvatarPlacement):
+    """Фон и положение знака на аватаре — параметры адреса «Применить в Telegram»."""
+
+    background: AvatarBackground
+
+
 @router.put("/telegram", responses={status.HTTP_409_CONFLICT: {}})
 async def apply_telegram(
-    background: AvatarBackground, request: Request, session: DbSession, owner: Owner
+    avatar_in: Annotated[AvatarIn, Query()], request: Request, session: DbSession, owner: Owner
 ) -> BrandSettingsOut:
     """«Применить в Telegram» (1.27): аватар — телом запроса, image/jpeg; его собирает
-    админка из квадратного знака на выбранном фоне (решение 0059)."""
+    админка из квадратного знака на выбранном фоне (решение 0059). Положение знака
+    сохраняется для следующего раза (0060)."""
     avatar = await read_limited(request, MAX_AVATAR_BYTES)
     bot: Bot = request.app.state.bot
+    placement = AvatarPlacement.model_validate(avatar_in.model_dump(exclude={"background"}))
     try:
-        await apply_to_telegram(session, bot, avatar, background, member_id=owner.id)
+        await apply_to_telegram(
+            session, bot, avatar, avatar_in.background, placement, member_id=owner.id
+        )
     except TelegramApplyError as error:
         raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
     await session.commit()

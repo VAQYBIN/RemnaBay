@@ -168,7 +168,8 @@ export interface paths {
         /**
          * Apply Telegram
          * @description «Применить в Telegram» (1.27): аватар — телом запроса, image/jpeg; его собирает
-         *     админка из квадратного знака на выбранном фоне (решение 0059).
+         *     админка из квадратного знака на выбранном фоне (решение 0059). Положение знака
+         *     сохраняется для следующего раза (0060).
          */
         put: operations["apply_telegram_api_admin_settings_brand_telegram_put"];
         post?: never;
@@ -988,6 +989,45 @@ export interface components {
          * @enum {string}
          */
         AvatarBackground: "brand" | "white" | "black";
+        /**
+         * AvatarPlacement
+         * @description Положение знака на аватаре, как его настроил владелец (0060): масштаб — доля
+         *     стороны аватара, %; сдвиг от центра — в пикселях аватара 640×640; поворот — в
+         *     градусах; отражение. Сохраняется, чтобы в следующий раз править, а не настраивать
+         *     заново.
+         */
+        AvatarPlacement: {
+            /**
+             * Scale
+             * @default 58
+             */
+            scale: number;
+            /**
+             * X
+             * @default 0
+             */
+            x: number;
+            /**
+             * Y
+             * @default 0
+             */
+            y: number;
+            /**
+             * Rotation
+             * @default 0
+             */
+            rotation: number;
+            /**
+             * Flip X
+             * @default false
+             */
+            flip_x: boolean;
+            /**
+             * Flip Y
+             * @default false
+             */
+            flip_y: boolean;
+        };
         /** BindIn */
         BindIn: {
             /** Telegram Id */
@@ -1672,7 +1712,8 @@ export interface components {
         TeamRole: "owner" | "assistant";
         /**
          * TelegramApplied
-         * @description Итог последнего «Применить в Telegram» — виден в настройках.
+         * @description Итог последнего «Применить в Telegram» — виден в настройках; фон и положение
+         *     знака — начальные значения окна применения в следующий раз.
          */
         TelegramApplied: {
             /**
@@ -1683,6 +1724,17 @@ export interface components {
             /** Ok */
             ok: boolean;
             background: components["schemas"]["AvatarBackground"];
+            /**
+             * @default {
+             *       "scale": 58,
+             *       "x": 0,
+             *       "y": 0,
+             *       "rotation": 0,
+             *       "flip_x": false,
+             *       "flip_y": false
+             *     }
+             */
+            placement: components["schemas"]["AvatarPlacement"];
             /** Error */
             error?: string | null;
         };
@@ -2045,6 +2097,12 @@ export interface operations {
     apply_telegram_api_admin_settings_brand_telegram_put: {
         parameters: {
             query: {
+                scale?: number;
+                x?: number;
+                y?: number;
+                rotation?: number;
+                flip_x?: boolean;
+                flip_y?: boolean;
                 background: components["schemas"]["AvatarBackground"];
             };
             header?: never;

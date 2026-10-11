@@ -61,12 +61,28 @@ class AvatarBackground(StrEnum):
     BLACK = "black"
 
 
+class AvatarPlacement(BaseModel):
+    """Положение знака на аватаре, как его настроил владелец (0060): масштаб — доля
+    стороны аватара, %; сдвиг от центра — в пикселях аватара 640×640; поворот — в
+    градусах; отражение. Сохраняется, чтобы в следующий раз править, а не настраивать
+    заново."""
+
+    scale: Annotated[int, Field(ge=20, le=150)] = 58
+    x: Annotated[float, Field(ge=-640, le=640)] = 0
+    y: Annotated[float, Field(ge=-640, le=640)] = 0
+    rotation: Annotated[int, Field(ge=-180, le=180)] = 0
+    flip_x: bool = False
+    flip_y: bool = False
+
+
 class TelegramApplied(BaseModel):
-    """Итог последнего «Применить в Telegram» — виден в настройках."""
+    """Итог последнего «Применить в Telegram» — виден в настройках; фон и положение
+    знака — начальные значения окна применения в следующий раз."""
 
     at: datetime
     ok: bool
     background: AvatarBackground
+    placement: AvatarPlacement = AvatarPlacement()
     # Ошибка Telegram, если применить не удалось
     error: str | None = None
 
@@ -123,6 +139,7 @@ async def apply_to_telegram(
     bot: Bot,
     avatar: bytes,
     background: AvatarBackground,
+    placement: AvatarPlacement,
     *,
     member_id: int,
 ) -> TelegramApplied:
@@ -155,7 +172,11 @@ async def apply_to_telegram(
     except AiogramError as failure:
         error = str(failure)
     result = TelegramApplied(
-        at=datetime.now(UTC), ok=error is None, background=background, error=error
+        at=datetime.now(UTC),
+        ok=error is None,
+        background=background,
+        placement=placement,
+        error=error,
     )
     await remember_setting(session, TELEGRAM_APPLIED, result)
     await record(
