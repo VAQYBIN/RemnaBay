@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Slider } from '@/components/ui/slider'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { formatDateTime } from '@/lib/format'
 
@@ -19,8 +20,11 @@ type Background = Schemas['AvatarBackground']
 
 // Сторона аватара: Telegram принимает квадратный JPG
 const SIZE = 640
-// Знак вписан в круг аватара с отступом: сторона квадрата в круге — 0,71 диаметра
-const MARK_SHARE = 0.58
+// Масштаб знака — доля стороны аватара, %. По умолчанию знак целиком внутри круга
+// с отступом: сторона квадрата, вписанного в круг, — 71 % диаметра
+const DEFAULT_SCALE = 58
+const MIN_SCALE = 20
+const MAX_SCALE = 100
 const BACKGROUNDS: { value: Background; label: string }[] = [
   { value: 'brand', label: 'Фирменный цвет' },
   { value: 'white', label: 'Белый' },
@@ -62,12 +66,12 @@ async function loadMark(url: string): Promise<HTMLImageElement> {
   }
 }
 
-function draw(canvas: HTMLCanvasElement, mark: HTMLImageElement, background: string): void {
+function draw(canvas: HTMLCanvasElement, mark: HTMLImageElement, background: string, scale: number): void {
   const context = canvas.getContext('2d')
   if (!context) return
   context.fillStyle = background
   context.fillRect(0, 0, SIZE, SIZE)
-  const side = SIZE * MARK_SHARE
+  const side = (SIZE * scale) / 100
   const offset = (SIZE - side) / 2
   context.drawImage(mark, offset, offset, side, side)
 }
@@ -94,9 +98,9 @@ export function TelegramResult({ settings, timeZone }: { settings: Settings; tim
   )
 }
 
-/** «Применить в Telegram» (1.27, решения 0058, 0059): имя, описания и аватар бота.
- *  Аватар — квадратный знак в круге на фоне, выбранном по круглому предпросмотру;
- *  JPG собирается здесь, из того же холста, что и предпросмотр. */
+/** «Применить в Telegram» (1.27, решения 0058–0060): имя, описания, меню команд и аватар
+ *  бота. Аватар — квадратный знак в выбранном масштабе на выбранном фоне; предпросмотр —
+ *  квадратная рамка с круглым ориентиром. JPG собирается из того же холста. */
 export function TelegramApplyDialog({
   open,
   onOpenChange,
@@ -110,6 +114,7 @@ export function TelegramApplyDialog({
 }) {
   const canvas = useRef<HTMLCanvasElement>(null)
   const [background, setBackground] = useState<Background>('brand')
+  const [scale, setScale] = useState(DEFAULT_SCALE)
   const [mark, setMark] = useState<HTMLImageElement | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
@@ -128,8 +133,8 @@ export function TelegramApplyDialog({
   }, [open, markUrl])
 
   useEffect(() => {
-    if (canvas.current && mark) draw(canvas.current, mark, fill(background, settings.primary_color))
-  }, [mark, background, settings.primary_color])
+    if (canvas.current && mark) draw(canvas.current, mark, fill(background, settings.primary_color), scale)
+  }, [mark, background, settings.primary_color, scale])
 
   const apply = async () => {
     if (!canvas.current || !mark) return
@@ -163,20 +168,42 @@ export function TelegramApplyDialog({
         <DialogHeader>
           <DialogTitle>Применить в Telegram</DialogTitle>
           <DialogDescription>
-            Бот получит имя «{settings.name}», аватар из квадратного знака
+            Бот получит имя «{settings.name}», меню команд, аватар из квадратного знака
             {description ? ', описание' : ''}
             {short ? ' и «Коротко о боте»' : ''}. Пустые поля в Telegram не меняются.
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col items-center gap-4">
-          <canvas
-            ref={canvas}
-            width={SIZE}
-            height={SIZE}
-            className="size-40 rounded-full shadow-sm"
-            role="img"
-            aria-label="Предпросмотр аватара"
-          />
+          {/* Квадрат — картинка, которая уйдёт в Telegram; круг — то, что клиенты
+              увидят как аватар: углы за кругом затемнены (решение 0060) */}
+          <div className="relative size-48 overflow-hidden rounded-md shadow-sm ring-1 ring-border">
+            <canvas
+              ref={canvas}
+              width={SIZE}
+              height={SIZE}
+              className="size-full"
+              role="img"
+              aria-label="Предпросмотр аватара"
+            />
+            <svg viewBox="0 0 100 100" className="pointer-events-none absolute inset-0 size-full" aria-hidden>
+              <path d="M0 0H100V100H0Z M50 0A50 50 0 1 0 50 100A50 50 0 1 0 50 0Z" fillRule="evenodd" fill="rgb(0 0 0 / 0.45)" />
+              <circle cx="50" cy="50" r="49.5" fill="none" stroke="white" strokeOpacity="0.8" strokeWidth="0.6" strokeDasharray="2 1.5" />
+            </svg>
+          </div>
+          <div className="flex w-full max-w-64 flex-col gap-2">
+            <div className="flex items-center justify-between text-sm">
+              <span id="avatar-scale">Размер знака</span>
+              <span className="tabular text-muted-foreground">{scale}%</span>
+            </div>
+            <Slider
+              aria-labelledby="avatar-scale"
+              min={MIN_SCALE}
+              max={MAX_SCALE}
+              step={1}
+              value={[scale]}
+              onValueChange={([value]) => value !== undefined && setScale(value)}
+            />
+          </div>
           <ToggleGroup
             type="single"
             value={background}
@@ -192,7 +219,8 @@ export function TelegramApplyDialog({
             ))}
           </ToggleGroup>
           <p className="text-center text-xs text-muted-foreground">
-            Выберите фон, на котором знак хорошо виден: Telegram показывает аватар кругом.
+            Квадрат — картинка для Telegram, круг — то, что клиенты увидят как аватар бота. Подберите размер
+            знака и фон, на котором он хорошо виден.
           </p>
         </div>
         {error && <p className="text-sm text-danger-text">{error}</p>}
