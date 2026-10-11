@@ -173,6 +173,25 @@ async def set_setting[T](
     )
 
 
+async def remember_setting[T](session: AsyncSession, setting: ShopSetting[T], value: T) -> bool:
+    """Значение, которое магазин узнал сам (например, ответ панели), — без записи в
+    журнал как изменение оператора. `True` — значение изменилось."""
+    new = setting.parse(value)
+    stored = await _stored(session, setting.key)
+    dumped = setting.dump(new)
+    if stored is not None and stored[0] == dumped:
+        return False
+    await session.execute(
+        insert(ShopSettingValue)
+        .values(key=setting.key, value=dumped)
+        .on_conflict_do_update(
+            index_elements=[ShopSettingValue.key],
+            set_={"value": dumped, "updated_at": func.now()},
+        )
+    )
+    return True
+
+
 def new_webhook_secret() -> str:
     return "".join(secrets.choice(_SECRET_ALPHABET) for _ in range(_GENERATED_SECRET_LENGTH))
 

@@ -22,15 +22,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from remnabay import runtime
-from remnabay.domain.clients import Client, TelegramAccount
 from remnabay.domain.payments import Payment, PaymentPurpose, PaymentState
 from remnabay.domain.subscriptions import SegmentKind, Subscription, TermSegment
 from remnabay.domain.tariffs import TariffType
 from remnabay.journal import Actor, Outcome, Subject, record
-from remnabay.messaging import load_texts, notify_team
-from remnabay.panel import CreateUser, TrafficStrategy, UpdateUser, User, UserStatus
-from remnabay.panel_names import lock_prefix, panel_username
+from remnabay.messaging import notify_team
+from remnabay.panel import TrafficStrategy, UpdateUser, User, UserStatus
 from remnabay.panel_sync import accept_access, accept_user, term_end
+from remnabay.panel_users import Access, NewUserError, new_subscription, panel_user
 from remnabay.payments._applier import Applied
 from remnabay.payments._apply import money
 from remnabay.payments._catalog import live_subscriptions, trial_for_purchase
@@ -39,9 +38,6 @@ from remnabay.payments._snapshot import TariffSnapshot
 SUBSCRIPTION_SUBJECT = "subscription"
 # Панель хранит дату с точностью до миллисекунд: даты ближе секунды — одна и та же
 _SAME_MOMENT = timedelta(seconds=1)
-# Сколько занятых чужими пользователями имён пропустить, прежде чем сдаться
-_MAX_NAME_TRIES = 50
-_NAME_LIMIT = 64
 
 
 class ApplyError(Exception):
@@ -245,101 +241,27 @@ class ShopApplier:
         self, session: AsyncSession, payment: Payment, snapshot: TariffSnapshot, terms: _Terms
     ) -> Applied:
         """Новая подписка: пользователь панели с параметрами тарифа (3.6, 3.14)."""
-        telegram_id = await session.scalar(
-            select(TelegramAccount.telegram_id)
-            .where(TelegramAccount.client_id == terms.client_id)
-            .order_by(TelegramAccount.created_at)
-            .limit(1)
-        )
-        if telegram_id is None:
-            raise ApplyError("У клиента нет Telegram-аккаунта")
         days = terms.days
         # Срок новой подписки — от момента её создания в панели: до этого доступа у
         # клиента не было, задержка (например, панель недоступна) срок не съедает (0057)
-        user = await self._panel_user(
-            session, terms.client_id, telegram_id, snapshot, datetime.now(UTC) + days
+        access = Access(
+            expire_at=datetime.now(UTC) + days,
+            traffic_limit_bytes=0,
+            device_limit=snapshot.device_limit,
+            squad_uuids=snapshot.squad_uuids,
         )
-        subscription = Subscription(
-            client_id=terms.client_id,
-            name=await self._default_name(session, terms.client_id),
-            tariff_id=snapshot.tariff_id,
-            panel_user_id=user.id,
-            panel_username=user.username,
-            panel_short_uuid=user.short_uuid,
-            subscription_url=user.subscription_url,
+        try:
+            user = await panel_user(session, terms.client_id, access, dev_mode=self._dev_mode)
+        except NewUserError as error:
+            raise ApplyError(str(error)) from error
+        subscription = await new_subscription(
+            session, terms.client_id, user, tariff_id=snapshot.tariff_id
         )
-        session.add(subscription)
-        await session.flush()
-        accept_access(subscription, user)
         await self._add_segment(
             session, payment, subscription, user.expire_at - days, user.expire_at
         )
         await self._journal(session, subscription, "subscription.created", payment)
         return Applied(subscription_id=subscription.id, created=True, purchase=True)
-
-    async def _panel_user(
-        self,
-        session: AsyncSession,
-        client_id: int,
-        telegram_id: int,
-        snapshot: TariffSnapshot,
-        expire_at: datetime,
-    ) -> User:
-        """Пользователь панели для новой подписки. Если прошлая попытка его уже создала,
-        а записать подписку не успела, — он же, второго не создаём (4.15)."""
-        panel = runtime.current().panel
-        prefix = await lock_prefix(session, dev_mode=self._dev_mode)
-        number = await self._next_number(session, client_id, prefix, telegram_id)
-        for _ in range(_MAX_NAME_TRIES):
-            username = panel_username(prefix, telegram_id, number)
-            existing = await panel.get_user_by_username(username)
-            if existing is None:
-                return await panel.create_user(
-                    CreateUser(
-                        username=username,
-                        expire_at=expire_at,
-                        traffic_limit_bytes=0,
-                        traffic_limit_strategy=TrafficStrategy.NO_RESET,
-                        hwid_device_limit=snapshot.device_limit,
-                        active_internal_squads=snapshot.squad_uuids,
-                        telegram_id=telegram_id,
-                    )
-                )
-            if existing.telegram_id == telegram_id and not await self._bound(session, existing.id):
-                return existing
-            # Имя занято чужим пользователем (создан в панели вручную) — следующий номер
-            number += 1
-        raise ApplyError("Не удалось подобрать свободное имя пользователя в панели")
-
-    async def _next_number(
-        self, session: AsyncSession, client_id: int, prefix: str, telegram_id: int
-    ) -> int:
-        """Следующий порядковый номер подписки клиента, созданной магазином."""
-        start = f"{prefix}_{telegram_id}_"
-        names = await session.scalars(
-            select(Subscription.panel_username).where(Subscription.client_id == client_id)
-        )
-        numbers = [
-            int(name.removeprefix(start))
-            for name in names
-            if name.startswith(start) and name.removeprefix(start).isdigit()
-        ]
-        return max(numbers, default=0) + 1
-
-    async def _bound(self, session: AsyncSession, panel_user_id: int) -> bool:
-        return (
-            await session.scalar(
-                select(Subscription.id).where(Subscription.panel_user_id == panel_user_id)
-            )
-            is not None
-        )
-
-    async def _default_name(self, session: AsyncSession, client_id: int) -> str:
-        """Название по умолчанию на языке клиента (3.14, решение 0057)."""
-        language = await session.scalar(select(Client.language_code).where(Client.id == client_id))
-        texts = await load_texts(session)
-        name = texts.render("subscription.default_name", language).strip()
-        return name[:_NAME_LIMIT] or texts.render("subscription.default_name", None)[:_NAME_LIMIT]
 
     async def _add_segment(
         self,

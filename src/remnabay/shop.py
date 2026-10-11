@@ -9,8 +9,10 @@ from enum import StrEnum
 from typing import Annotated
 
 from pydantic import Field, PositiveInt, TypeAdapter
+from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from remnabay.domain.team import TeamMember
 from remnabay.shop_settings import ShopSetting, get_setting
 
 
@@ -54,3 +56,18 @@ async def sales_open(session: AsyncSession) -> bool:
 
 async def is_tester(session: AsyncSession, telegram_id: int) -> bool:
     return telegram_id in await get_setting(session, SHOP_TESTERS)
+
+
+async def offers_paused_for(session: AsyncSession, telegram_id: int | None) -> bool:
+    """Магазин временно закрыт для этого человека (1.22): ему не предлагают купить,
+    продлить и попробовать бесплатно. Для команды и тестировщиков бот работает как обычно."""
+    if await shop_state(session) != ShopState.PAUSED:
+        return False
+    if telegram_id is None:
+        return True
+    member = await session.scalar(
+        select(
+            exists().where(TeamMember.telegram_id == telegram_id, TeamMember.revoked_at.is_(None))
+        )
+    )
+    return not member and not await is_tester(session, telegram_id)

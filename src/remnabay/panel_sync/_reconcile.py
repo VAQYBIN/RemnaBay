@@ -17,6 +17,8 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from remnabay import runtime
+from remnabay.clients import client_telegram_id
+from remnabay.device_registry import record_device
 from remnabay.domain.subscriptions import (
     PanelUserStatus,
     SegmentKind,
@@ -26,9 +28,16 @@ from remnabay.domain.subscriptions import (
 )
 from remnabay.domain.tariffs import TrafficResetStrategy
 from remnabay.journal import Actor, JsonValue, Outcome, Subject, record
-from remnabay.messaging import MAIN_MENU_BUTTON, ButtonArgs, guide_button, send_to_client
+from remnabay.messaging import (
+    MAIN_MENU_BUTTON,
+    ButtonArgs,
+    buy_button,
+    guide_button,
+    send_to_client,
+)
 from remnabay.panel import TrafficStrategy, User, UserStatus
 from remnabay.queue import TaskContext, task
+from remnabay.shop import offers_paused_for
 
 SUBSCRIPTION_SUBJECT = "subscription"
 
@@ -235,9 +244,40 @@ async def reconcile(session: AsyncSession, subscription: Subscription, args: Rec
         subscription.deleted_at = datetime.now(UTC)
         await _journal(session, subscription, "subscription.deleted_in_panel", args)
         return
+    was_limited = subscription.panel_status == PanelUserStatus.LIMITED
     changes = await accept_user(session, subscription, user)
     if changes:
         await _journal(session, subscription, "subscription.changed_in_panel", args, changes)
+    if subscription.is_trial:
+        await _register_trial_devices(session, subscription, args)
+        if not was_limited and subscription.panel_status == PanelUserStatus.LIMITED:
+            await _tell_trial_traffic_exhausted(session, subscription)
+
+
+async def _register_trial_devices(
+    session: AsyncSession, subscription: Subscription, args: ReconcileArgs
+) -> None:
+    """5.8: событие о подключении к триальной подписке могло не дойти — сверка
+    запрашивает устройства пользователя и дописывает реестр."""
+    devices = await runtime.current().panel.list_devices(subscription.panel_user_id)
+    for device in devices.devices:
+        await record_device(
+            session, subscription, device.hwid, device.created_at, source=args.source
+        )
+
+
+async def _tell_trial_traffic_exhausted(session: AsyncSession, subscription: Subscription) -> None:
+    """5.10, С16: трафик триала исчерпан — «Трафик пробного периода закончился» и
+    «Купить подписку». Пока магазин временно закрыт, сообщение не отправляется (1.22)."""
+    telegram_id = await client_telegram_id(session, subscription.client_id)
+    if await offers_paused_for(session, telegram_id):
+        return
+    await send_to_client(
+        session,
+        subscription.client_id,
+        "event.trial_traffic_exhausted",
+        buttons=[buy_button(), MAIN_MENU_BUTTON],
+    )
 
 
 @task("panel.reconcile_subscription", ReconcileArgs, needs_attention=False)
