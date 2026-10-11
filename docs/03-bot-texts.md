@@ -228,6 +228,8 @@
 | `devices.row` | {platform} · {model} · {app} · с {connected_at} |
 | `devices.button_delete` | Удалить {platform} {model} |
 
+Чего панель не знает об устройстве (платформа, модель, приложение) и лимит, если панель его не сообщила, показываются прочерком «—» ([решение 0059](decisions/0059-stage-7-refinements.md)).
+
 `devices.empty`
 ```
 К подписке пока не подключено ни одного устройства.
