@@ -30,7 +30,14 @@ from remnabay.db import Base
 from remnabay.domain.subscriptions import Subscription
 from remnabay.guide._config import ConfigError, GuideConfig, parse_config
 from remnabay.journal import Actor, Outcome, record
-from remnabay.panel import PanelClient, PanelError
+from remnabay.panel import (
+    PanelClient,
+    PanelError,
+    PanelRequestError,
+    PanelResponseError,
+    SubpageConfig,
+    UserSubpageConfig,
+)
 from remnabay.queue import Periodic, TaskContext, task
 from remnabay.shop_settings import ShopSetting, get_setting, remember_setting
 
@@ -39,6 +46,8 @@ logger = logging.getLogger(__name__)
 # Конфиг по умолчанию: удалить его в панели нельзя (12.1, решение 0043)
 DEFAULT_CONFIG_UUID = UUID(int=0)
 REFRESH_EVERY = timedelta(hours=1)
+# Сколько подписок попробовать, чтобы узнать у панели о браузере (12.16)
+_BROWSER_CHECK_TRIES = 5
 # Заголовки типичного браузера: по ним панель решает, пустит ли браузер (12.16)
 BROWSER_HEADERS = {
     "user-agent": (
@@ -83,6 +92,16 @@ async def _remember_webpage_allowed(session: AsyncSession, allowed: bool) -> Non
         )
 
 
+async def remember_assignment(
+    session: AsyncSession, subscription: Subscription, answer: UserSubpageConfig
+) -> UUID:
+    """Ответ панели о конфиге подписки и о браузере — запоминается (12.1, 12.16)."""
+    config_uuid = answer.subpage_config_uuid or DEFAULT_CONFIG_UUID
+    subscription.subpage_config_uuid = config_uuid
+    await _remember_webpage_allowed(session, answer.webpage_allowed)
+    return config_uuid
+
+
 async def assign_config(
     session: AsyncSession, panel: PanelClient, subscription: Subscription
 ) -> UUID:
@@ -91,10 +110,7 @@ async def assign_config(
     Ошибки панели — у вызывающего: тогда действует последнее известное назначение.
     """
     answer = await panel.get_user_subpage_config(subscription.panel_short_uuid, BROWSER_HEADERS)
-    config_uuid = answer.subpage_config_uuid or DEFAULT_CONFIG_UUID
-    subscription.subpage_config_uuid = config_uuid
-    await _remember_webpage_allowed(session, answer.webpage_allowed)
-    return config_uuid
+    return await remember_assignment(session, subscription, answer)
 
 
 def known_config_uuid(subscription: Subscription) -> UUID:
@@ -102,23 +118,20 @@ def known_config_uuid(subscription: Subscription) -> UUID:
     return subscription.subpage_config_uuid or DEFAULT_CONFIG_UUID
 
 
-async def fetch_config(
-    session: AsyncSession, panel: PanelClient, config_uuid: UUID
-) -> StoredConfig:
-    """Получает конфиг у панели и сохраняет его (12.7)."""
-    config = await panel.get_subpage_config(config_uuid)
+async def store_config(session: AsyncSession, config_uuid: UUID, config: SubpageConfig) -> None:
+    """Сохраняет полученный конфиг (12.7)."""
     content = json.dumps(config.config or {}, ensure_ascii=False)
-    now = datetime.now(UTC)
-    values = {"name": config.name[:256], "content": content, "fetched_at": now}
+    values = {"name": config.name[:256], "content": content, "fetched_at": datetime.now(UTC)}
     await session.execute(
         insert(StoredConfig)
         .values(uuid=config_uuid, **values)
         .on_conflict_do_update(index_elements=[StoredConfig.uuid], set_=values)
     )
-    stored = await session.get(StoredConfig, config_uuid, populate_existing=True)
-    if stored is None:
-        raise RuntimeError("Конфиг не сохранён")
-    return stored
+
+
+async def fetch_config(session: AsyncSession, panel: PanelClient, config_uuid: UUID) -> None:
+    """Получает конфиг у панели и сохраняет его (12.7). Ошибки панели — у вызывающего."""
+    await store_config(session, config_uuid, await panel.get_subpage_config(config_uuid))
 
 
 async def stored_config(session: AsyncSession, config_uuid: UUID) -> GuideConfig | None:
@@ -142,7 +155,12 @@ class RefreshResult:
 
 async def refresh_configs(session: AsyncSession, panel: PanelClient) -> RefreshResult:
     """Обновляет все нужные конфиги: по умолчанию и назначенные подпискам (12.7), и
-    ответ «пускает ли браузер» (12.16). Ошибки панели — у вызывающего."""
+    ответ «пускает ли браузер» (12.16).
+
+    Панель недоступна — `PanelUnavailableError` у вызывающего. Отказ по одному конфигу
+    (например, его удалили в панели, а подписка ещё помнит старый) остальные не
+    останавливает: подписка узнает новое назначение, когда клиент откроет инструкцию.
+    """
     assigned = await session.scalars(
         select(Subscription.subpage_config_uuid)
         .where(Subscription.subpage_config_uuid.is_not(None), Subscription.deleted_at.is_(None))
@@ -150,19 +168,32 @@ async def refresh_configs(session: AsyncSession, panel: PanelClient) -> RefreshR
     )
     uuids = [DEFAULT_CONFIG_UUID]
     uuids += [uuid for uuid in assigned if uuid is not None and uuid != DEFAULT_CONFIG_UUID]
+    fetched = 0
     for config_uuid in uuids:
-        await fetch_config(session, panel, config_uuid)
-    # Ответ о браузере панель даёт по ссылке подписки: берём любую действующую
-    short_uuid = await session.scalar(
+        try:
+            await fetch_config(session, panel, config_uuid)
+        except PanelRequestError, PanelResponseError:
+            if config_uuid == DEFAULT_CONFIG_UUID:
+                raise
+            logger.warning("Конфиг Subscription Page %s не получен", config_uuid, exc_info=True)
+            continue
+        fetched += 1
+    # Ответ о браузере панель даёт по ссылке подписки: берём недавние действующие
+    short_uuids = await session.scalars(
         select(Subscription.panel_short_uuid)
         .where(Subscription.deleted_at.is_(None))
         .order_by(Subscription.id.desc())
-        .limit(1)
+        .limit(_BROWSER_CHECK_TRIES)
     )
-    if short_uuid is not None:
-        answer = await panel.get_user_subpage_config(short_uuid, BROWSER_HEADERS)
+    for short_uuid in short_uuids:
+        try:
+            answer = await panel.get_user_subpage_config(short_uuid, BROWSER_HEADERS)
+        except PanelRequestError:
+            # Пользователя удалили в панели, сверка ещё не знает — следующая подписка
+            continue
         await _remember_webpage_allowed(session, answer.webpage_allowed)
-    return RefreshResult(len(uuids), await get_setting(session, WEBPAGE_ALLOWED))
+        break
+    return RefreshResult(fetched, await get_setting(session, WEBPAGE_ALLOWED))
 
 
 async def last_refreshed_at(session: AsyncSession) -> datetime | None:

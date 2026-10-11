@@ -34,16 +34,17 @@ from remnabay.bot._screens import Keyboard, Screen
 from remnabay.bot._shop import main_menu
 from remnabay.domain.subscriptions import Subscription
 from remnabay.guide import (
+    BROWSER_HEADERS,
     REDIRECT_PATH,
     ButtonType,
     ConfigApp,
     ConfigButton,
     GuideConfig,
     Language,
-    assign_config,
-    fetch_config,
     known_config_uuid,
     redirect_token,
+    remember_assignment,
+    store_config,
     stored_config,
     webpage_allowed,
 )
@@ -58,20 +59,28 @@ _WEB_SCHEMES = ("https://", "http://", "tg://")
 
 async def _config(ctx: BotContext, subscription: Subscription) -> GuideConfig | None:
     """Конфиг подписки: назначение — у панели, содержимое — сохранённое; ещё не
-    сохранённое — у панели. Панель не ответила — последнее известное (12.8)."""
+    сохранённое — у панели. Панель не ответила — последнее известное (12.8).
+
+    Таймаут — только на запросы к панели: запись в базу не прерывается."""
+    seconds = PANEL_TIMEOUT.total_seconds()
     try:
-        async with asyncio.timeout(PANEL_TIMEOUT.total_seconds()):
-            config_uuid = await assign_config(ctx.session, ctx.panel, subscription)
+        async with asyncio.timeout(seconds):
+            answer = await ctx.panel.get_user_subpage_config(
+                subscription.panel_short_uuid, BROWSER_HEADERS
+            )
     except PanelError, TimeoutError:
         config_uuid = known_config_uuid(subscription)
+    else:
+        config_uuid = await remember_assignment(ctx.session, subscription, answer)
     config = await stored_config(ctx.session, config_uuid)
     if config is not None:
         return config
     try:
-        async with asyncio.timeout(PANEL_TIMEOUT.total_seconds()):
-            await fetch_config(ctx.session, ctx.panel, config_uuid)
+        async with asyncio.timeout(seconds):
+            fetched = await ctx.panel.get_subpage_config(config_uuid)
     except PanelError, TimeoutError:
         return None
+    await store_config(ctx.session, config_uuid, fetched)
     return await stored_config(ctx.session, config_uuid)
 
 

@@ -6,19 +6,17 @@
 подтверждения (6.5); панель недоступна — удаление в очереди (6.6).
 """
 
-import asyncio
-
 from aiogram import Router
 from aiogram.types import CallbackQuery
 
 from remnabay.bot._common import (
-    PANEL_TIMEOUT,
     AskRemoveAll,
     Card,
     DevicesScreen,
     RemoveAll,
     RemoveDevice,
     own_subscription,
+    panel_devices,
     show,
 )
 from remnabay.bot._context import BotContext
@@ -28,9 +26,7 @@ from remnabay.devices import (
     DeviceList,
     Removal,
     app_name,
-    device_limit,
     handle,
-    list_devices,
     remove_devices,
 )
 from remnabay.domain.subscriptions import Subscription
@@ -38,16 +34,6 @@ from remnabay.panel import Device, PanelError
 
 # Неизвестное панели значение в строке устройства (решение 0059)
 UNKNOWN = "—"
-
-
-async def _devices(ctx: BotContext, subscription: Subscription) -> DeviceList | None:
-    """Устройства из панели. `None` — лимит устройств в панели выключен (6.1).
-    Панель не ответила — `PanelError` или `TimeoutError` у вызывающего."""
-    async with asyncio.timeout(PANEL_TIMEOUT.total_seconds()):
-        limit = await device_limit(ctx.session, ctx.panel)
-        if not limit.enabled:
-            return None
-        return await list_devices(ctx.panel, subscription, limit)
 
 
 def _names(device: Device) -> dict[str, str]:
@@ -101,7 +87,7 @@ async def devices_screen(
     """З7. Лимит в панели выключили — карточка подписки, без раздела (6.1). Панель
     не отвечает — «данные могут быть неактуальны» (4.12): список — только из панели."""
     try:
-        devices = await _devices(ctx, subscription)
+        devices = await panel_devices(ctx, subscription)
     except PanelError, TimeoutError:
         keyboard = Keyboard().action(
             ctx.render("btn.back"), Card(subscription_id=subscription.id).pack()
@@ -122,10 +108,17 @@ async def open_devices(query: CallbackQuery, callback_data: DevicesScreen, ctx: 
 
 
 async def _remove(
-    query: CallbackQuery, ctx: BotContext, subscription: Subscription, hwid: str | None
+    query: CallbackQuery,
+    ctx: BotContext,
+    subscription: Subscription,
+    *,
+    hwid: str | None = None,
+    device: str | None = None,
 ) -> None:
     try:
-        removal = await remove_devices(ctx.session, ctx.panel, subscription, hwid)
+        removal = await remove_devices(
+            ctx.session, ctx.panel, subscription, hwid=hwid, device=device
+        )
     except PanelError:
         # Панель отказала (например, устройства уже нет) — показываем, что в ней сейчас
         await show(query, ctx, await devices_screen(ctx, subscription))
@@ -138,21 +131,23 @@ async def _remove(
 
 
 async def remove_one(query: CallbackQuery, callback_data: RemoveDevice, ctx: BotContext) -> None:
-    """«Удалить» у устройства (6.4)."""
+    """«Удалить» у устройства (6.4). Панель не отвечает — HWID не узнать, удаление
+    ставится в повтор по отпечатку с кнопки (6.6)."""
     subscription = await own_subscription(ctx, callback_data.subscription_id)
     if subscription is None:
         await show(query, ctx, await main_menu(ctx))
         return
     try:
-        devices = await _devices(ctx, subscription)
+        devices = await panel_devices(ctx, subscription)
     except PanelError, TimeoutError:
-        devices = None
+        await _remove(query, ctx, subscription, device=callback_data.device)
+        return
     device = devices.find(callback_data.device) if devices is not None else None
     if device is None:
-        # Устройства уже нет или панель не ответила — актуальный список
+        # Устройства уже нет или раздел выключен — актуальный экран
         await show(query, ctx, await devices_screen(ctx, subscription))
         return
-    await _remove(query, ctx, subscription, device.hwid)
+    await _remove(query, ctx, subscription, hwid=device.hwid)
 
 
 async def ask_remove_all(
@@ -181,7 +176,7 @@ async def remove_all(query: CallbackQuery, callback_data: RemoveAll, ctx: BotCon
     if subscription is None:
         await show(query, ctx, await main_menu(ctx))
         return
-    await _remove(query, ctx, subscription, None)
+    await _remove(query, ctx, subscription)
 
 
 def build_router() -> Router:

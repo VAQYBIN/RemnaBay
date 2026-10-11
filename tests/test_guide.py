@@ -404,3 +404,17 @@ async def test_12_8_panel_outage_does_not_block_guide(shop: Shop) -> None:
     await add(shop.session, PanelOutage(started_at=datetime.now(UTC)))
     shop.panel.down = True
     assert isinstance(await _guide(shop, subscription), SendRichMessage)
+
+
+async def test_12_7_stale_assigned_config_does_not_stop_refresh(shop: Shop) -> None:
+    """12.7: конфиг, назначенный подписке, удалили в панели — обновление остальных
+    конфигов (и конфига по умолчанию) всё равно проходит."""
+    await _owner(shop)
+    subscription = await _subscription(shop)
+    subscription.subpage_config_uuid = UUID(SQUAD_CONFIG)
+    await shop.session.flush()
+
+    response = await shop.http.post("/api/admin/settings/panel/guide/refresh")
+
+    assert response.status_code == 200
+    assert response.json()["guide_refreshed_at"] is not None

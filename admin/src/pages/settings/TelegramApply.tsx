@@ -34,13 +34,19 @@ function fill(background: Background, brand: string): string {
 }
 
 /** Знак как картинка для холста. У SVG без width и height браузер не знает размера —
- *  задаём его, сохраняя viewBox. */
+ *  задаём его. Без viewBox новые width и height лишь увеличили бы область, а не
+ *  рисунок, поэтому viewBox сначала берётся из прежних размеров. */
 async function loadMark(url: string): Promise<HTMLImageElement> {
   const response = await fetch(url, { credentials: 'same-origin' })
   let blob = await response.blob()
   if (blob.type.startsWith('image/svg')) {
     const document = new DOMParser().parseFromString(await blob.text(), 'image/svg+xml')
     const svg = document.documentElement
+    if (!svg.hasAttribute('viewBox')) {
+      const width = Number.parseFloat(svg.getAttribute('width') ?? '')
+      const height = Number.parseFloat(svg.getAttribute('height') ?? '')
+      if (width > 0 && height > 0) svg.setAttribute('viewBox', `0 0 ${width} ${height}`)
+    }
     svg.setAttribute('width', String(SIZE))
     svg.setAttribute('height', String(SIZE))
     blob = new Blob([new XMLSerializer().serializeToString(svg)], { type: 'image/svg+xml' })

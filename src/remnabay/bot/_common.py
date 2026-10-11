@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, InaccessibleMessage
 
 from remnabay.bot._context import BotContext
 from remnabay.bot._screens import Keyboard, Screen
-from remnabay.devices import HWID_ENABLED, DeviceList, device_limit, list_devices
+from remnabay.devices import HWID_ENABLED, DeviceList, list_devices, remember_device_limit
 from remnabay.domain.subscriptions import Subscription
 from remnabay.messaging import BUY_CALLBACK, GUIDE_CALLBACK_PREFIX
 from remnabay.panel import PanelError
@@ -112,17 +112,27 @@ async def own_subscription(ctx: BotContext, subscription_id: int) -> Subscriptio
     return None
 
 
+async def panel_devices(ctx: BotContext, subscription: Subscription) -> DeviceList | None:
+    """Устройства подписки из панели (6.2, 6.3). `None` — лимит устройств в панели
+    выключен (6.1). Панель не ответила — `PanelError` или `TimeoutError`.
+
+    Таймаут — только на запросы к панели: запись в базу не прерывается."""
+    seconds = PANEL_TIMEOUT.total_seconds()
+    async with asyncio.timeout(seconds):
+        settings = await ctx.panel.get_subscription_settings()
+    limit = await remember_device_limit(ctx.session, settings)
+    if not limit.enabled:
+        return None
+    async with asyncio.timeout(seconds):
+        return await list_devices(ctx.panel, subscription, limit)
+
+
 async def card_devices(ctx: BotContext, subscription: Subscription) -> DeviceList | None:
     """Устройства для карточки: «занято X из Y» и кнопка раздела (З3, 6.1). `None` —
-    лимит устройств в панели выключен. Панель не ответила — список пустой, без лимита:
-    раздел откроется, когда она ответит."""
+    лимит устройств в панели выключен. Панель не ответила — список пустой, без лимита,
+    а кнопка раздела — по последнему ответу панели."""
     try:
-        async with asyncio.timeout(PANEL_TIMEOUT.total_seconds()):
-            limit = await device_limit(ctx.session, ctx.panel)
-            if not limit.enabled:
-                return None
-            return await list_devices(ctx.panel, subscription, limit)
+        return await panel_devices(ctx, subscription)
     except PanelError, TimeoutError:
-        # Последний ответ панели о лимите устройств — пока она не отвечает
         known = await get_setting(ctx.session, HWID_ENABLED)
         return DeviceList(devices=[], limit=None) if known else None

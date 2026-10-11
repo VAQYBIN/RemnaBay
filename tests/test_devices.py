@@ -328,3 +328,23 @@ async def test_5_8_device_list_refusal_does_not_break_reconcile(shop: Shop) -> N
         args = ReconcileArgs(subscription_id=trial.id, source=Source.SYNC)
         await reconcile(shop.session, trial, args)
     assert trial.expires_at == datetime(2027, 1, 1, tzinfo=UTC)
+
+
+async def test_6_6_single_device_queued_when_panel_down(shop: Shop) -> None:
+    """6.6: панель не отвечает — «Удалить» у устройства из уже показанного списка
+    ставит удаление в повтор; когда панель вернулась, удаляется именно это устройство."""
+    subscription = await _subscription(shop)
+    shop.panel.devices = {7: [device_json(hwid="h-1"), device_json(hwid="h-2")]}
+    shop.panel.down = True
+
+    remove = RemoveDevice(subscription_id=subscription.id, device=handle("h-1"))
+    await shop.press(USER, remove.pack())
+
+    assert "Устройство будет удалено" in _text(shop.telegram.last())
+    [task] = await queued(shop.session, delete_devices)
+    assert DeleteArgs.model_validate(task.args).device == handle("h-1")
+
+    shop.panel.down = False
+    with fake_runtime(panel=shop.panel):
+        await run_queued(shop.session, delete_devices)
+    assert [d["hwid"] for d in shop.panel.devices[7]] == ["h-2"]

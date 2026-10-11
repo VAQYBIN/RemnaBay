@@ -18,7 +18,7 @@ from remnabay.clients import client_telegram_id
 from remnabay.domain.clients import Client
 from remnabay.domain.subscriptions import Subscription
 from remnabay.messaging import load_texts
-from remnabay.panel import CreateUser, TrafficStrategy, User
+from remnabay.panel import CreateUser, TrafficStrategy, UpdateUser, User
 from remnabay.panel_names import lock_prefix, panel_username
 from remnabay.panel_sync import accept_access
 
@@ -92,7 +92,18 @@ async def panel_user(
                 )
             )
         if existing.telegram_id == telegram_id and not await _bound(session, existing.id):
-            return existing
+            # Пользователя создала прерванная попытка — возможно, другой операции
+            # (триал, а теперь покупка): параметры доступа — те, что нужны сейчас
+            return await panel.update_user(
+                UpdateUser(
+                    id=existing.id,
+                    expire_at=access.expire_at,
+                    traffic_limit_bytes=access.traffic_limit_bytes,
+                    traffic_limit_strategy=TrafficStrategy.NO_RESET,
+                    hwid_device_limit=access.device_limit,
+                    active_internal_squads=access.squad_uuids,
+                )
+            )
         # Имя занято чужим пользователем (создан в панели вручную) — следующий номер
         number += 1
     raise NewUserError("Не удалось подобрать свободное имя пользователя в панели")

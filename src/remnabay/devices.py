@@ -21,10 +21,10 @@ from remnabay import runtime
 from remnabay.domain.subscriptions import Subscription, operations_key
 from remnabay.journal import Actor, Outcome, Subject, record
 from remnabay.messaging import tell_action_failed
-from remnabay.panel import Device, PanelClient, PanelError, PanelUnavailableError
+from remnabay.panel import Device, PanelClient, PanelUnavailableError, SubscriptionSettings
 from remnabay.panel_sync import panel_available
 from remnabay.queue import TaskContext, task
-from remnabay.shop_settings import ShopSetting, get_setting, remember_setting
+from remnabay.shop_settings import ShopSetting, remember_setting
 
 SUBSCRIPTION_SUBJECT = "subscription"
 # Короткий отпечаток HWID для кнопки: данные кнопки Telegram — не длиннее 64 байт
@@ -57,12 +57,11 @@ class DeviceLimit:
     fallback: int | None = None
 
 
-async def device_limit(session: AsyncSession, panel: PanelClient) -> DeviceLimit:
-    """6.1: включён ли в панели лимит устройств. Панель не ответила — последний ответ."""
-    try:
-        settings = await panel.get_subscription_settings()
-    except PanelError:
-        return DeviceLimit(enabled=bool(await get_setting(session, HWID_ENABLED)))
+async def remember_device_limit(
+    session: AsyncSession, settings: SubscriptionSettings
+) -> DeviceLimit:
+    """6.1: включён ли в панели лимит устройств — по ответу панели; ответ запоминается
+    (`HWID_ENABLED`): он действует, пока панель не отвечает."""
     hwid = settings.hwid_settings
     enabled = hwid is not None and hwid.enabled
     await remember_setting(session, HWID_ENABLED, enabled)
@@ -107,37 +106,61 @@ class Removal(StrEnum):
 class DeleteArgs(BaseModel):
     subscription_id: int
     client_id: int
-    # Пусто — удалить все устройства подписки (6.5)
+    # Устройство: HWID или, если панель не ответила и HWID не узнать, — отпечаток с
+    # кнопки «Удалить» (6.6). Оба пусты — удалить все устройства подписки (6.5)
     hwid: str | None = None
+    device: str | None = None
+
+    @property
+    def all_devices(self) -> bool:
+        return self.hwid is None and self.device is None
 
 
 async def _journal_removed(session: AsyncSession, args: DeleteArgs, *, queued: bool) -> None:
     await record(
         session,
         actor=Actor.client(args.client_id),
-        action="device.deleted_all" if args.hwid is None else "device.deleted",
+        action="device.deleted_all" if args.all_devices else "device.deleted",
         outcome=Outcome.SUCCESS,
         subject=Subject(SUBSCRIPTION_SUBJECT, args.subscription_id),
-        details={"hwid": args.hwid, "queued": queued},
+        details={"hwid": args.hwid, "device": args.device, "queued": queued},
     )
 
 
-async def _delete(panel: PanelClient, subscription: Subscription, hwid: str | None) -> None:
+async def _delete(panel: PanelClient, subscription: Subscription, args: DeleteArgs) -> str | None:
+    """Удаляет в панели; возвращает HWID удалённого устройства (`None` — все или уже нет)."""
+    user_id = subscription.panel_user_id
+    if args.all_devices:
+        await panel.delete_all_devices(user_id)
+        return None
+    hwid = args.hwid
     if hwid is None:
-        await panel.delete_all_devices(subscription.panel_user_id)
-    else:
-        await panel.delete_device(subscription.panel_user_id, hwid)
+        devices = await panel.list_devices(user_id)
+        found = next((d for d in devices.devices if handle(d.hwid) == args.device), None)
+        if found is None:
+            # Устройства уже нет — удалять нечего
+            return None
+        hwid = found.hwid
+    await panel.delete_device(user_id, hwid)
+    return hwid
 
 
 async def remove_devices(
-    session: AsyncSession, panel: PanelClient, subscription: Subscription, hwid: str | None
+    session: AsyncSession,
+    panel: PanelClient,
+    subscription: Subscription,
+    *,
+    hwid: str | None = None,
+    device: str | None = None,
 ) -> Removal:
     """Клиент удаляет устройство или все сразу (6.4, 6.5). Панель недоступна — удаление
     ставится в повтор (6.6). Действие клиента — в журнал."""
-    args = DeleteArgs(subscription_id=subscription.id, client_id=subscription.client_id, hwid=hwid)
+    args = DeleteArgs(
+        subscription_id=subscription.id, client_id=subscription.client_id, hwid=hwid, device=device
+    )
     if await panel_available(session):
         try:
-            await _delete(panel, subscription, hwid)
+            await _delete(panel, subscription, args)
         except PanelUnavailableError:
             pass
         else:
@@ -155,14 +178,14 @@ async def delete_devices(context: TaskContext, args: DeleteArgs) -> None:
     subscription = await context.session.get(Subscription, args.subscription_id)
     if subscription is None or subscription.deleted_at is not None:
         return
-    await _delete(runtime.current().panel, subscription, args.hwid)
+    hwid = await _delete(runtime.current().panel, subscription, args)
     await record(
         context.session,
         actor=Actor.SYSTEM,
         action="device.deleted_in_panel",
         outcome=Outcome.SUCCESS,
         subject=Subject(SUBSCRIPTION_SUBJECT, args.subscription_id),
-        details={"hwid": args.hwid},
+        details={"hwid": hwid, "all": args.all_devices},
     )
 
 

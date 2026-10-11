@@ -37,6 +37,8 @@ from remnabay.guide._store import (
     last_refreshed_at,
     refresh_configs,
     refresh_configs_task,
+    remember_assignment,
+    store_config,
     stored_config,
     webpage_allowed,
 )
@@ -68,7 +70,9 @@ __all__ = [
     "redirect_token",
     "refresh_configs",
     "refresh_configs_task",
+    "remember_assignment",
     "resolve",
+    "store_config",
     "stored_config",
     "webpage_allowed",
 ]

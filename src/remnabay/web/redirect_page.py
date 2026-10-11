@@ -158,7 +158,8 @@ async def redirect_page(token: str, session: DbSession) -> HTMLResponse:
     config = await stored_config(session, known_config_uuid(redirect.subscription))
     if config is None:
         return await _invalid(session, texts, language)
-    pick = Language(config, language, default).pick
+    # Тексты конфига — на языке клиента, даже если у бота такого языка нет (12.2)
+    pick = Language(config, client.language_code if client else None, default).pick
     app = redirect.app.name
     escaped_link = html.escape(redirect.deeplink, quote=True)
     body = (
