@@ -9,6 +9,7 @@
 операций магазина над этой подпиской (4.17) и видит уже применённые ими отрезки.
 """
 
+import logging
 from datetime import UTC, datetime
 from enum import StrEnum
 
@@ -35,11 +36,13 @@ from remnabay.messaging import (
     guide_button,
     send_to_client,
 )
-from remnabay.panel import TrafficStrategy, User, UserStatus
+from remnabay.panel import PanelRequestError, TrafficStrategy, User, UserStatus
 from remnabay.queue import TaskContext, task
 from remnabay.shop import offers_paused_for
 
 SUBSCRIPTION_SUBJECT = "subscription"
+
+logger = logging.getLogger(__name__)
 
 _STATUSES = {
     UserStatus.ACTIVE: PanelUserStatus.ACTIVE,
@@ -259,7 +262,13 @@ async def _register_trial_devices(
 ) -> None:
     """5.8: событие о подключении к триальной подписке могло не дойти — сверка
     запрашивает устройства пользователя и дописывает реестр."""
-    devices = await runtime.current().panel.list_devices(subscription.panel_user_id)
+    try:
+        devices = await runtime.current().panel.list_devices(subscription.panel_user_id)
+    except PanelRequestError:
+        # Панель отказала в списке (например, у токена нет права): сверка подписки
+        # важнее; устройство попадёт в реестр по событию или следующей сверкой
+        logger.warning("Устройства подписки %s не получены при сверке", subscription.id)
+        return
     for device in devices.devices:
         await record_device(
             session, subscription, device.hwid, device.created_at, source=args.source

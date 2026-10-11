@@ -5,6 +5,7 @@ from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx2
 import pytest
 from aiogram.methods import EditMessageText, SendMessage, SendRichMessage
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -307,3 +308,23 @@ async def test_6_2_card_shows_devices_used_of_limit(shop: Shop) -> None:
     assert "Устройства" in content
     assert "1 из 3" in content
     assert "Устройства" in _labels(card)
+
+
+async def test_5_8_device_list_refusal_does_not_break_reconcile(shop: Shop) -> None:
+    """5.8, 4.8: панель отказала в списке устройств — сверка подписки всё равно проходит."""
+    trial = await _subscription(shop)
+    trial.is_trial = True
+    shop.panel.users[7]["expireAt"] = "2027-01-01T00:00:00.000Z"
+    shop.panel.devices = {}
+    original = shop.panel.handle
+
+    def refuse_devices(request: httpx2.Request) -> httpx2.Response:
+        if request.url.path.startswith("/api/hwid/devices/"):
+            return httpx2.Response(403, json={"message": "Forbidden"})
+        return original(request)
+
+    shop.panel.handle = refuse_devices  # type: ignore[method-assign]
+    with fake_runtime(panel=shop.panel):
+        args = ReconcileArgs(subscription_id=trial.id, source=Source.SYNC)
+        await reconcile(shop.session, trial, args)
+    assert trial.expires_at == datetime(2027, 1, 1, tzinfo=UTC)
