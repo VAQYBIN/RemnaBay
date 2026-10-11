@@ -21,6 +21,10 @@ PANEL_URL = "https://panel.example.com"
 _USER_PATH = re.compile(r"^/api/users/(\d+)$")
 _USERNAME_PATH = re.compile(r"^/api/users/by-username/([\w-]+)$")
 _RESET_PATH = re.compile(r"^/api/users/(\d+)/actions/reset-traffic$")
+_DEVICES_PATH = re.compile(r"^/api/hwid/devices/(\d+)$")
+_USER_CONFIG_PATH = re.compile(r"^/api/subscriptions/subpage-config/([\w-]+)$")
+_CONFIG_PATH = re.compile(r"^/api/subscription-page-configs/([\w-]+)$")
+DEFAULT_CONFIG = "00000000-0000-0000-0000-000000000000"
 # Поля пользователя, которые меняет запрос PATCH /api/users
 _UPDATABLE = (
     "expireAt",
@@ -69,6 +73,23 @@ def user_json(**overrides: Any) -> dict[str, Any]:
     return user
 
 
+def device_json(**overrides: Any) -> dict[str, Any]:
+    """Устройство пользователя панели 3.4.4 в формате ответа API."""
+    device: dict[str, Any] = {
+        "hwid": "hwid-1",
+        "userId": 7,
+        "platform": "iOS",
+        "osVersion": "18.1",
+        "deviceModel": "iPhone 15",
+        "userAgent": "Happ/2.6.0/ios",
+        "requestIp": None,
+        "createdAt": "2026-10-05T12:00:00.000Z",
+        "updatedAt": "2026-10-05T12:00:00.000Z",
+    }
+    device.update(overrides)
+    return device
+
+
 @dataclass
 class FakePanel:
     """Панель с пользователями в памяти: создаёт, читает, меняет пользователей и
@@ -91,6 +112,17 @@ class FakePanel:
     next_id: int = 1000
     # Ответ на запрос пользователя «потерялся»: изменение применено, ответ — ошибка шлюза
     lose_next_write: bool = False
+    # Устройства пользователей: id пользователя → устройства
+    devices: dict[int, list[dict[str, Any]]] = field(
+        default_factory=dict[int, list[dict[str, Any]]]
+    )
+    fallback_device_limit: int = 2
+    # Конфиги Subscription Page: uuid → содержимое; назначение пользователю — по shortUuid
+    subpage_configs: dict[str, dict[str, Any]] = field(default_factory=dict[str, dict[str, Any]])
+    user_configs: dict[str, str | None] = field(default_factory=dict[str, str | None])
+    webpage_allowed: bool = True
+    # Заголовки последнего запроса конфига пользователя (12.16)
+    subpage_headers: dict[str, str] = field(default_factory=dict[str, str])
 
     def add_user(self, **overrides: Any) -> dict[str, Any]:
         user = user_json(**overrides)
@@ -154,8 +186,25 @@ class FakePanel:
         if request.url.path == "/api/system/metadata":
             return httpx2.Response(200, json={"response": {"version": self.version}})
         if request.url.path == "/api/subscription-settings":
-            hwid = None if self.hwid_enabled is None else {"enabled": self.hwid_enabled}
+            hwid = (
+                None
+                if self.hwid_enabled is None
+                else {
+                    "enabled": self.hwid_enabled,
+                    "fallbackDeviceLimit": self.fallback_device_limit,
+                    "maxDevicesAnnounce": None,
+                }
+            )
             return httpx2.Response(200, json={"response": {"hwidSettings": hwid}})
+        if request.url.path.startswith("/api/hwid/") or "subpage-config" in request.url.path:
+            return self._guide_or_devices(request)
+        config = _CONFIG_PATH.match(request.url.path)
+        if config and request.method == "GET":
+            content = self.subpage_configs.get(config.group(1))
+            if content is None:
+                return httpx2.Response(404, json={"message": "Config not found"})
+            body = {"uuid": config.group(1), "name": "Default", "config": content}
+            return httpx2.Response(200, json={"response": body})
         if request.url.path == "/api/internal-squads":
             squads = [{"uuid": uuid, "name": name} for uuid, name in self.squads.items()]
             body = {"total": len(squads), "internalSquads": squads}
@@ -184,6 +233,37 @@ class FakePanel:
                 body = {"message": "User not found", "errorCode": "A063"}
                 return httpx2.Response(404, json=body)
             return httpx2.Response(200, json={"response": user})
+        return httpx2.Response(404, json={"message": "Not found"})
+
+    def _devices_body(self, user_id: int) -> httpx2.Response:
+        devices = self.devices.get(user_id, [])
+        return httpx2.Response(200, json={"response": {"total": len(devices), "devices": devices}})
+
+    def _guide_or_devices(self, request: httpx2.Request) -> httpx2.Response:
+        """Устройства (блок 6) и конфиг Subscription Page пользователя (12.1, 12.16)."""
+        path = request.url.path
+        listed = _DEVICES_PATH.match(path)
+        if listed and request.method == "GET":
+            return self._devices_body(int(listed.group(1)))
+        if path in ("/api/hwid/devices/delete", "/api/hwid/devices/delete-all"):
+            body: dict[str, Any] = json.loads(request.content)
+            self.writes.append((f"POST {path}", body))
+            user_id = int(body["userId"])
+            if path.endswith("delete-all"):
+                self.devices[user_id] = []
+            else:
+                self.devices[user_id] = [
+                    d for d in self.devices.get(user_id, []) if d["hwid"] != body["hwid"]
+                ]
+            return self._devices_body(user_id)
+        assigned = _USER_CONFIG_PATH.match(path)
+        if assigned and request.method == "GET":
+            self.subpage_headers = json.loads(request.content)["requestHeaders"]
+            body = {
+                "subpageConfigUuid": self.user_configs.get(assigned.group(1)),
+                "webpageAllowed": self.webpage_allowed,
+            }
+            return httpx2.Response(200, json={"response": body})
         return httpx2.Response(404, json={"message": "Not found"})
 
     def client(self) -> PanelClient:

@@ -14,7 +14,6 @@ from aiogram.filters import CommandObject, CommandStart
 from aiogram.filters.callback_data import CallbackData
 from aiogram.types import (
     CallbackQuery,
-    InaccessibleMessage,
     InputRichBlockParagraph,
     InputRichBlockSectionHeading,
     InputRichBlockTable,
@@ -27,6 +26,21 @@ from aiogram.types import (
 )
 from babel.numbers import format_currency
 
+from remnabay.bot._common import (
+    BACK_TO_MENU,
+    BUY,
+    SUBSCRIPTIONS,
+    TRY_FREE,
+    Card,
+    DevicesScreen,
+    Guide,
+    card_devices,
+    own_subscription,
+    paused_screen,
+    sales_allowed,
+    show,
+    support_url,
+)
 from remnabay.bot._context import BotContext
 from remnabay.bot._screens import SUCCESS, Dates, Keyboard, Screen, date_value, rich_date
 from remnabay.domain.payments import Payment, PaymentPurpose, PaymentState
@@ -56,20 +70,13 @@ from remnabay.payments import (
     tariffs_on_sale,
     trial_for_purchase,
 )
-from remnabay.shop import SHOP_CURRENCY, SHOP_SUPPORT_CONTACT, is_tester, sales_open
+from remnabay.shop import SHOP_CURRENCY
 from remnabay.shop_settings import get_setting
+from remnabay.trial import request_trial, trial_available
 
 # Ключ данных обработчика: провайдеры с ключами оператора (3.27)
 PROVIDERS_KEY = "providers"
-# «Купить подписку», «Мои подписки», «Назад» к меню (правка того же сообщения)
-BUY = "buy"
-SUBSCRIPTIONS = "subs"
-BACK_TO_MENU = "menu:back"
 _KOPECKS = 100
-
-
-class Card(CallbackData, prefix="sub"):
-    subscription_id: int
 
 
 class Renew(CallbackData, prefix="renew"):
@@ -119,42 +126,6 @@ def _days(ctx: BotContext, days: int) -> str:
     return ctx.texts.quantity("unit.days", ctx.client.language_code, days)
 
 
-async def _support_url(ctx: BotContext) -> str | None:
-    """Контакт поддержки как ссылка: «@имя», «t.me/имя» или адрес сайта."""
-    contact = (await get_setting(ctx.session, SHOP_SUPPORT_CONTACT)).strip()
-    if contact.startswith("@") and len(contact) > 1:
-        return f"https://t.me/{contact[1:]}"
-    if contact.startswith(("https://", "http://")):
-        return contact
-    if contact.startswith("t.me/"):
-        return f"https://{contact}"
-    return None
-
-
-async def _sales_allowed(ctx: BotContext, telegram_id: int) -> bool:
-    """Покупка и продление: в открытом магазине; для команды и тестировщиков — всегда (1.22)."""
-    if await sales_open(ctx.session) or ctx.member is not None:
-        return True
-    return await is_tester(ctx.session, telegram_id)
-
-
-async def _paused(ctx: BotContext) -> Screen:
-    """З0а: «Магазин временно закрыт» вместо покупки и продления (1.22)."""
-    text = ctx.render("shop.paused", brand_name=await ctx.brand_name())
-    keyboard = Keyboard().action(ctx.render("btn.main_menu"), BACK_TO_MENU)
-    return Screen.plain(text, keyboard)
-
-
-async def _show(query: CallbackQuery, ctx: BotContext, screen: Screen) -> None:
-    """Экран вместо текущего сообщения меню."""
-    await query.answer()
-    message = query.message
-    if message is None or isinstance(message, InaccessibleMessage):
-        await screen.send(ctx.bot, query.from_user.id)
-        return
-    await screen.edit(ctx.bot, query.from_user.id, message.message_id)
-
-
 def _state(subscription: Subscription, now: datetime) -> str:
     """Состояние подписки для клиента — по данным панели (01-domain)."""
     if subscription.panel_status == PanelUserStatus.DISABLED:
@@ -176,13 +147,6 @@ async def _summary(
         value = await date_value(ctx, subscription.expires_at)
         end_date = dates.mark(value) if dates is not None else value.fallback
     return ctx.render(f"summary.{state}", subscription_name=subscription.name, end_date=end_date)
-
-
-async def _own_subscription(ctx: BotContext, subscription_id: int) -> Subscription | None:
-    for subscription in await live_subscriptions(ctx.session, ctx.client.id):
-        if subscription.id == subscription_id:
-            return subscription
-    return None
 
 
 # --- З1. Главное меню ---
@@ -212,10 +176,14 @@ async def main_menu(ctx: BotContext) -> Screen:
         )
     elif subscriptions:
         keyboard.action(ctx.render("btn.my_subscriptions"), SUBSCRIPTIONS)
+    trial = await trial_available(ctx.session, ctx.client)
+    if trial:
+        # Триал доступен — целевое действие «Попробовать бесплатно» (5.2, З1)
+        keyboard.action(ctx.render("btn.try_free"), TRY_FREE, style=SUCCESS)
     if can_purchase(subscriptions):
         # Без подписок или с единственной триальной — «Купить подписку» (3.36)
-        keyboard.action(ctx.render("btn.buy"), BUY, style=SUCCESS)
-    support = await _support_url(ctx)
+        keyboard.action(ctx.render("btn.buy"), BUY, style=None if trial else SUCCESS)
+    support = await support_url(ctx)
     if support is not None:
         keyboard.link(ctx.render("btn.support"), support)
     return Screen.plain(text, keyboard, dates)
@@ -252,7 +220,7 @@ async def menu_again(query: CallbackQuery, ctx: BotContext) -> None:
 
 
 async def back_to_menu(query: CallbackQuery, ctx: BotContext) -> None:
-    await _show(query, ctx, await main_menu(ctx))
+    await show(query, ctx, await main_menu(ctx))
 
 
 # --- З2, З3. Подписки ---
@@ -266,7 +234,7 @@ async def subscriptions_list(query: CallbackQuery, ctx: BotContext) -> None:
         label = await _summary(ctx, subscription, None, now)
         keyboard.action(label, Card(subscription_id=subscription.id).pack())
     keyboard.action(ctx.render("btn.back"), BACK_TO_MENU)
-    await _show(query, ctx, Screen.plain(ctx.render("subscriptions.list.header"), keyboard))
+    await show(query, ctx, Screen.plain(ctx.render("subscriptions.list.header"), keyboard))
 
 
 def _row(label: str, value: RichTextUnion) -> list[RichBlockTableCell]:
@@ -293,6 +261,11 @@ async def subscription_card(ctx: BotContext, subscription: Subscription) -> Scre
     if subscription.expires_at is not None:
         end = rich_date(await date_value(ctx, subscription.expires_at))
         rows.append(_row(ctx.render("card.field.end_date"), end))
+    # «Устройства: занято X из Y» — если в панели включён лимит устройств (З3, 6.1)
+    devices = await card_devices(ctx, subscription)
+    if devices is not None and devices.limit is not None:
+        value = ctx.render("card.devices_value", used=str(devices.used), limit=str(devices.limit))
+        rows.append(_row(ctx.render("card.field.devices"), value))
     blocks: list[InputRichBlockUnion] = [
         InputRichBlockSectionHeading(text=subscription.name, size=3),
         InputRichBlockTable(cells=rows),
@@ -312,7 +285,7 @@ async def subscription_card(ctx: BotContext, subscription: Subscription) -> Scre
     subscriptions = await live_subscriptions(ctx.session, ctx.client.id)
     if disabled_in_panel(subscription):
         # Отключена в панели: продления нет, клиент обращается в поддержку (4.7, 3.36)
-        support = await _support_url(ctx)
+        support = await support_url(ctx)
         if support is not None:
             keyboard.link(ctx.render("btn.support"), support)
     elif subscription.is_trial:
@@ -323,17 +296,22 @@ async def subscription_card(ctx: BotContext, subscription: Subscription) -> Scre
             ctx.render("btn.renew"), Renew(subscription_id=subscription.id).pack(), style=SUCCESS
         )
     keyboard.copy(ctx.render("btn.copy_link"), subscription.subscription_url)
+    keyboard.action(ctx.render("btn.how_to_connect"), Guide(subscription_id=subscription.id).pack())
+    if devices is not None:
+        keyboard.action(
+            ctx.render("btn.devices"), DevicesScreen(subscription_id=subscription.id).pack()
+        )
     back = SUBSCRIPTIONS if len(subscriptions) > 1 else BACK_TO_MENU
     keyboard.action(ctx.render("btn.back"), back)
     return Screen(keyboard=keyboard, rich=InputRichMessage(blocks=blocks))
 
 
 async def open_card(query: CallbackQuery, callback_data: Card, ctx: BotContext) -> None:
-    subscription = await _own_subscription(ctx, callback_data.subscription_id)
+    subscription = await own_subscription(ctx, callback_data.subscription_id)
     if subscription is None:
-        await _show(query, ctx, await main_menu(ctx))
+        await show(query, ctx, await main_menu(ctx))
         return
-    await _show(query, ctx, await subscription_card(ctx, subscription))
+    await show(query, ctx, await subscription_card(ctx, subscription))
 
 
 # --- З4. Выбор тарифа ---
@@ -388,6 +366,9 @@ async def tariff_choice(
     back = (
         Card(subscription_id=subscription.id).pack() if subscription is not None else BACK_TO_MENU
     )
+    if subscription is None and await trial_available(ctx.session, ctx.client):
+        # «Попробовать бесплатно» — внизу экрана выбора тарифа (5.2, 0035)
+        keyboard.action(ctx.render("btn.try_free"), TRY_FREE, style=SUCCESS)
     keyboard.action(ctx.render("btn.back"), back)
     return Screen(keyboard=keyboard, rich=InputRichMessage(blocks=blocks))
 
@@ -395,35 +376,50 @@ async def tariff_choice(
 async def buy(query: CallbackQuery, ctx: BotContext) -> None:
     """«Купить подписку» — выбор тарифа; при единственной триальной подписке покупка
     применится к ней (3.16, 3.36)."""
-    if not await _sales_allowed(ctx, query.from_user.id):
-        await _show(query, ctx, await _paused(ctx))
+    if not await sales_allowed(ctx, query.from_user.id):
+        await show(query, ctx, await paused_screen(ctx))
         return
     if not can_purchase(await live_subscriptions(ctx.session, ctx.client.id)):
-        await _show(query, ctx, await main_menu(ctx))
+        await show(query, ctx, await main_menu(ctx))
         return
-    await _show(query, ctx, await tariff_choice(ctx, None, None))
+    await show(query, ctx, await tariff_choice(ctx, None, None))
 
 
 async def renew(query: CallbackQuery, callback_data: Renew, ctx: BotContext) -> None:
     """«Продлить»: тариф подписки — сразу подтверждение (3.20, 3.23); тариф в архиве у
     истёкшей подписки или подписка без тарифа — выбор тарифа (3.21, 3.35)."""
-    if not await _sales_allowed(ctx, query.from_user.id):
-        await _show(query, ctx, await _paused(ctx))
+    if not await sales_allowed(ctx, query.from_user.id):
+        await show(query, ctx, await paused_screen(ctx))
         return
-    subscription = await _own_subscription(ctx, callback_data.subscription_id)
+    subscription = await own_subscription(ctx, callback_data.subscription_id)
     if subscription is None or not can_renew(subscription):
-        await _show(query, ctx, await main_menu(ctx))
+        await show(query, ctx, await main_menu(ctx))
         return
     tariff = await renewal_tariff(ctx.session, subscription, _now())
     if tariff is not None:
-        await _show(query, ctx, await confirmation(ctx, tariff, subscription))
+        await show(query, ctx, await confirmation(ctx, tariff, subscription))
         return
     header = (
         "tariffs.header.no_tariff"
         if subscription.tariff_id is None
         else "tariffs.header.archived_expired"
     )
-    await _show(query, ctx, await tariff_choice(ctx, subscription, header))
+    await show(query, ctx, await tariff_choice(ctx, subscription, header))
+
+
+# --- Триал ---
+
+
+async def try_free(query: CallbackQuery, ctx: BotContext) -> None:
+    """«Попробовать бесплатно» (5.4–5.6): создание триала уходит в очередь; ссылку и
+    срок клиент получит событием «Триал активирован» (С3), а если панель не ответила
+    сразу — «Создаём пробную подписку» (С18). Повторное нажатие второй триал не создаёт
+    (5.5). Пока магазин временно закрыт — «Магазин временно закрыт» (1.22)."""
+    if not await sales_allowed(ctx, query.from_user.id):
+        await show(query, ctx, await paused_screen(ctx))
+        return
+    await request_trial(ctx.session, ctx.client)
+    await show(query, ctx, await main_menu(ctx))
 
 
 # --- З5. Подтверждение ---
@@ -468,7 +464,7 @@ async def _choice(
     tariff = await ctx.session.get(Tariff, tariff_id)
     subscription = None
     if subscription_id:
-        subscription = await _own_subscription(ctx, subscription_id)
+        subscription = await own_subscription(ctx, subscription_id)
         if subscription is None:
             return None
     purpose = PaymentPurpose.RENEWAL if subscription is not None else PaymentPurpose.PURCHASE
@@ -489,15 +485,15 @@ async def _choice(
 
 
 async def pick(query: CallbackQuery, callback_data: Pick, ctx: BotContext) -> None:
-    if not await _sales_allowed(ctx, query.from_user.id):
-        await _show(query, ctx, await _paused(ctx))
+    if not await sales_allowed(ctx, query.from_user.id):
+        await show(query, ctx, await paused_screen(ctx))
         return
     choice = await _choice(ctx, callback_data.tariff_id, callback_data.subscription_id)
     if choice is None:
-        await _show(query, ctx, await main_menu(ctx))
+        await show(query, ctx, await main_menu(ctx))
         return
     _purpose, tariff, subscription = choice
-    await _show(query, ctx, await confirmation(ctx, tariff, subscription))
+    await show(query, ctx, await confirmation(ctx, tariff, subscription))
 
 
 # --- З6. Оплата ---
@@ -528,12 +524,12 @@ async def pay(
 ) -> None:
     """«Оплатить»: счёт на сумму с экрана подтверждения (3.4); повторное нажатие на
     том же экране — тот же счёт (3.5)."""
-    if not await _sales_allowed(ctx, query.from_user.id):
-        await _show(query, ctx, await _paused(ctx))
+    if not await sales_allowed(ctx, query.from_user.id):
+        await show(query, ctx, await paused_screen(ctx))
         return
     choice = await _choice(ctx, callback_data.tariff_id, callback_data.subscription_id)
     if choice is None:
-        await _show(query, ctx, await main_menu(ctx))
+        await show(query, ctx, await main_menu(ctx))
         return
     purpose, tariff, subscription = choice
     bot = await ctx.bot.me()
@@ -556,21 +552,21 @@ async def pay(
         payment = await open_invoice(ctx.session, providers, checkout, now=_now())
     except PriceChangedError:
         # Цена изменилась, пока клиент смотрел экран: показываем подтверждение заново
-        await _show(query, ctx, await confirmation(ctx, tariff, subscription))
+        await show(query, ctx, await confirmation(ctx, tariff, subscription))
         return
     except PaymentUnavailableError:
-        await _show(query, ctx, _unavailable(ctx))
+        await show(query, ctx, _unavailable(ctx))
         return
     except CheckoutError:
-        await _show(query, ctx, await main_menu(ctx))
+        await show(query, ctx, await main_menu(ctx))
         return
     # Платёж сохранён до того, как клиент увидит ссылку на оплату: иначе сбой при показе
     # экрана откатил бы платёж, а оплата по ссылке стала бы «неизвестной» (4.23)
     await ctx.session.commit()
     if payment.state != PaymentState.PENDING:
-        await _show(query, ctx, await main_menu(ctx))
+        await show(query, ctx, await main_menu(ctx))
         return
-    await _show(query, ctx, await invoice_screen(ctx, payment))
+    await show(query, ctx, await invoice_screen(ctx, payment))
 
 
 async def cancel_payment(
@@ -580,7 +576,7 @@ async def cancel_payment(
     await cancel_by_client(
         ctx.session, providers, callback_data.payment_id, client_id=ctx.client.id
     )
-    await _show(query, ctx, await main_menu(ctx))
+    await show(query, ctx, await main_menu(ctx))
 
 
 async def retry_payment(query: CallbackQuery, callback_data: RetryPay, ctx: BotContext) -> None:
@@ -589,8 +585,8 @@ async def retry_payment(query: CallbackQuery, callback_data: RetryPay, ctx: BotC
     await query.answer()
     payment = await ctx.session.get(Payment, callback_data.payment_id)
     screen: Screen
-    if not await _sales_allowed(ctx, query.from_user.id):
-        screen = await _paused(ctx)
+    if not await sales_allowed(ctx, query.from_user.id):
+        screen = await paused_screen(ctx)
     elif payment is None or payment.client_id != ctx.client.id or payment.tariff_id is None:
         screen = await main_menu(ctx)
     else:
@@ -612,6 +608,7 @@ def build_router() -> Router:
     router.callback_query.register(subscriptions_list, F.data == SUBSCRIPTIONS)
     router.callback_query.register(open_card, Card.filter())
     router.callback_query.register(buy, F.data == BUY)
+    router.callback_query.register(try_free, F.data == TRY_FREE)
     router.callback_query.register(renew, Renew.filter())
     router.callback_query.register(pick, Pick.filter())
     router.callback_query.register(pay, Pay.filter())

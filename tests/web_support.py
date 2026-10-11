@@ -95,6 +95,7 @@ async def running_shop(session: AsyncSession) -> AsyncGenerator[Shop]:
     app.state.dispatcher.workflow_data["sessions"] = same_session(session)
     panel = FakePanel()
     app.state.panel = panel.client()
+    app.state.dispatcher.workflow_data["panel"] = app.state.panel
     oidc = FakeTelegramOidc()
     app.state.oidc = oidc.client()
 

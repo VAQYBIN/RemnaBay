@@ -16,6 +16,10 @@ from aiogram.methods import (
     GetMe,
     SendMessage,
     SendRichMessage,
+    SetMyDescription,
+    SetMyName,
+    SetMyProfilePhoto,
+    SetMyShortDescription,
     SetWebhook,
     TelegramMethod,
 )
@@ -26,6 +30,7 @@ from remnabay.bot import SessionFactory, create_bot, create_dispatcher
 from remnabay.crypto import SecretBox
 from remnabay.payments import Providers
 from tests.conftest import REQUIRED_ENV
+from tests.panel_support import FakePanel
 
 BOT_TOKEN = REQUIRED_ENV["BOT_TOKEN"]
 BOT_USERNAME = "shop_test_bot"
@@ -40,6 +45,8 @@ class FakeTelegram(BaseSession):
     def __init__(self) -> None:
         super().__init__()
         self.requests: list[TelegramMethod[Any]] = []
+        # Ошибка Telegram на следующий запрос (например, при «Применить в Telegram», 1.27)
+        self.fail_with: Exception | None = None
 
     async def close(self) -> None:
         pass
@@ -52,6 +59,9 @@ class FakeTelegram(BaseSession):
     ) -> Any:
         del timeout
         self.requests.append(method)
+        if self.fail_with is not None:
+            error, self.fail_with = self.fail_with, None
+            raise error
         match method:
             case GetMe():
                 return User(id=bot.id, is_bot=True, first_name=BOT_NAME, username=BOT_USERNAME)
@@ -70,6 +80,8 @@ class FakeTelegram(BaseSession):
                     chat=Chat(id=cast(int, method.chat_id), type="private"),
                 )
             case AnswerCallbackQuery() | SetWebhook() | DeleteWebhook():
+                return True
+            case SetMyName() | SetMyDescription() | SetMyShortDescription() | SetMyProfilePhoto():
                 return True
             case _:
                 raise AssertionError(f"Запрос не поддержан в тестах: {type(method).__name__}")
@@ -169,5 +181,7 @@ async def bot_harness(session: AsyncSession) -> AsyncGenerator[BotHarness]:
         same_session(session),
         admin_login_url=ADMIN_LOGIN_URL,
         providers=Providers(SecretBox(REQUIRED_ENV["ENCRYPTION_KEY"]), []),
+        panel=FakePanel().client(),
+        shop_url=REQUIRED_ENV["PUBLIC_URL"],
     )
     yield BotHarness(bot=bot, dispatcher=dispatcher, telegram=telegram)

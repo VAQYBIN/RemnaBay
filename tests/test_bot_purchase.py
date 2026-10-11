@@ -333,7 +333,13 @@ async def test_3_23_3_20_single_subscription_renews_with_its_tariff(
     card = await _press(shop, _button(menu, "Моя подписка"))
     assert isinstance(card, EditMessageText)
     assert "Месяц" in _rich_text(card)
-    assert _labels(card) == ["Продлить", "Скопировать ссылку", "Назад"]
+    assert _labels(card) == [
+        "Продлить",
+        "Скопировать ссылку",
+        "Как подключить",
+        "Устройства",
+        "Назад",
+    ]
     assert _button(card, "Скопировать ссылку").copy_text is not None
 
     confirm = await _press(shop, _button(card, "Продлить"))
