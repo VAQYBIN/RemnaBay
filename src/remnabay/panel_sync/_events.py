@@ -13,10 +13,11 @@ from sqlalchemy import exists, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from remnabay.device_registry import record_device
 from remnabay.domain.panel_events import PanelEvent as StoredEvent
 from remnabay.domain.subscriptions import Subscription
 from remnabay.journal import Actor, Outcome, record
-from remnabay.panel import DeviceEvent, PanelEvent, UserEvent
+from remnabay.panel import DeviceEvent, DeviceEventType, PanelEvent, UserEvent
 from remnabay.panel_sync._reconcile import Source, enqueue_reconcile
 
 
@@ -53,14 +54,20 @@ async def receive_event(session: AsyncSession, body: bytes, event: PanelEvent) -
         return
     user_id = _panel_user_id(event)
     if user_id is not None:
-        subscription_id = await session.scalar(
-            select(Subscription.id).where(
+        subscription = await session.scalar(
+            select(Subscription).where(
                 Subscription.panel_user_id == user_id, Subscription.deleted_at.is_(None)
             )
         )
         # Пользователь без подписки в магазине (создан в панели вручную) не усыновляется
-        if subscription_id is not None:
-            await enqueue_reconcile(session, subscription_id, Source.WEBHOOK, name)
+        if subscription is not None:
+            if isinstance(event, DeviceEvent) and event.event == DeviceEventType.ADDED:
+                # 5.7: подключение устройства к любой подписке — в реестр
+                device = event.data.hwid_user_device
+                await record_device(
+                    session, subscription, device.hwid, device.created_at, source=Source.WEBHOOK
+                )
+            await enqueue_reconcile(session, subscription.id, Source.WEBHOOK, name)
     await session.execute(
         update(StoredEvent).where(StoredEvent.id == stored_id).values(processed_at=func.now())
     )

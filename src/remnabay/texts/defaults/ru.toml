@@ -52,7 +52,7 @@
 С возвращением! Мы обновили бот, и ваши подписки уже здесь. Ссылки остались прежними — ничего перенастраивать не нужно.
 
 {subscriptions_summary}'''
-"summary.active" = "{subscription_name} — до {end_date}"
+"summary.active" = "{subscription_name} — активна до {end_date}, осталось {days_text}"
 "summary.expired" = "{subscription_name} — истекла {end_date}"
 "summary.disabled" = "{subscription_name} — отключена"
 "summary.limited" = "{subscription_name} — трафик исчерпан"
@@ -63,16 +63,23 @@
 "subscriptions.list.header" = "Ваши подписки:"
 
 # З3. Карточка подписки — rich
+"card.title" = "Подписка «{subscription_name}»"
 "card.field.tariff" = "Тариф"
 "card.field.status" = "Статус"
 "card.field.end_date" = "Действует до"
 "card.field.devices" = "Устройства"
 "card.devices_value" = "{used} из {limit}"
+"card.field.remaining" = "Осталось"
+"card.field.traffic" = "Трафик"
+"card.traffic.value" = "{used} из {limit}"
+"card.traffic.unlimited" = "без ограничения"
+"card.link" = "Ссылка на подписку"
 "card.status.active" = "Активна"
 "card.status.expired" = "Истекла"
 "card.status.disabled" = "Отключена"
 "card.status.limited" = "Трафик исчерпан"
 "card.tariff.none" = "Не выбран"
+"card.tariff.trial" = "Пробный период"
 "card.note.archived" = "Этот тариф больше не продаётся. Продлить его можно, пока подписка активна."
 "card.note.expired" = "Подписка истекла. Продлите её, чтобы снова пользоваться VPN."
 "card.note.disabled" = "Подписка отключена. Напишите в поддержку — разберёмся."
@@ -83,7 +90,7 @@
 "tariffs.col.period" = "Срок"
 "tariffs.col.devices" = "Устройства"
 "tariffs.col.price" = "Цена"
-"tariffs.button" = "{tariff_name} — {price}"
+"tariffs.button" = "{tariff_name}"
 "tariffs.header.no_tariff" = "Выберите тариф для продления — подписка и ссылка останутся прежними."
 "tariffs.header.archived_expired" = "Ваш тариф больше не продаётся. Выберите новый — подписка и ссылка останутся прежними."
 
@@ -110,7 +117,7 @@
 "devices.header" = '''
 Устройства подписки «{subscription_name}»
 Занято {used} из {limit}.'''
-"devices.row" = "{platform} · {model} · с {connected_at}"
+"devices.row" = "{platform} · {model} · {app} · с {connected_at}"
 "devices.button_delete" = "Удалить {platform} {model}"
 "devices.empty" = "К подписке пока не подключено ни одного устройства."
 "devices.confirm_delete_all" = "Удалить все устройства? Их придётся подключить заново."
@@ -160,6 +167,9 @@
 
 # С4. Оплата получена, подписка создаётся
 "event.payment_processing" = "Оплата получена. Применяем её к подписке — это может занять немного времени. Мы пришлём сообщение, как только всё будет готово."
+
+# С18. Триал создаётся
+"event.trial_processing" = "Создаём пробную подписку — это может занять немного времени. Пришлём ссылку, как только всё будет готово."
 
 # С5. Оплата не прошла
 "event.payment_failed" = "Платёж не прошёл. Попробуйте ещё раз — например, с другой картой."
@@ -233,9 +243,20 @@
 # /help
 "help.body" = "Инструкция по подключению — по кнопке ниже. Если что-то не получается, напишите в поддержку: {support_contact}."
 "help.body.no_support" = "Инструкция по подключению — по кнопке ниже."
+"help.commands" = '''
+Команды:
+/start — главное меню
+/help — помощь и инструкция по подключению'''
+"command.start" = "Главное меню"
+"command.help" = "Помощь и инструкция по подключению"
+"help.no_subscription" = "Подписки пока нет. Оформите её по кнопке ниже — мы пришлём ссылку и инструкцию по подключению. Если что-то не получается, напишите в поддержку: {support_contact}."
+"help.no_subscription.no_support" = "Подписки пока нет. Оформите её по кнопке ниже — мы пришлём ссылку и инструкцию по подключению."
 
 # Непонятное сообщение
 "fallback.unknown" = "Не совсем понял. Откройте главное меню — там всё самое нужное."
+
+# Объём трафика: {value} — гигабайты с одним знаком после запятой (решение 0060)
+"unit.gigabytes" = "{value} ГБ"
 
 # Единицы с множественным числом: подставляются в {days_text}, {period},
 # {trial_period}, {minutes_text} (03-bot-texts.md, «Единицы», решение 0056).

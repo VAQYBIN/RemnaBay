@@ -28,8 +28,15 @@ from aiogram.exceptions import (
     TelegramServerError,
     TelegramUnauthorizedError,
 )
-from aiogram.types import CopyTextButton, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import (
+    CopyTextButton,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    MessageEntity,
+)
 from aiohttp import ClientConnectorError
+
+from remnabay.messaging._dates import DATE_FORMAT, DateEntity
 
 # Меньше таймаута задачи очереди (30 с): иначе зависшую отправку прервала бы очередь,
 # и магазин не узнал бы, что случилось с сообщением
@@ -77,6 +84,8 @@ class Button:
 class OutgoingMessage:
     text: str
     buttons: tuple[Button, ...] = ()
+    # Даты текста — сущностью date_time (0044)
+    dates: tuple[DateEntity, ...] = ()
 
 
 class Sender(Protocol):
@@ -101,6 +110,21 @@ def _keyboard(buttons: tuple[Button, ...]) -> InlineKeyboardMarkup | None:
         for button in buttons
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _entities(dates: tuple[DateEntity, ...]) -> list[MessageEntity] | None:
+    if not dates:
+        return None
+    return [
+        MessageEntity(
+            type="date_time",
+            offset=date.offset,
+            length=date.length,
+            unix_time=date.unix_time,
+            date_time_format=DATE_FORMAT,
+        )
+        for date in dates
+    ]
 
 
 def classify(error: AiogramError) -> DeliveryError:
@@ -145,6 +169,7 @@ class TelegramSender:
             await self._bot.send_message(
                 chat_id=chat_id,
                 text=message.text,
+                entities=_entities(message.dates),
                 reply_markup=_keyboard(message.buttons),
             )
         except AiogramError as error:

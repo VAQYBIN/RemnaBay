@@ -20,6 +20,7 @@ from remnabay.messaging import (
     AmbiguousDeliveryError,
     Button,
     ButtonArgs,
+    DateEntity,
     DeliveryError,
     NotAcceptedError,
     OutgoingMessage,
@@ -244,6 +245,50 @@ async def test_0018_text_by_key_in_client_language_with_operator_override(
             ),
         )
     ]
+
+
+async def test_0044_dates_are_date_time_entities_with_shop_time_fallback(
+    db_session: AsyncSession,
+) -> None:
+    """0044, хвост этапа 6 (С3, С6): дата в сообщении из очереди — сущность date_time;
+    запасной текст — во времени магазина с подписью пояса, собирается при отправке."""
+    client = await make_client(db_session)
+    moment = datetime(2026, 11, 1, 20, 0, tzinfo=UTC)
+    sender = FakeSender()
+    await send_to_client(
+        db_session,
+        client.id,
+        "event.renewed",
+        variables={"subscription_name": "Основная"},
+        dates={"end_date": moment},
+    )
+    [args] = await _queued(db_session)
+
+    await _run_send(db_session, sender, args)
+
+    [(_chat, message)] = sender.sent
+    fallback = "1 ноября 2026, 23:00 (МСК)"
+    assert message.text.startswith(f"Подписка «Основная» продлена до {fallback}.")
+    [date] = message.dates
+    assert message.text[date.offset : date.offset + date.length] == fallback
+    assert date.unix_time == int(moment.timestamp())
+
+
+async def test_0044_date_entity_is_sent_to_telegram(bot_api: tuple[FakeBotApi, str]) -> None:
+    """0044: отправитель передаёт дату в Telegram сущностью date_time."""
+    api, base = bot_api
+    message = OutgoingMessage("до 1 ноября", dates=(DateEntity(3, 8, 1_790_000_000),))
+
+    await _send_via(base, message)
+
+    [entity] = json.loads(api.requests[0]["entities"])
+    assert entity == {
+        "type": "date_time",
+        "offset": 3,
+        "length": 8,
+        "unix_time": 1_790_000_000,
+        "date_time_format": "Dt",
+    }
 
 
 async def test_rule_4_blocked_bot_is_not_an_error(db_session: AsyncSession) -> None:

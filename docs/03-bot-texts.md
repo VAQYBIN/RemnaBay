@@ -44,6 +44,12 @@
 - **`unit.days`** — «{count} день», «{count} дня», «{count} дней». Срок тарифа всегда показывается днями: «30 дней», не «1 месяц».
 - **`unit.minutes`** — «{count} минуту», «{count} минуты», «{count} минут».
 
+Объём трафика — в гигабайтах с одним знаком после запятой; `{value}` — число («12,4»). Форма не зависит от числа ([решение 0060](decisions/0060-stage-7-manual-review.md)):
+
+| Ключ | Текст |
+|---|---|
+| `unit.gigabytes` | {value} ГБ |
+
 ## Кнопки
 | Ключ | Текст |
 |---|---|
@@ -111,7 +117,7 @@
 
 | Ключ | Текст |
 |---|---|
-| `summary.active` | {subscription_name} — до {end_date} |
+| `summary.active` | {subscription_name} — активна до {end_date}, осталось {days_text} |
 | `summary.expired` | {subscription_name} — истекла {end_date} |
 | `summary.disabled` | {subscription_name} — отключена |
 | `summary.limited` | {subscription_name} — трафик исчерпан |
@@ -134,18 +140,27 @@
 ```
 
 ## З3. Карточка подписки — rich
+Строки «Осталось», «Трафик» и блок «Ссылка на подписку» — [решение 0060](decisions/0060-stage-7-manual-review.md). «Осталось» Telegram показывает сам («через 21 день»); запасной текст — `{days_text}`.
+
 | Ключ | Текст |
 |---|---|
+| `card.title` | Подписка «{subscription_name}» |
 | `card.field.tariff` | Тариф |
 | `card.field.status` | Статус |
 | `card.field.end_date` | Действует до |
 | `card.field.devices` | Устройства |
 | `card.devices_value` | {used} из {limit} |
+| `card.field.remaining` | Осталось |
+| `card.field.traffic` | Трафик |
+| `card.traffic.value` | {used} из {limit} |
+| `card.traffic.unlimited` | без ограничения |
+| `card.link` | Ссылка на подписку |
 | `card.status.active` | Активна |
 | `card.status.expired` | Истекла |
 | `card.status.disabled` | Отключена |
 | `card.status.limited` | Трафик исчерпан |
 | `card.tariff.none` | Не выбран |
+| `card.tariff.trial` | Пробный период |
 
 `card.note.archived`
 ```
@@ -168,7 +183,7 @@
 | `tariffs.col.period` | Срок |
 | `tariffs.col.devices` | Устройства |
 | `tariffs.col.price` | Цена |
-| `tariffs.button` | {tariff_name} — {price} |
+| `tariffs.button` | {tariff_name} |
 
 `tariffs.header.no_tariff` — продление подписки без тарифа
 ```
@@ -225,8 +240,10 @@
 ```
 | Ключ | Текст |
 |---|---|
-| `devices.row` | {platform} · {model} · с {connected_at} |
+| `devices.row` | {platform} · {model} · {app} · с {connected_at} |
 | `devices.button_delete` | Удалить {platform} {model} |
+
+Чего панель не знает об устройстве (платформа, модель, приложение) и лимит, если панель его не сообщила, показываются прочерком «—» ([решение 0059](decisions/0059-stage-7-refinements.md)).
 
 `devices.empty`
 ```
@@ -326,6 +343,12 @@
 `event.payment_processing`
 ```
 Оплата получена. Применяем её к подписке — это может занять немного времени. Мы пришлём сообщение, как только всё будет готово.
+```
+
+### С18. Триал создаётся
+`event.trial_processing` — панель недоступна при выдаче триала (5.6, [решение 0058](decisions/0058-stage-7-preparation.md))
+```
+Создаём пробную подписку — это может занять немного времени. Пришлём ссылку, как только всё будет готово.
 ```
 
 ### С5. Оплата не прошла
@@ -473,6 +496,27 @@
 `help.body.no_support` — контакт поддержки не задан
 ```
 Инструкция по подключению — по кнопке ниже.
+```
+`help.commands` — добавляется к тексту `/help` ([решение 0060](decisions/0060-stage-7-manual-review.md))
+```
+Команды:
+/start — главное меню
+/help — помощь и инструкция по подключению
+```
+Меню команд бота в Telegram — задаётся кнопкой «Применить в Telegram» (1.27):
+
+| Ключ | Текст |
+|---|---|
+| `command.start` | Главное меню |
+| `command.help` | Помощь и инструкция по подключению |
+
+`help.no_subscription` — у клиента нет подписок ([решение 0058](decisions/0058-stage-7-preparation.md))
+```
+Подписки пока нет. Оформите её по кнопке ниже — мы пришлём ссылку и инструкцию по подключению. Если что-то не получается, напишите в поддержку: {support_contact}.
+```
+`help.no_subscription.no_support` — нет подписок, контакт поддержки не задан
+```
+Подписки пока нет. Оформите её по кнопке ниже — мы пришлём ссылку и инструкцию по подключению.
 ```
 
 ### Непонятное сообщение

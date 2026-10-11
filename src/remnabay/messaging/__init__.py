@@ -6,13 +6,15 @@
 правило 4). Тексты — только по ключам (0018).
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from remnabay.domain.clients import TelegramAccount
 from remnabay.domain.team import TeamMember, TeamRole
+from remnabay.messaging._dates import DATE_FORMAT, DateEntity, Dates, DateValue, utf16_length
 from remnabay.messaging._sender import (
     AmbiguousDeliveryError,
     Button,
@@ -35,6 +37,22 @@ from remnabay.messaging._tasks import (
 # «Главное меню» — на каждом событии (03-screens); нажатие разбирает бот
 MAIN_MENU_CALLBACK = "menu:main"
 MAIN_MENU_BUTTON = ButtonArgs(text_key="btn.main_menu", callback_data=MAIN_MENU_CALLBACK)
+# «Купить подписку» — ведёт к выбору тарифа (С9, С16)
+BUY_CALLBACK = "buy"
+# «Как подключить» — инструкция по подключению подписки (С2); `guide:<id подписки>`
+GUIDE_CALLBACK_PREFIX = "guide"
+
+
+def guide_button(subscription_id: int) -> ButtonArgs:
+    """«Как подключить» на событии со ссылкой (С1, С3, С15)."""
+    return ButtonArgs(
+        text_key="btn.how_to_connect", callback_data=f"{GUIDE_CALLBACK_PREFIX}:{subscription_id}"
+    )
+
+
+def buy_button() -> ButtonArgs:
+    """«Купить подписку» — целевое действие события (С16)."""
+    return ButtonArgs(text_key="btn.buy", callback_data=BUY_CALLBACK, style="success")
 
 
 async def send_to_client(
@@ -43,9 +61,11 @@ async def send_to_client(
     text_key: str,
     *,
     variables: dict[str, str] | None = None,
+    dates: Mapping[str, datetime] | None = None,
     buttons: Sequence[ButtonArgs] = (),
 ) -> None:
-    """Ставит сообщение клиенту в его Telegram-аккаунт."""
+    """Ставит сообщение клиенту в его Telegram-аккаунт. `dates` — переменные-даты:
+    клиент видит их сущностью date_time (0044)."""
     chat_id = await session.scalar(
         select(TelegramAccount.telegram_id)
         .where(TelegramAccount.client_id == client_id)
@@ -57,6 +77,7 @@ async def send_to_client(
         client_id=client_id,
         text_key=text_key,
         variables=variables or {},
+        dates=dict(dates or {}),
         buttons=list(buttons),
     )
     if chat_id is None:
@@ -72,7 +93,11 @@ async def tell_action_failed(session: AsyncSession, client_id: int) -> None:
 
 
 async def notify_team(
-    session: AsyncSession, text_key: str, *, variables: dict[str, str] | None = None
+    session: AsyncSession,
+    text_key: str,
+    *,
+    variables: dict[str, str] | None = None,
+    dates: Mapping[str, datetime] | None = None,
 ) -> None:
     """Уведомление команды: в MVP — владельцам в Telegram (04-operator-settings,
     «Уведомления команде»). Владелец из `.env` есть среди них — его гарантирует
@@ -85,16 +110,27 @@ async def notify_team(
     for telegram_id in owners:
         await send_message.enqueue(
             session,
-            SendArgs(chat_id=telegram_id, text_key=text_key, variables=variables or {}),
+            SendArgs(
+                chat_id=telegram_id,
+                text_key=text_key,
+                variables=variables or {},
+                dates=dict(dates or {}),
+            ),
         )
 
 
 __all__ = [
+    "BUY_CALLBACK",
+    "DATE_FORMAT",
+    "GUIDE_CALLBACK_PREFIX",
     "MAIN_MENU_BUTTON",
     "MAIN_MENU_CALLBACK",
     "AmbiguousDeliveryError",
     "Button",
     "ButtonArgs",
+    "DateEntity",
+    "DateValue",
+    "Dates",
     "DeliveryError",
     "NotAcceptedError",
     "OutgoingMessage",
@@ -103,9 +139,12 @@ __all__ = [
     "Sender",
     "TelegramSender",
     "UndeliverableError",
+    "buy_button",
+    "guide_button",
     "load_texts",
     "notify_team",
     "send_message",
     "send_to_client",
     "tell_action_failed",
+    "utf16_length",
 ]

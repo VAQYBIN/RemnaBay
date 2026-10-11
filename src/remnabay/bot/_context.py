@@ -16,6 +16,7 @@ from remnabay.clients import TelegramUser, register_telegram_user
 from remnabay.domain.clients import Client, TelegramAccount
 from remnabay.domain.team import TeamMember
 from remnabay.messaging import load_texts
+from remnabay.panel import PanelClient
 from remnabay.shop import ShopState, is_tester, shop_state
 from remnabay.texts import Texts
 
@@ -25,6 +26,10 @@ type Handler = Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]]
 # Ключ контекста в данных обработчика aiogram: обработчик объявляет `ctx: BotContext`
 CONTEXT_KEY = "ctx"
 SESSIONS_KEY = "sessions"
+# Клиент панели: инструкция и устройства читаются из панели при открытии (6.3, 12.1)
+PANEL_KEY = "panel"
+# Публичный адрес магазина: страница-переходник (12.10)
+SHOP_URL_KEY = "shop_url"
 
 
 @dataclass(frozen=True)
@@ -35,6 +40,9 @@ class BotContext:
     # Действующий участник команды, если человек в ней состоит
     member: TeamMember | None
     texts: Texts
+    panel: PanelClient
+    # Публичный адрес магазина без «/» в конце
+    shop_url: str
     # Клиент появился этим обновлением — впервые открыл бот (3.15)
     new_client: bool = False
 
@@ -78,6 +86,8 @@ async def context_middleware(handler: Handler, event: TelegramObject, data: dict
             client=client,
             member=await active_member(session, user.id),
             texts=await load_texts(session),
+            panel=data[PANEL_KEY],
+            shop_url=data[SHOP_URL_KEY],
             new_client=new_client,
         )
         if await _shop_hidden_from(ctx, event, user.id):

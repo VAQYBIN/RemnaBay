@@ -23,13 +23,13 @@ from remnabay.journal import Actor, ActorType, JournalEntry, JsonValue, Outcome,
 from remnabay.messaging import (
     MAIN_MENU_BUTTON,
     ButtonArgs,
-    load_texts,
+    guide_button,
     notify_team,
     send_to_client,
 )
 from remnabay.payments._applier import Applied
 from remnabay.queue import TaskContext, task
-from remnabay.shop_settings import SHOP_LANGUAGE, get_setting, shop_time_zone
+from remnabay.shop_settings import SHOP_LANGUAGE, get_setting
 
 PAYMENT_SUBJECT = "payment"
 # Если за это время платёж не применён, клиент получает «Оплата получена, подписка
@@ -123,10 +123,8 @@ async def _notify_resolved(session: AsyncSession, payment: Payment, applied: App
         session,
         payment.client_id,
         "event.payment_resolved.renewed",
-        variables={
-            "subscription_name": subscription.name,
-            "end_date": await _end_date(session, subscription),
-        },
+        variables={"subscription_name": subscription.name},
+        dates={"end_date": subscription.expires_at},
         buttons=[MAIN_MENU_BUTTON],
     )
 
@@ -146,29 +144,22 @@ async def _notify_applied(session: AsyncSession, payment: Payment, applied: Appl
             payment.client_id,
             "event.subscription_ready",
             variables={"subscription_link": link},
-            buttons=[ButtonArgs(text_key="btn.copy_link", copy_text=link), MAIN_MENU_BUTTON],
+            buttons=[
+                ButtonArgs(text_key="btn.copy_link", copy_text=link),
+                guide_button(subscription.id),
+                MAIN_MENU_BUTTON,
+            ],
         )
+        return
+    if subscription.expires_at is None:
         return
     await send_to_client(
         session,
         payment.client_id,
         "event.renewed",
-        variables={
-            "subscription_name": subscription.name,
-            "end_date": await _end_date(session, subscription),
-        },
+        variables={"subscription_name": subscription.name},
+        dates={"end_date": subscription.expires_at},
         buttons=[MAIN_MENU_BUTTON],
-    )
-
-
-async def _end_date(session: AsyncSession, subscription: Subscription) -> str:
-    if subscription.expires_at is None:
-        return ""
-    texts = await load_texts(session)
-    return texts.date_fallback(
-        subscription.expires_at,
-        await get_setting(session, SHOP_LANGUAGE),
-        await shop_time_zone(session),
     )
 
 

@@ -20,6 +20,8 @@ from remnabay.attention import attention
 from remnabay.config import Settings
 from remnabay.crypto import SecretBox
 from remnabay.db import create_engine
+from remnabay.devices import delete_devices
+from remnabay.guide import REFRESH_CONFIGS, refresh_configs_task
 from remnabay.messaging import TelegramSender, notify_team, send_message
 from remnabay.panel import PanelClient, PanelUnavailableError
 from remnabay.panel_sync import (
@@ -45,6 +47,7 @@ from remnabay.shop_settings import (
     claim_interval,
     get_setting,
 )
+from remnabay.trial import create_trial, trial_processing_notice
 
 DEFAULT_HEARTBEAT_PATH = Path(tempfile.gettempdir()) / "remnabay-worker.heartbeat"
 HEARTBEAT_INTERVAL_SECONDS = 10.0
@@ -63,10 +66,15 @@ TASKS = TaskRegistry(
         processing_notice,
         expire_invoice,
         poll_invoice,
+        create_trial,
+        trial_processing_notice,
+        refresh_configs_task,
+        delete_devices,
     )
 )
-# Периодические задачи: сверка всех подписок с панелью (4.8), проверка связи с ней (4.13)
-PERIODIC = (SYNC_ALL, HEALTH_CHECK)
+# Периодические задачи: сверка всех подписок с панелью (4.8), проверка связи с ней (4.13),
+# обновление конфигов Subscription Page (12.7)
+PERIODIC = (SYNC_ALL, HEALTH_CHECK, REFRESH_CONFIGS)
 # Ошибки «внешний сервис недоступен»: задача ждёт, а не проваливается (4.30)
 UNAVAILABLE: tuple[type[Exception], ...] = (PanelUnavailableError,)
 
@@ -178,6 +186,7 @@ def run(settings: Settings) -> None:
                     panel=panel,
                     payments=ShopApplier(dev_mode=settings.dev_mode),
                     providers=Providers(box, [YooKassaKind(yookassa)]),
+                    dev_mode=settings.dev_mode,
                 )
             ):
                 await run_worker(stop, queue=queue)

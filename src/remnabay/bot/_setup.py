@@ -10,8 +10,15 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.session.base import BaseSession
 from aiogram.exceptions import AiogramError
 
-from remnabay.bot import _fallback, _login, _shop
-from remnabay.bot._context import SESSIONS_KEY, SessionFactory, context_middleware
+from remnabay.bot import _devices, _fallback, _guide, _help, _login, _shop
+from remnabay.bot._context import (
+    PANEL_KEY,
+    SESSIONS_KEY,
+    SHOP_URL_KEY,
+    SessionFactory,
+    context_middleware,
+)
+from remnabay.panel import PanelClient
 from remnabay.payments import Providers
 
 TELEGRAM_WEBHOOK_PATH = "/webhooks/telegram"
@@ -26,20 +33,31 @@ def create_bot(token: str, *, session: BaseSession | None = None) -> Bot:
 
 
 def create_dispatcher(
-    sessions: SessionFactory, *, admin_login_url: str, providers: Providers
+    sessions: SessionFactory,
+    *,
+    admin_login_url: str,
+    providers: Providers,
+    panel: PanelClient,
+    shop_url: str,
 ) -> Dispatcher:
     """Диспетчер со всеми роутерами; непонятное сообщение — последним.
 
     `admin_login_url` — страница входа в админку для кнопки на /admin;
-    `providers` — платёжные провайдеры для оплаты (3.27).
+    `providers` — платёжные провайдеры для оплаты (3.27); `panel` — клиент панели для
+    инструкции и устройств; `shop_url` — публичный адрес магазина (страница-переходник).
     """
     dispatcher = Dispatcher()
     dispatcher.workflow_data[SESSIONS_KEY] = sessions
     dispatcher.workflow_data[_login.ADMIN_LOGIN_URL_KEY] = admin_login_url
     dispatcher.workflow_data[_shop.PROVIDERS_KEY] = providers
+    dispatcher.workflow_data[PANEL_KEY] = panel
+    dispatcher.workflow_data[SHOP_URL_KEY] = shop_url.rstrip("/")
     dispatcher.update.outer_middleware(context_middleware)
     dispatcher.include_router(_login.build_router())
     dispatcher.include_router(_shop.build_router())
+    dispatcher.include_router(_guide.build_router())
+    dispatcher.include_router(_devices.build_router())
+    dispatcher.include_router(_help.build_router())
     dispatcher.include_router(_fallback.build_router())
     return dispatcher
 

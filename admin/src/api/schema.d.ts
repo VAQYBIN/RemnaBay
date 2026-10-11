@@ -157,6 +157,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/settings/brand/telegram": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Apply Telegram
+         * @description «Применить в Telegram» (1.27): аватар — телом запроса, image/jpeg; его собирает
+         *     админка из квадратного знака на выбранном фоне (решение 0059). Положение знака
+         *     сохраняется для следующего раза (0060).
+         */
+        put: operations["apply_telegram_api_admin_settings_brand_telegram_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/checklist": {
         parameters: {
             query?: never;
@@ -350,6 +372,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/settings/panel/guide/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Guide
+         * @description «Обновить сейчас»: конфиги Subscription Page и ответ «пускает ли браузер» (12.7, 12.16).
+         */
+        post: operations["refresh_guide_api_admin_settings_panel_guide_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/stats": {
         parameters: {
             query?: never;
@@ -508,6 +550,27 @@ export interface paths {
          * @description Вернуть в продажу (2.7).
          */
         post: operations["restore_api_admin_tariffs__tariff_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/settings/trial": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Trial Settings */
+        get: operations["get_trial_settings_api_admin_settings_trial_get"];
+        /**
+         * Update Trial Settings
+         * @description 5.1: сквады выбираются из списка панели; при включении — хотя бы один.
+         */
+        put: operations["update_trial_settings_api_admin_settings_trial_put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -876,6 +939,12 @@ export interface components {
          */
         ActorType: "team_member" | "client" | "system" | "panel" | "provider";
         /**
+         * ApplyStep
+         * @description Что «Применить в Telegram» задаёт боту — шаги независимы друг от друга.
+         * @enum {string}
+         */
+        ApplyStep: "name" | "commands" | "description" | "short_description" | "photo";
+        /**
          * AssetKind
          * @enum {string}
          */
@@ -920,6 +989,51 @@ export interface components {
             /** Time Zone */
             time_zone: string;
         };
+        /**
+         * AvatarBackground
+         * @description Фон аватара — выбирается в окне применения по круглому предпросмотру.
+         * @enum {string}
+         */
+        AvatarBackground: "brand" | "white" | "black";
+        /**
+         * AvatarPlacement
+         * @description Положение знака на аватаре, как его настроил владелец (0060): масштаб — доля
+         *     стороны аватара, %; сдвиг от центра — в пикселях аватара 640×640; поворот — в
+         *     градусах; отражение. Сохраняется, чтобы в следующий раз править, а не настраивать
+         *     заново.
+         */
+        AvatarPlacement: {
+            /**
+             * Scale
+             * @default 58
+             */
+            scale: number;
+            /**
+             * X
+             * @default 0
+             */
+            x: number;
+            /**
+             * Y
+             * @default 0
+             */
+            y: number;
+            /**
+             * Rotation
+             * @default 0
+             */
+            rotation: number;
+            /**
+             * Flip X
+             * @default false
+             */
+            flip_x: boolean;
+            /**
+             * Flip Y
+             * @default false
+             */
+            flip_y: boolean;
+        };
         /** BindIn */
         BindIn: {
             /** Telegram Id */
@@ -962,6 +1076,8 @@ export interface components {
             primary_color: components["schemas"]["Color"];
             secondary_color?: components["schemas"]["Color"] | null;
             welcome_text?: components["schemas"]["_Welcome"] | null;
+            bot_description?: components["schemas"]["remnabay__web__admin___brand___Description"] | null;
+            bot_short_description?: components["schemas"]["_ShortDescription"] | null;
         };
         /** BrandSettingsOut */
         BrandSettingsOut: {
@@ -978,6 +1094,11 @@ export interface components {
             mark: components["schemas"]["AssetOut"] | null;
             logo: components["schemas"]["AssetOut"] | null;
             palette: components["schemas"]["PaletteOut"];
+            /** Bot Description */
+            bot_description: string;
+            /** Bot Short Description */
+            bot_short_description: string;
+            telegram: components["schemas"]["TelegramApplied"] | null;
         };
         /** ChecklistOut */
         ChecklistOut: {
@@ -1276,6 +1397,10 @@ export interface components {
             username_prefix: string;
             /** Username Prefix Locked */
             username_prefix_locked: boolean;
+            /** Guide Refreshed At */
+            guide_refreshed_at: string | null;
+            /** Webpage Allowed */
+            webpage_allowed: boolean | null;
         };
         /** PaymentCardOut */
         PaymentCardOut: {
@@ -1502,6 +1627,18 @@ export interface components {
             expiring_soon: number;
             revenue: components["schemas"]["RevenueOut"] | null;
         };
+        /**
+         * StepFailure
+         * @description Шаг не удался: текст ошибки Telegram и, если Telegram ограничил частоту
+         *     изменений, через сколько секунд можно повторить.
+         */
+        StepFailure: {
+            step: components["schemas"]["ApplyStep"];
+            /** Error */
+            error: string;
+            /** Retry After */
+            retry_after?: number | null;
+        };
         /** SubscriptionRef */
         SubscriptionRef: {
             /** Id */
@@ -1524,7 +1661,7 @@ export interface components {
             type: "term_unlimited";
             name: components["schemas"]["remnabay__web__admin___tariffs___Name"];
             /** @default  */
-            description: components["schemas"]["_Description"];
+            description: components["schemas"]["remnabay__web__admin___tariffs___Description"];
             /** Duration Days */
             duration_days: number;
             /** Price */
@@ -1592,6 +1729,51 @@ export interface components {
          */
         TeamRole: "owner" | "assistant";
         /**
+         * TelegramApplied
+         * @description Итог последнего «Применить в Telegram» — виден в настройках; фон и положение
+         *     знака — начальные значения окна применения в следующий раз.
+         */
+        TelegramApplied: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Ok */
+            ok: boolean;
+            background: components["schemas"]["AvatarBackground"];
+            /**
+             * @default {
+             *       "scale": 58,
+             *       "x": 0,
+             *       "y": 0,
+             *       "rotation": 0,
+             *       "flip_x": false,
+             *       "flip_y": false
+             *     }
+             */
+            placement: components["schemas"]["AvatarPlacement"];
+            /**
+             * Done
+             * @default []
+             */
+            done: components["schemas"]["ApplyStep"][];
+            /**
+             * Unchanged
+             * @default []
+             */
+            unchanged: components["schemas"]["ApplyStep"][];
+            /**
+             * Failed
+             * @default []
+             */
+            failed: components["schemas"]["StepFailure"][];
+            /** Avatar Sha256 */
+            avatar_sha256?: string | null;
+            /** Error */
+            error?: string | null;
+        };
+        /**
          * TokensOut
          * @description Токены оформления обеих тем: имя → значение CSS.
          */
@@ -1604,6 +1786,32 @@ export interface components {
             dark: {
                 [key: string]: string;
             };
+        };
+        /** TrialSettingsIn */
+        TrialSettingsIn: {
+            /** Enabled */
+            enabled: boolean;
+            /** Duration Days */
+            duration_days: number;
+            /** Traffic Limit Gb */
+            traffic_limit_gb: number;
+            /** Device Limit */
+            device_limit: number;
+            /** Squad Uuids */
+            squad_uuids: string[];
+        };
+        /** TrialSettingsOut */
+        TrialSettingsOut: {
+            /** Enabled */
+            enabled: boolean;
+            /** Duration Days */
+            duration_days: number;
+            /** Traffic Limit Gb */
+            traffic_limit_gb: number;
+            /** Device Limit */
+            device_limit: number;
+            /** Squad Uuids */
+            squad_uuids: string[];
         };
         /**
          * Usage
@@ -1658,11 +1866,13 @@ export interface components {
             webhook_secret: string;
         };
         _Contact: string;
-        _Description: string;
         /** @enum {string} */
         _Filter: "pending" | "paid" | "applied" | "declined" | "expired" | "cancelled" | "paid_not_applied" | "resolved_manually" | "refunded" | "partially_refunded" | "unknown";
+        _ShortDescription: string;
         _Welcome: string;
+        remnabay__web__admin___brand___Description: string;
         remnabay__web__admin___brand___Name: string;
+        remnabay__web__admin___tariffs___Description: string;
         remnabay__web__admin___tariffs___Name: string;
     };
     responses: never;
@@ -1907,6 +2117,50 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["BrandSettingsOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    apply_telegram_api_admin_settings_brand_telegram_put: {
+        parameters: {
+            query: {
+                scale?: number;
+                x?: number;
+                y?: number;
+                rotation?: number;
+                flip_x?: boolean;
+                flip_y?: boolean;
+                background: components["schemas"]["AvatarBackground"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrandSettingsOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -2229,6 +2483,40 @@ export interface operations {
             };
         };
     };
+    refresh_guide_api_admin_settings_panel_guide_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PanelSettingsOut"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     stats_api_admin_stats_get: {
         parameters: {
             query?: {
@@ -2547,6 +2835,73 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    get_trial_settings_api_admin_settings_trial_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrialSettingsOut"];
+                };
+            };
+        };
+    };
+    update_trial_settings_api_admin_settings_trial_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrialSettingsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrialSettingsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

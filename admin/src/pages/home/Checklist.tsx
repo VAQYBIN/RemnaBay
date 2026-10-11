@@ -137,7 +137,16 @@ function Body({ item, isOwner }: { item: Item; isOwner: boolean }) {
         </p>
       )
     case 'trial':
-      return <p>{item.trial_enabled ? 'Триал включён.' : 'Триал выключен — это нормально.'}</p>
+      return (
+        <p>
+          {item.trial_enabled ? 'Триал включён.' : 'Триал выключен — это нормально.'}{' '}
+          {isOwner && (
+            <Link to="/settings/trial" className="text-brand-text underline-offset-4 hover:underline">
+              Настройки триала
+            </Link>
+          )}
+        </p>
+      )
     case 'username_prefix': {
       const prefix = item.username_prefix?.prefix ?? 'rb'
       if (item.status === 'done') return <p>Пользователи в панели получают имена {prefix}_…</p>

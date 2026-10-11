@@ -32,6 +32,7 @@ from remnabay.web import (
     brand_files,
     panel_webhook,
     payment_webhook,
+    redirect_page,
     telegram_webhook,
 )
 from remnabay.web.admin import LOGIN_PAGE_PATH
@@ -71,7 +72,11 @@ def create_app(settings: Settings, *, startup: bool = False) -> FastAPI:
     yookassa = yookassa_http()
     providers = Providers(box, [YooKassaKind(yookassa)])
     dispatcher = create_dispatcher(
-        sessions, admin_login_url=settings.public_link(LOGIN_PAGE_PATH), providers=providers
+        sessions,
+        admin_login_url=settings.public_link(LOGIN_PAGE_PATH),
+        providers=providers,
+        panel=panel,
+        shop_url=settings.public_link(""),
     )
 
     @asynccontextmanager
@@ -120,6 +125,7 @@ def create_app(settings: Settings, *, startup: bool = False) -> FastAPI:
     app.include_router(admin.build_router())
     app.include_router(admin_static.build_router())
     app.include_router(brand_files.router)
+    app.include_router(redirect_page.router)
 
     @app.get(
         HEALTH_PATH,

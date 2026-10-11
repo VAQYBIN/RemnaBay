@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Trash2, Upload } from 'lucide-react'
+import { AlertTriangle, Send, Trash2, Upload } from 'lucide-react'
 import { type ChangeEvent, useEffect, useRef, useState } from 'react'
 
 import { $api, errorMessage, fetchClient, type Schemas } from '@/api/client'
@@ -12,12 +12,25 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { brandCss } from '@/lib/brand'
+import { TelegramApplyDialog, TelegramResult } from '@/pages/settings/TelegramApply'
 
 type Settings = Schemas['BrandSettingsOut']
 type Palette = Schemas['PaletteOut']
 type AssetKind = 'mark' | 'logo'
 
 const HEX = /^#[0-9a-f]{6}$/i
+// Ограничения Telegram: описание бота и «Коротко о боте» (1.27)
+const MAX_DESCRIPTION = 512
+const MAX_SHORT_DESCRIPTION = 120
+
+type Form = {
+  name: string
+  primary: string
+  secondary: string
+  welcome: string
+  description: string
+  short: string
+}
 const SEMANTIC_NAMES: Record<string, string> = {
   success: '«успех»',
   warning: '«внимание»',
@@ -127,12 +140,15 @@ function AssetUpload({
   )
 }
 
-/** «Бренд» (1.11, 1.23, 1.24): название, логотипы, цвета, приветственный текст. */
+/** «Бренд» (1.11, 1.23, 1.24, 1.27): название, логотипы, цвета, приветственный текст,
+ *  описания бота и «Применить в Telegram». */
 export function BrandSettingsPage() {
   const queryClient = useQueryClient()
   const { data } = $api.useQuery('get', '/api/admin/settings/brand')
-  const [form, setForm] = useState<{ name: string; primary: string; secondary: string; welcome: string } | null>(null)
+  const [form, setForm] = useState<Form | null>(null)
   const [saved, setSaved] = useState<string | null>(null)
+  const [telegramOpen, setTelegramOpen] = useState(false)
+  const shop = $api.useQuery('get', '/api/admin/settings/shop')
   const preview = $api.useMutation('post', '/api/admin/settings/brand/preview')
   const save = $api.useMutation('put', '/api/admin/settings/brand')
   const { mutate: requestPreview } = preview
@@ -144,6 +160,8 @@ export function BrandSettingsPage() {
         primary: data.primary_color,
         secondary: data.secondary_color ?? '',
         welcome: data.welcome_text,
+        description: data.bot_description,
+        short: data.bot_short_description,
       })
     }
   }, [data, form])
@@ -175,6 +193,8 @@ export function BrandSettingsPage() {
           primary_color: form.primary,
           secondary_color: form.secondary || null,
           welcome_text: form.welcome,
+          bot_description: form.description,
+          bot_short_description: form.short,
         },
       },
       {
@@ -186,6 +206,12 @@ export function BrandSettingsPage() {
     )
   }
   const warning = warningText(palette)
+  // В Telegram уходит сохранённое: несохранённые название и описания сначала сохранить
+  const unsaved =
+    form.name.trim() !== data.name ||
+    form.description.trim() !== data.bot_description ||
+    form.short.trim() !== data.bot_short_description
+  const ready = Boolean(data.name && data.mark)
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
@@ -250,6 +276,55 @@ export function BrandSettingsPage() {
         </Field>
       </Module>
 
+      <Module title="Бот в Telegram" className="lg:col-span-2">
+        <div className="flex flex-col gap-5">
+          <Field
+            id="bot-description"
+            label="Описание бота"
+            hint={`По желанию, до ${MAX_DESCRIPTION} знаков: Telegram показывает его в пустом чате до /start. Осталось: ${MAX_DESCRIPTION - form.description.length}.`}
+          >
+            <Textarea
+              id="bot-description"
+              rows={3}
+              maxLength={MAX_DESCRIPTION}
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+            />
+          </Field>
+          <Field
+            id="bot-short"
+            label="Коротко о боте"
+            hint={`По желанию, до ${MAX_SHORT_DESCRIPTION} знаков: видно в профиле бота. Осталось: ${MAX_SHORT_DESCRIPTION - form.short.length}.`}
+          >
+            <Input
+              id="bot-short"
+              maxLength={MAX_SHORT_DESCRIPTION}
+              value={form.short}
+              onChange={(e) => setForm({ ...form, short: e.target.value })}
+            />
+          </Field>
+          <div className="flex flex-col gap-2">
+            <Button
+              variant="outline"
+              className="w-fit"
+              onClick={() => setTelegramOpen(true)}
+              disabled={!ready || unsaved}
+            >
+              <Send />
+              Применить в Telegram
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              {!ready
+                ? 'Доступно, когда сохранены название и квадратный знак.'
+                : unsaved
+                  ? 'Сначала сохраните изменения — в Telegram уходит сохранённое.'
+                  : 'Имя бота — название бренда, аватар — квадратный знак.'}
+            </p>
+            <TelegramResult settings={data} timeZone={shop.data?.time_zone ?? 'Europe/Moscow'} />
+          </div>
+        </div>
+      </Module>
+
       <div className="flex flex-wrap items-center gap-3 lg:col-span-2">
         <Button onClick={submit} disabled={save.isPending}>
           Сохранить
@@ -257,6 +332,8 @@ export function BrandSettingsPage() {
         {save.error && <p className="text-sm text-danger-text">{errorMessage(save.error, 'Не удалось сохранить')}</p>}
         {saved && !save.error && <p className="text-sm text-muted-foreground">{saved}</p>}
       </div>
+
+      <TelegramApplyDialog open={telegramOpen} onOpenChange={setTelegramOpen} settings={data} onApplied={refreshBrand} />
     </div>
   )
 }

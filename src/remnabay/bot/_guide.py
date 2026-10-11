@@ -1,0 +1,270 @@
+"""С2. Инструкция по подключению — rich, из конфига Subscription Page (блок 12, решение 0019).
+
+- Конфиг — назначенный подписке в панели; панель не ответила — последний известный
+  (12.1, 12.8). Конфиг ни разу не получен — `guide.unavailable` (12.8, 12.16).
+- Платформы — сворачиваемые блоки; внутри рекомендуемое приложение и его шаги,
+  остальные — по «Другие приложения» (12.3). Тексты — на языке клиента (12.2).
+- Кнопки шагов: копирование — ссылка подписки, внешняя ссылка — как есть, импорт в
+  приложение — через страницу-переходник (12.4, 12.10). SVG-иконки и брендинг
+  веб-страницы не переносятся (12.5).
+- Под сообщением: «Скопировать ссылку», «Открыть в браузере» — только если панель
+  пускает браузер на страницу подписки (12.6, 12.16), «Главное меню».
+"""
+
+import asyncio
+from itertools import batched
+
+from aiogram import Router
+from aiogram.types import (
+    CallbackQuery,
+    CopyTextButton,
+    InputRichBlockButtons,
+    InputRichBlockDetails,
+    InputRichBlockParagraph,
+    InputRichBlockSectionHeading,
+    InputRichBlockUnion,
+    InputRichMessage,
+    RichMessageButton,
+    RichTextBold,
+)
+
+from remnabay.bot._common import (
+    BACK_TO_MENU,
+    HELP,
+    PANEL_TIMEOUT,
+    Card,
+    Guide,
+    GuideApps,
+    GuideBack,
+    GuideHere,
+    own_subscription,
+    show,
+)
+from remnabay.bot._context import BotContext
+from remnabay.bot._screens import Keyboard, Screen
+from remnabay.bot._shop import main_menu
+from remnabay.domain.subscriptions import Subscription
+from remnabay.guide import (
+    BROWSER_HEADERS,
+    REDIRECT_PATH,
+    ButtonType,
+    ConfigApp,
+    ConfigButton,
+    GuideConfig,
+    Language,
+    known_config_uuid,
+    redirect_token,
+    remember_assignment,
+    store_config,
+    stored_config,
+    webpage_allowed,
+)
+from remnabay.panel import PanelError
+from remnabay.shop_settings import SHOP_LANGUAGE, get_setting
+
+# Кнопок в одном ряду rich-сообщения — не больше 8 (Bot API)
+_ROW = 8
+_WEB_SCHEMES = ("https://", "http://", "tg://")
+
+
+async def _config(ctx: BotContext, subscription: Subscription) -> GuideConfig | None:
+    """Конфиг подписки: назначение — у панели, содержимое — сохранённое; ещё не
+    сохранённое — у панели. Панель не ответила — последнее известное (12.8).
+
+    Таймаут — только на запросы к панели: запись в базу не прерывается."""
+    seconds = PANEL_TIMEOUT.total_seconds()
+    try:
+        async with asyncio.timeout(seconds):
+            answer = await ctx.panel.get_user_subpage_config(
+                subscription.panel_short_uuid, BROWSER_HEADERS
+            )
+    except PanelError, TimeoutError:
+        config_uuid = known_config_uuid(subscription)
+    else:
+        config_uuid = await remember_assignment(ctx.session, subscription, answer)
+    config = await stored_config(ctx.session, config_uuid)
+    if config is not None:
+        return config
+    try:
+        async with asyncio.timeout(seconds):
+            fetched = await ctx.panel.get_subpage_config(config_uuid)
+    except PanelError, TimeoutError:
+        return None
+    await store_config(ctx.session, config_uuid, fetched)
+    return await stored_config(ctx.session, config_uuid)
+
+
+class _Builder:
+    """Собирает rich-инструкцию одной подписки."""
+
+    def __init__(
+        self,
+        ctx: BotContext,
+        subscription: Subscription,
+        config: GuideConfig,
+        language: Language,
+        back: GuideBack,
+    ) -> None:
+        self._back = back
+        self._ctx = ctx
+        self._subscription = subscription
+        self._config = config
+        self._language = language
+
+    async def _button(
+        self, platform: str, app: ConfigApp, button: ConfigButton
+    ) -> RichMessageButton | None:
+        text = self._language.pick(button.text) or app.name
+        match button.type:
+            case ButtonType.COPY_BUTTON:
+                link = self._subscription.subscription_url
+                return RichMessageButton(text=text, copy_text=CopyTextButton(text=link))
+            case ButtonType.EXTERNAL if button.link.startswith(_WEB_SCHEMES):
+                return RichMessageButton(text=text, url=button.link)
+            case ButtonType.SUBSCRIPTION_LINK if button.link:
+                token = await redirect_token(
+                    self._ctx.session, self._subscription, platform, app.name, button.link
+                )
+                return RichMessageButton(
+                    text=text, url=f"{self._ctx.shop_url}{REDIRECT_PATH}/{token}"
+                )
+            case _:
+                # Неизвестный вид кнопки или ссылка, которую Telegram не откроет
+                return None
+
+    async def app(self, platform: str, app: ConfigApp) -> list[InputRichBlockUnion]:
+        """Приложение и его шаги: заголовок, описание, кнопки (12.3, 12.4)."""
+        blocks: list[InputRichBlockUnion] = [InputRichBlockSectionHeading(text=app.name, size=4)]
+        for step in app.blocks:
+            title = self._language.pick(step.title)
+            description = self._language.pick(step.description)
+            if title:
+                blocks.append(InputRichBlockParagraph(text=RichTextBold(text=title)))
+            if description:
+                blocks.append(InputRichBlockParagraph(text=description))
+            buttons = [
+                found
+                for button in step.buttons
+                if (found := await self._button(platform, app, button)) is not None
+            ]
+            rows = batched(buttons, _ROW, strict=False)
+            blocks.extend(InputRichBlockButtons(buttons=list(row)) for row in rows)
+        return blocks
+
+    async def message(self, expanded: str | None) -> InputRichMessage | None:
+        """Платформы — сворачиваемые блоки. У платформы `expanded` блок раскрыт и
+        показаны все её приложения (12.3). `None` — платформ с приложениями нет."""
+        blocks: list[InputRichBlockUnion] = []
+        header = self._language.pick(self._config.base_translations.installation_guide_header)
+        if header:
+            blocks.append(InputRichBlockSectionHeading(text=header, size=3))
+        for key, platform in self._config.platforms.items():
+            recommended = platform.recommended()
+            if recommended is None:
+                continue
+            content = await self.app(key, recommended)
+            others = [app for app in platform.apps if app is not recommended]
+            if key == expanded:
+                for app in others:
+                    content.extend(await self.app(key, app))
+            elif others:
+                more = GuideApps(
+                    subscription_id=self._subscription.id, platform=key, back=self._back
+                )
+                content.append(
+                    InputRichBlockButtons(
+                        buttons=[
+                            RichMessageButton(
+                                text=self._ctx.render("btn.other_apps"), callback_data=more.pack()
+                            )
+                        ]
+                    )
+                )
+            summary = self._language.pick(platform.display_name) or key
+            blocks.append(
+                InputRichBlockDetails(
+                    summary=RichTextBold(text=summary), blocks=content, is_open=key == expanded
+                )
+            )
+        if len(blocks) == (1 if header else 0):
+            return None
+        return InputRichMessage(blocks=blocks)
+
+
+def _back(subscription: Subscription, back: GuideBack) -> str | None:
+    """«Назад» из инструкции, открытой на месте: в карточку или в /help (0060)."""
+    match back:
+        case GuideBack.CARD:
+            return Card(subscription_id=subscription.id).pack()
+        case GuideBack.HELP:
+            return HELP
+        case _:
+            return None
+
+
+async def guide_screen(
+    ctx: BotContext,
+    subscription: Subscription,
+    expanded: str | None = None,
+    back: GuideBack = GuideBack.NONE,
+) -> Screen:
+    """С2 или, если конфиг ни разу не получен, `guide.unavailable` (12.8). «Главное меню»
+    правит то же сообщение (0060)."""
+    # Сначала конфиг: вместе с ним панель отвечает, пускает ли она браузер (12.16)
+    config = await _config(ctx, subscription)
+    browser = await webpage_allowed(ctx.session)
+    keyboard = Keyboard().copy(ctx.render("btn.copy_link"), subscription.subscription_url)
+    if browser:
+        keyboard.link(ctx.render("btn.open_in_browser"), subscription.subscription_url)
+    back_data = _back(subscription, back)
+    if back_data is not None:
+        keyboard.action(ctx.render("btn.back"), back_data)
+    keyboard.action(ctx.render("btn.main_menu"), BACK_TO_MENU)
+    rich = None
+    if config is not None:
+        default = await get_setting(ctx.session, SHOP_LANGUAGE)
+        language = Language(config, ctx.client.language_code, default)
+        rich = await _Builder(ctx, subscription, config, language, back).message(expanded)
+    if rich is None:
+        key = "guide.unavailable" if browser else "guide.unavailable_no_browser"
+        return Screen.plain(ctx.render(key), keyboard)
+    return Screen(keyboard=keyboard, rich=rich)
+
+
+async def open_guide(query: CallbackQuery, callback_data: Guide, ctx: BotContext) -> None:
+    """«Как подключить» на событии со ссылкой (С1, С3, С15) — инструкция новым
+    сообщением: событие со ссылкой не пропадает (0060)."""
+    await query.answer()
+    subscription = await own_subscription(ctx, callback_data.subscription_id)
+    if subscription is None:
+        await (await main_menu(ctx)).send(ctx.bot, query.from_user.id)
+        return
+    await (await guide_screen(ctx, subscription)).send(ctx.bot, query.from_user.id)
+
+
+async def open_guide_here(query: CallbackQuery, callback_data: GuideHere, ctx: BotContext) -> None:
+    """«Как подключить» в карточке подписки и в /help — в том же сообщении (0060)."""
+    subscription = await own_subscription(ctx, callback_data.subscription_id)
+    if subscription is None:
+        await show(query, ctx, await main_menu(ctx))
+        return
+    screen = await guide_screen(ctx, subscription, back=callback_data.back)
+    await show(query, ctx, screen)
+
+
+async def other_apps(query: CallbackQuery, callback_data: GuideApps, ctx: BotContext) -> None:
+    """«Другие приложения» — та же инструкция с раскрытой платформой (12.3)."""
+    subscription = await own_subscription(ctx, callback_data.subscription_id)
+    if subscription is None:
+        await query.answer()
+        return
+    screen = await guide_screen(ctx, subscription, callback_data.platform, callback_data.back)
+    await show(query, ctx, screen)
+
+
+def build_router() -> Router:
+    router = Router(name="guide")
+    router.callback_query.register(open_guide, Guide.filter())
+    router.callback_query.register(open_guide_here, GuideHere.filter())
+    router.callback_query.register(other_apps, GuideApps.filter())
+    return router

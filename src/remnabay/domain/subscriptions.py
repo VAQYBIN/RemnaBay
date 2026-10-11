@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from enum import StrEnum
+from uuid import UUID
 
 from sqlalchemy import (
     BigInteger,
@@ -14,6 +15,7 @@ from sqlalchemy import (
     String,
     false,
 )
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from remnabay.db import Base, str_enum_type
@@ -74,6 +76,9 @@ class Subscription(Base):
         str_enum_type(TrafficResetStrategy, "traffic_reset_strategy")
     )
     panel_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Конфиг Subscription Page, который панель назначила подписке, — последнее известное
+    # назначение (12.1, 12.8); пусто — ещё не спрашивали, действует конфиг по умолчанию
+    subpage_config_uuid: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
 
 
 def operations_key(subscription_id: int) -> str:

@@ -13,6 +13,7 @@ import { PanelSettingsPage } from '@/pages/settings/PanelSettingsPage'
 import { PaymentSettingsPage } from '@/pages/settings/PaymentSettingsPage'
 import { SettingsLayout } from '@/pages/settings/SettingsLayout'
 import { ShopSettingsPage } from '@/pages/settings/ShopSettingsPage'
+import { TrialSettingsPage } from '@/pages/settings/TrialSettingsPage'
 import { TariffsPage } from '@/pages/TariffsPage'
 
 /** Навигация админки (03-screens, «Навигация») — разделы этого этапа. */
@@ -35,6 +36,7 @@ export const router = createBrowserRouter(
             { index: true, element: <Navigate to="brand" replace /> },
             { path: 'brand', Component: BrandSettingsPage },
             { path: 'payment', Component: PaymentSettingsPage },
+            { path: 'trial', Component: TrialSettingsPage },
             { path: 'shop', Component: ShopSettingsPage },
             { path: 'panel', Component: PanelSettingsPage },
             { path: 'login', Component: LoginSettingsPage },

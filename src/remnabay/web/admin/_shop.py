@@ -22,7 +22,9 @@ from remnabay.checklist import (
 from remnabay.crypto import SecretBox, SecretDecryptionError
 from remnabay.domain.panel_events import PanelEvent
 from remnabay.domain.team import TeamMember, TeamRole
-from remnabay.panel import PanelClient
+from remnabay.guide import WEBPAGE_ALLOWED, last_refreshed_at, refresh_configs
+from remnabay.journal import Actor, Outcome, record
+from remnabay.panel import PanelClient, PanelError, PanelUnavailableError
 from remnabay.panel_names import PrefixLockedError, save_prefix, username_prefix
 from remnabay.panel_sync import panel_available, sync_page
 from remnabay.queue import last_periodic_start
@@ -308,6 +310,10 @@ class PanelSettingsOut(BaseModel):
     username_prefix: str
     # Префикс зафиксирован — изменить нельзя
     username_prefix_locked: bool
+    # Когда магазин последний раз получил конфиг Subscription Page (12.7); ещё не получал — пусто
+    guide_refreshed_at: datetime | None
+    # Пускает ли панель браузер на страницу подписки (12.16, 12.17); ответа не было — пусто
+    webpage_allowed: bool | None
 
 
 class UsernamePrefixIn(BaseModel):
@@ -339,6 +345,8 @@ async def _panel_settings(
         webhook_secret_fits_panel=secret is not None and _fits_panel(secret),
         username_prefix=prefix,
         username_prefix_locked=locked,
+        guide_refreshed_at=await last_refreshed_at(session),
+        webpage_allowed=await get_setting(session, WEBPAGE_ALLOWED),
     )
 
 
@@ -412,5 +420,36 @@ async def update_username_prefix(
             status.HTTP_409_CONFLICT,
             PrefixLockedOut(message="Префикс уже зафиксирован — изменить его нельзя").model_dump(),
         ) from error
+    await session.commit()
+    return await _panel_settings(request, session, settings)
+
+
+@router.post(
+    "/settings/panel/guide/refresh",
+    tags=["settings"],
+    responses={status.HTTP_503_SERVICE_UNAVAILABLE: {}, status.HTTP_502_BAD_GATEWAY: {}},
+)
+async def refresh_guide(
+    request: Request, session: DbSession, settings: AppSettings, owner: Owner
+) -> PanelSettingsOut:
+    """«Обновить сейчас»: конфиги Subscription Page и ответ «пускает ли браузер» (12.7, 12.16)."""
+    panel: PanelClient = request.app.state.panel
+    try:
+        await refresh_configs(session, panel)
+    except PanelUnavailableError as error:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Панель недоступна — действует последний сохранённый конфиг",
+        ) from error
+    except PanelError as error:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, f"Панель ответила ошибкой: {error}"
+        ) from error
+    await record(
+        session,
+        actor=Actor.team_member(owner.id),
+        action="guide.refreshed",
+        outcome=Outcome.SUCCESS,
+    )
     await session.commit()
     return await _panel_settings(request, session, settings)

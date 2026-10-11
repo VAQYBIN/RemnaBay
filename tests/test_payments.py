@@ -323,10 +323,9 @@ async def test_4_22_retry_then_client_learns_result(db_session: AsyncSession) ->
         payment.client_id,
         "event.payment_resolved.renewed",
     )
-    assert message.variables == {
-        "subscription_name": "Основная",
-        "end_date": "1 декабря 2026, 12:00 (МСК)",
-    }
+    assert message.variables == {"subscription_name": "Основная"}
+    # Дата — сущностью date_time, запасной текст — при отправке (0044)
+    assert message.dates == {"end_date": datetime(2026, 12, 1, 9, 0, tzinfo=UTC)}
     assert ("payment.retried", ActorType.TEAM_MEMBER) in await _actions(db_session, payment)
 
 

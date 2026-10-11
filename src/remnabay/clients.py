@@ -69,3 +69,13 @@ async def _create(session: AsyncSession, user: TelegramUser, now: datetime) -> T
         if account is None:
             raise
         return account
+
+
+async def client_telegram_id(session: AsyncSession, client_id: int) -> int | None:
+    """Telegram ID клиента — его первый Telegram-аккаунт."""
+    return await session.scalar(
+        select(TelegramAccount.telegram_id)
+        .where(TelegramAccount.client_id == client_id)
+        .order_by(TelegramAccount.created_at)
+        .limit(1)
+    )

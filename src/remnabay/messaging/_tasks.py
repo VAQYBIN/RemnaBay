@@ -8,6 +8,7 @@
 
 import functools
 import logging
+from datetime import datetime
 
 from pydantic import BaseModel
 from sqlalchemy import func, select, update
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from remnabay import runtime
 from remnabay.domain.clients import Client
 from remnabay.journal import Actor, Outcome, Subject, record
+from remnabay.messaging._dates import Dates, DateValue
 from remnabay.messaging._sender import (
     AmbiguousDeliveryError,
     Button,
@@ -25,7 +27,7 @@ from remnabay.messaging._sender import (
     UndeliverableError,
 )
 from remnabay.queue import AttemptResult, RejectedError, TaskContext, task
-from remnabay.shop_settings import SHOP_LANGUAGE, get_setting
+from remnabay.shop_settings import SHOP_LANGUAGE, get_setting, shop_time_zone
 from remnabay.texts import Catalog, TextError, Texts, load_default_catalogs, load_overrides
 
 logger = logging.getLogger(__name__)
@@ -53,6 +55,9 @@ class SendArgs(BaseModel):
     client_id: int | None = None
     text_key: str
     variables: dict[str, str] = {}
+    # Переменные-даты: подставляются сущностью date_time с запасным текстом во
+    # времени магазина (0044) — на языке получателя, в момент отправки
+    dates: dict[str, datetime] = {}
     buttons: list[ButtonArgs] = []
 
 
@@ -107,7 +112,15 @@ async def _render(session: AsyncSession, args: SendArgs) -> OutgoingMessage:
         )
         for button in args.buttons
     )
-    return OutgoingMessage(texts.render(args.text_key, language, **args.variables), buttons)
+    dates = Dates()
+    variables = dict(args.variables)
+    if args.dates:
+        time_zone = await shop_time_zone(session)
+        for name, moment in args.dates.items():
+            fallback = texts.date_fallback(moment, language, time_zone)
+            variables[name] = dates.mark(DateValue(moment, fallback))
+    text, entities = dates.render(texts.render(args.text_key, language, **variables))
+    return OutgoingMessage(text, buttons, tuple(entities))
 
 
 async def _mark_blocked(session: AsyncSession, client_id: int) -> None:

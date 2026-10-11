@@ -245,7 +245,7 @@ async def test_4_29_revoked_link_is_saved_and_client_gets_new_one(
     db_session: AsyncSession,
 ) -> None:
     """4.29: ссылку отозвали в панели — магазин сохраняет новую и ставит клиенту сообщение
-    с новой ссылкой и кнопкой копирования."""
+    с новой ссылкой, кнопкой копирования и инструкцией (С15)."""
     client, subscription, _payment = await _subscription(db_session)
     new_link = "https://sub.example.com/zzz999"
     panel = FakePanel(
@@ -260,7 +260,11 @@ async def test_4_29_revoked_link_is_saved_and_client_gets_new_one(
     ]
     assert (message.client_id, message.text_key) == (client.id, "event.link_revoked")
     assert message.variables == {"subscription_name": "Основная", "subscription_link": new_link}
-    assert [(b.text_key, b.copy_text) for b in message.buttons] == [("btn.copy_link", new_link)]
+    assert [(b.text_key, b.copy_text, b.callback_data) for b in message.buttons] == [
+        ("btn.copy_link", new_link, None),
+        ("btn.how_to_connect", None, f"guide:{subscription.id}"),
+        ("btn.main_menu", None, "menu:main"),
+    ]
 
 
 async def test_4_29_new_link_domain_without_revocation_sends_nothing(
@@ -426,8 +430,8 @@ async def test_4_13_long_outage_notifies_team_once(db_session: AsyncSession) -> 
 
     [notification] = await _notifications(db_session)
     assert (notification.chat_id, notification.text_key) == (1, "team.panel_unavailable")
-    # Время — в часовом поясе магазина (по умолчанию Москва), месяц словом (0044)
-    assert notification.variables == {"since": "1 октября 2026, 23:00 (МСК)"}
+    # Время — сущностью date_time; запасной текст собирается при отправке (0044)
+    assert notification.dates == {"since": datetime(2026, 10, 1, 20, 0, tzinfo=UTC)}
 
 
 async def test_0048_team_learns_when_panel_is_back_after_notified_outage(
@@ -449,8 +453,8 @@ async def test_0048_team_learns_when_panel_is_back_after_notified_outage(
     keys = [n.text_key for n in await _notifications(db_session)]
     assert keys == ["team.panel_unavailable", "team.panel_available_again"]
     back = (await _notifications(db_session))[-1]
-    assert back.variables["since"] == "1 октября 2026, 23:00 (МСК)"
-    assert back.variables["until"].endswith("(МСК)")
+    assert back.dates["since"] == datetime(2026, 10, 1, 20, 0, tzinfo=UTC)
+    assert back.dates["until"] > back.dates["since"]
 
 
 async def test_4_13_short_outage_ends_without_notification(db_session: AsyncSession) -> None:

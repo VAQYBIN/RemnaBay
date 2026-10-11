@@ -27,6 +27,8 @@ class Runtime:
     payments: PaymentApplier
     # Подключённые провайдеры — для опроса неоплаченных счетов (3.29)
     providers: Providers
+    # Режим разработки: свой префикс имён в панели (решение 0057)
+    dev_mode: bool = False
 
 
 _current: ContextVar[Runtime] = ContextVar("remnabay_runtime")

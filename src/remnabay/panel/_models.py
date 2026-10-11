@@ -69,6 +69,8 @@ class Metadata(PanelModel):
 
 class HwidSettings(PanelModel):
     enabled: bool
+    # Лимит устройств пользователя, у которого свой лимит не задан (6.2)
+    fallback_device_limit: int | None = None
 
 
 class SubscriptionSettings(PanelModel):

@@ -3,20 +3,32 @@
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Request, status
+from aiogram import Bot
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
 from remnabay.brand import (
+    BOT_DESCRIPTION,
+    BOT_SHORT_DESCRIPTION,
     BRAND_NAME,
     BRAND_PRIMARY_COLOR,
     BRAND_SECONDARY_COLOR,
     MAX_ASSET_BYTES,
+    MAX_AVATAR_BYTES,
+    MAX_DESCRIPTION_LENGTH,
     MAX_NAME_LENGTH,
+    MAX_SHORT_DESCRIPTION_LENGTH,
+    TELEGRAM_APPLIED,
     WELCOME_TEXT_KEY,
     AssetError,
     AssetKind,
+    AvatarBackground,
+    AvatarPlacement,
     BrandPalette,
     Semantic,
+    TelegramApplied,
+    TelegramApplyError,
+    apply_to_telegram,
     asset_versions,
     brand_name,
     build_palette,
@@ -128,6 +140,11 @@ class BrandSettingsOut(BaseModel):
     mark: AssetOut | None
     logo: AssetOut | None
     palette: PaletteOut
+    # Описание бота и «Коротко о боте» — для «Применить в Telegram» (1.27)
+    bot_description: str
+    bot_short_description: str
+    # Итог последнего «Применить в Telegram»; ещё не применяли — пусто
+    telegram: TelegramApplied | None
 
 
 async def _welcome_language(session: DbSession) -> str:
@@ -151,6 +168,9 @@ async def _settings_out(session: DbSession) -> BrandSettingsOut:
         mark=AssetOut(url=asset_url(AssetKind.MARK, mark)) if mark else None,
         logo=AssetOut(url=asset_url(AssetKind.LOGO, logo)) if logo else None,
         palette=_palette_out(_palette(primary, secondary)),
+        bot_description=await get_setting(session, BOT_DESCRIPTION),
+        bot_short_description=await get_setting(session, BOT_SHORT_DESCRIPTION),
+        telegram=await get_setting(session, TELEGRAM_APPLIED),
     )
 
 
@@ -162,6 +182,8 @@ async def brand_settings(session: DbSession, owner: Owner) -> BrandSettingsOut:
 
 type _Name = Annotated[str, Field(max_length=MAX_NAME_LENGTH)]
 type _Welcome = Annotated[str, Field(max_length=MAX_WELCOME_LENGTH)]
+type _Description = Annotated[str, Field(max_length=MAX_DESCRIPTION_LENGTH)]
+type _ShortDescription = Annotated[str, Field(max_length=MAX_SHORT_DESCRIPTION_LENGTH)]
 
 
 class BrandSettingsIn(BaseModel):
@@ -170,6 +192,9 @@ class BrandSettingsIn(BaseModel):
     secondary_color: Color | None = None
     # Пусто — текст по умолчанию из 03-bot-texts.md
     welcome_text: _Welcome | None = None
+    # Не передано — не меняется
+    bot_description: _Description | None = None
+    bot_short_description: _ShortDescription | None = None
 
 
 @router.put("")
@@ -181,6 +206,10 @@ async def update_brand_settings(
         (BRAND_NAME, body.name.strip()),
         (BRAND_PRIMARY_COLOR, body.primary_color),
     ]
+    if body.bot_description is not None:
+        changes.append((BOT_DESCRIPTION, body.bot_description.strip()))
+    if body.bot_short_description is not None:
+        changes.append((BOT_SHORT_DESCRIPTION, body.bot_short_description.strip()))
     for setting, value in changes:
         if await get_setting(session, setting) != value:
             await set_setting(session, setting, value, member_id=owner.id)
@@ -236,5 +265,31 @@ async def upload_asset(
 @router.delete("/assets/{kind}")
 async def remove_asset(kind: AssetKind, session: DbSession, owner: Owner) -> BrandSettingsOut:
     await delete_asset(session, kind, member_id=owner.id)
+    await session.commit()
+    return await _settings_out(session)
+
+
+class AvatarIn(AvatarPlacement):
+    """Фон и положение знака на аватаре — параметры адреса «Применить в Telegram»."""
+
+    background: AvatarBackground
+
+
+@router.put("/telegram", responses={status.HTTP_409_CONFLICT: {}})
+async def apply_telegram(
+    avatar_in: Annotated[AvatarIn, Query()], request: Request, session: DbSession, owner: Owner
+) -> BrandSettingsOut:
+    """«Применить в Telegram» (1.27): аватар — телом запроса, image/jpeg; его собирает
+    админка из квадратного знака на выбранном фоне (решение 0059). Положение знака
+    сохраняется для следующего раза (0060)."""
+    avatar = await read_limited(request, MAX_AVATAR_BYTES)
+    bot: Bot = request.app.state.bot
+    placement = AvatarPlacement.model_validate(avatar_in.model_dump(exclude={"background"}))
+    try:
+        await apply_to_telegram(
+            session, bot, avatar, avatar_in.background, placement, member_id=owner.id
+        )
+    except TelegramApplyError as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
     await session.commit()
     return await _settings_out(session)

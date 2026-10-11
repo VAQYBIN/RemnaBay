@@ -3,7 +3,7 @@
 Alembic и тесты схемы импортируют этот модуль, чтобы видеть схему целиком.
 """
 
-from remnabay import brand, journal, panel_sync, queue, shop_settings, texts
+from remnabay import brand, guide, journal, panel_sync, queue, shop_settings, texts
 from remnabay.db import Base
 from remnabay.domain import (
     bonus,
@@ -27,6 +27,7 @@ __all__ = [
     "brand",
     "broadcasts",
     "clients",
+    "guide",
     "journal",
     "migration_runs",
     "panel_events",

@@ -188,8 +188,10 @@ async def test_3_6_client_gets_subscription_link(
     assert message.text_key == "event.subscription_ready"
     link = message.variables["subscription_link"]
     assert link.startswith("https://sub.example.com/")
+    # 3.6, 12.4: ссылка копируется кнопкой, инструкция — по «Как подключить» (С1)
     assert [(b.text_key, b.copy_text) for b in message.buttons] == [
         ("btn.copy_link", link),
+        ("btn.how_to_connect", None),
         ("btn.main_menu", None),
     ]
 
@@ -304,6 +306,29 @@ async def test_4_15_retry_after_lost_answer_does_not_create_second_user(
     assert len(_writes(panel, "POST /api/users")) == 1
     assert len(panel.users) == 1
     assert payment.state == PaymentState.APPLIED
+
+
+async def test_4_15_purchase_reusing_interrupted_trial_user_gets_tariff_access(
+    db_session: AsyncSession, panel: FakePanel, client: Client, tariff: Tariff
+) -> None:
+    """4.15, 3.6: прерванное создание триала оставило в панели пользователя с тем же
+    именем — покупка берёт его, но записывает параметры тарифа, а не триала."""
+    panel.add_user(
+        id=900,
+        username=f"rb_{TELEGRAM_ID}_1",
+        telegramId=TELEGRAM_ID,
+        expireAt=(datetime.now(UTC) + timedelta(days=3)).isoformat(),
+        trafficLimitBytes=10 * 1024**3,
+        hwidDeviceLimit=1,
+    )
+    await _apply(db_session, panel, await _paid(db_session, client, tariff))
+
+    assert _writes(panel, "POST /api/users") == []
+    [update] = _writes(panel, "PATCH /api/users")
+    assert (update["id"], update["trafficLimitBytes"], update["hwidDeviceLimit"]) == (900, 0, 3)
+    assert update["activeInternalSquads"] == [str(SQUAD)]
+    expire = _at(update["expireAt"])
+    assert abs(expire - (datetime.now(UTC) + timedelta(days=30))) < timedelta(minutes=1)
 
 
 # --- Продление ---
