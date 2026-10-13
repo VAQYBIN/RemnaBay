@@ -3,7 +3,15 @@
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, Integer, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    ForeignKey,
+    Identity,
+    Index,
+    Integer,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from remnabay.db import Base, str_enum_type
@@ -28,7 +36,16 @@ class Reminder(Base):
     """
 
     __tablename__ = "reminders"
-    __table_args__ = (UniqueConstraint("subscription_id", "expires_at", "offset_hours"),)
+    __table_args__ = (
+        UniqueConstraint("subscription_id", "expires_at", "offset_hours"),
+        # Раз в минуту магазин ищет наступившие и неотправленные (0014): отправленные и
+        # пропущенные копятся годами и в этот поиск не попадают
+        Index(
+            "ix_reminders_scheduled_due_at",
+            "due_at",
+            postgresql_where="state = 'scheduled'",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     subscription_id: Mapped[int] = mapped_column(ForeignKey("subscriptions.id"))
@@ -36,7 +53,7 @@ class Reminder(Base):
     offset_hours: Mapped[int] = mapped_column(Integer)
     # Дата окончания, от которой рассчитано напоминание
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     state: Mapped[ReminderState] = mapped_column(
         str_enum_type(ReminderState, "reminder_state"),
         server_default=ReminderState.SCHEDULED.value,

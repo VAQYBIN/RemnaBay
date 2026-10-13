@@ -274,6 +274,32 @@ async def test_0044_dates_are_date_time_entities_with_shop_time_fallback(
     assert date.unix_time == int(moment.timestamp())
 
 
+async def test_7_11_extra_paragraph_follows_main_text(db_session: AsyncSession) -> None:
+    """7.11: предупреждение об архивном тарифе добавляется к напоминанию следующим абзацем;
+    дата в основном тексте остаётся сущностью date_time."""
+    client = await make_client(db_session)
+    moment = datetime(2026, 11, 1, 20, 0, tzinfo=UTC)
+    sender = FakeSender()
+    await send_to_client(
+        db_session,
+        client.id,
+        "reminder.before",
+        variables={"subscription_name": "Основная"},
+        dates={"end_date": moment},
+        extra_keys=["reminder.before.archived"],
+    )
+    [args] = await _queued(db_session)
+
+    await _run_send(db_session, sender, args)
+
+    [(_chat, message)] = sender.sent
+    first, second = message.text.split("\n\n")
+    assert first.startswith("Подписка «Основная» заканчивается 1 ноября 2026, 23:00 (МСК).")
+    assert second.startswith("Ваш тариф больше не продаётся")
+    [date] = message.dates
+    assert message.text[date.offset : date.offset + date.length] == "1 ноября 2026, 23:00 (МСК)"
+
+
 async def test_0044_date_entity_is_sent_to_telegram(bot_api: tuple[FakeBotApi, str]) -> None:
     """0044: отправитель передаёт дату в Telegram сущностью date_time."""
     api, base = bot_api

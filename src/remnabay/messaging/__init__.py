@@ -41,6 +41,8 @@ MAIN_MENU_BUTTON = ButtonArgs(text_key="btn.main_menu", callback_data=MAIN_MENU_
 BUY_CALLBACK = "buy"
 # «Как подключить» — инструкция по подключению подписки (С2); `guide:<id подписки>`
 GUIDE_CALLBACK_PREFIX = "guide"
+# «Продлить» — продление именно этой подписки (7.5); `renew:<id подписки>`
+RENEW_CALLBACK_PREFIX = "renew"
 
 
 def guide_button(subscription_id: int) -> ButtonArgs:
@@ -55,6 +57,15 @@ def buy_button() -> ButtonArgs:
     return ButtonArgs(text_key="btn.buy", callback_data=BUY_CALLBACK, style="success")
 
 
+def renew_button(subscription_id: int) -> ButtonArgs:
+    """«Продлить» — целевое действие напоминания и «Подписка истекла» (С7, С8)."""
+    return ButtonArgs(
+        text_key="btn.renew",
+        callback_data=f"{RENEW_CALLBACK_PREFIX}:{subscription_id}",
+        style="success",
+    )
+
+
 async def send_to_client(
     session: AsyncSession,
     client_id: int,
@@ -63,9 +74,11 @@ async def send_to_client(
     variables: dict[str, str] | None = None,
     dates: Mapping[str, datetime] | None = None,
     buttons: Sequence[ButtonArgs] = (),
+    extra_keys: Sequence[str] = (),
 ) -> None:
     """Ставит сообщение клиенту в его Telegram-аккаунт. `dates` — переменные-даты:
-    клиент видит их сущностью date_time (0044)."""
+    клиент видит их сущностью date_time (0044). `extra_keys` — тексты, которые
+    добавляются следующими абзацами (например, `reminder.before.archived`, 7.11)."""
     chat_id = await session.scalar(
         select(TelegramAccount.telegram_id)
         .where(TelegramAccount.client_id == client_id)
@@ -76,6 +89,7 @@ async def send_to_client(
         chat_id=chat_id or 0,
         client_id=client_id,
         text_key=text_key,
+        extra_keys=list(extra_keys),
         variables=variables or {},
         dates=dict(dates or {}),
         buttons=list(buttons),
@@ -125,6 +139,7 @@ __all__ = [
     "GUIDE_CALLBACK_PREFIX",
     "MAIN_MENU_BUTTON",
     "MAIN_MENU_CALLBACK",
+    "RENEW_CALLBACK_PREFIX",
     "AmbiguousDeliveryError",
     "Button",
     "ButtonArgs",
@@ -143,6 +158,7 @@ __all__ = [
     "guide_button",
     "load_texts",
     "notify_team",
+    "renew_button",
     "send_message",
     "send_to_client",
     "tell_action_failed",
