@@ -9,6 +9,7 @@ const SECTIONS = [
   { to: 'brand', label: 'Бренд' },
   { to: 'payment', label: 'Оплата' },
   { to: 'trial', label: 'Триал' },
+  { to: 'reminders', label: 'Напоминания' },
   { to: 'shop', label: 'Магазин' },
   { to: 'panel', label: 'Панель' },
   { to: 'login', label: 'Вход в админку' },

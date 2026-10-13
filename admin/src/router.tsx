@@ -11,6 +11,7 @@ import { BrandSettingsPage } from '@/pages/settings/BrandSettingsPage'
 import { LoginSettingsPage } from '@/pages/settings/LoginSettingsPage'
 import { PanelSettingsPage } from '@/pages/settings/PanelSettingsPage'
 import { PaymentSettingsPage } from '@/pages/settings/PaymentSettingsPage'
+import { ReminderSettingsPage } from '@/pages/settings/ReminderSettingsPage'
 import { SettingsLayout } from '@/pages/settings/SettingsLayout'
 import { ShopSettingsPage } from '@/pages/settings/ShopSettingsPage'
 import { TrialSettingsPage } from '@/pages/settings/TrialSettingsPage'
@@ -37,6 +38,7 @@ export const router = createBrowserRouter(
             { path: 'brand', Component: BrandSettingsPage },
             { path: 'payment', Component: PaymentSettingsPage },
             { path: 'trial', Component: TrialSettingsPage },
+            { path: 'reminders', Component: ReminderSettingsPage },
             { path: 'shop', Component: ShopSettingsPage },
             { path: 'panel', Component: PanelSettingsPage },
             { path: 'login', Component: LoginSettingsPage },
