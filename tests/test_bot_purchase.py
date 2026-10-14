@@ -169,7 +169,7 @@ async def test_3_1_3_2_buy_shows_tariffs_on_sale_in_owner_order(shop: Shop) -> N
     """3.1, 3.2, 2.4: новый клиент видит «Купить подписку»; список — тарифы в продаже в
     порядке владельца, архивного нет."""
     menu = await _menu(shop)
-    assert _labels(menu) == ["Купить подписку"]
+    assert _labels(menu) == ["Купить подписку", "Ввести промокод"]
     assert _button(menu, "Купить подписку").style == "success"
 
     choice = await _press(shop, _button(menu, "Купить подписку"))
@@ -195,7 +195,7 @@ async def test_3_3_confirmation_shows_tariff_period_price_total(
     assert "Тариф: Месяц" in _text(screen)
     assert "Срок: 30 дней" in _text(screen)
     assert "Итого: 199,00\xa0₽" in _text(screen)
-    assert _labels(screen) == ["Оплатить", "Назад"]
+    assert _labels(screen) == ["Оплатить", "Ввести промокод", "Назад"]
     assert _button(screen, "Оплатить").style == "success"
 
 
@@ -330,7 +330,7 @@ async def test_3_23_3_20_single_subscription_renews_with_its_tariff(
     month = tariffs[0]
     subscription = await _subscription(shop, month)
     menu = await _menu(shop)
-    assert _labels(menu) == ["Моя подписка"]
+    assert _labels(menu) == ["Моя подписка", "Ввести промокод"]
     assert _entities(menu)  # дата окончания в сводке — date_time
 
     card = await _press(shop, _button(menu, "Моя подписка"))
@@ -410,7 +410,7 @@ async def test_3_24_several_subscriptions_each_shown_separately(
     await shop.session.flush()
 
     menu = await _menu(shop)
-    assert _labels(menu) == ["Мои подписки"]
+    assert _labels(menu) == ["Мои подписки", "Ввести промокод"]
     listing = await _press(shop, _button(menu, "Мои подписки"))
     labels = _labels(listing)
     assert any(label.startswith("Основная — активна до") for label in labels)
@@ -432,7 +432,7 @@ async def test_3_36_only_trial_offers_buy_instead_of_renew(
     del tariffs
     trial = await _subscription(shop, None, is_trial=True)
     menu = await _menu(shop)
-    assert _labels(menu) == ["Моя подписка", "Купить подписку"]
+    assert _labels(menu) == ["Моя подписка", "Купить подписку", "Ввести промокод"]
     await shop.press(USER, Card(subscription_id=trial.id).pack())
     card = shop.telegram.last()
     assert "Продлить" not in _labels(card)

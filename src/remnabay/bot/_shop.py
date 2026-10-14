@@ -32,12 +32,14 @@ from babel.numbers import format_currency, format_decimal
 from remnabay.bot._common import (
     BACK_TO_MENU,
     BUY,
+    PROMO_MENU,
     SUBSCRIPTIONS,
     TRY_FREE,
     Card,
     DevicesScreen,
     GuideBack,
     GuideHere,
+    PromoAsk,
     card_devices,
     own_subscription,
     paused_screen,
@@ -60,6 +62,7 @@ from remnabay.bot._screens import (
     rich_relative,
 )
 from remnabay.domain.payments import Payment, PaymentPurpose, PaymentState
+from remnabay.domain.promo import PromoCode
 from remnabay.domain.referrals import ReferralCode, ReferralLink
 from remnabay.domain.subscriptions import PanelUserStatus, Subscription
 from remnabay.domain.tariffs import Tariff, TariffState
@@ -70,6 +73,7 @@ from remnabay.payments import (
     CatalogError,
     Checkout,
     CheckoutError,
+    CheckoutPromo,
     PaymentUnavailableError,
     PriceChangedError,
     Providers,
@@ -86,6 +90,7 @@ from remnabay.payments import (
     tariffs_on_sale,
     trial_for_purchase,
 )
+from remnabay.promo import PromoRejectedError, check_discount, still_usable
 from remnabay.shop import SHOP_CURRENCY
 from remnabay.shop_settings import get_setting
 from remnabay.trial import GIGABYTE, request_trial, trial_available
@@ -112,12 +117,14 @@ class Pick(CallbackData, prefix="pick"):
 
 
 class Pay(CallbackData, prefix="pay"):
-    """«Оплатить» на экране подтверждения: цена, которую видел клиент, и токен экрана (3.4, 3.5)."""
+    """«Оплатить» на экране подтверждения: итог, который видел клиент, токен экрана
+    (3.4, 3.5) и промокод на скидку (8.4; 0 — без промокода)."""
 
     tariff_id: int
     subscription_id: int
     price: int
     token: str
+    promo: int = 0
 
 
 class CancelPay(CallbackData, prefix="unpay"):
@@ -217,6 +224,8 @@ async def main_menu(ctx: BotContext) -> Screen:
     if can_purchase(subscriptions):
         # Без подписок или с единственной триальной — «Купить подписку» (3.36)
         keyboard.action(ctx.render("btn.buy"), BUY, style=None if trial else SUCCESS)
+    # «Ввести промокод» — всегда (З1): промокод на дни работает и в закрытом магазине (1.22)
+    keyboard.action(ctx.render("btn.promo"), PROMO_MENU)
     support = await support_url(ctx)
     if support is not None:
         keyboard.link(ctx.render("btn.support"), support)
@@ -459,7 +468,9 @@ async def buy(query: CallbackQuery, ctx: BotContext) -> None:
     await show(query, ctx, await tariff_choice(ctx, None, None))
 
 
-async def renew(query: CallbackQuery, callback_data: Renew, ctx: BotContext) -> None:
+async def renew(
+    query: CallbackQuery, callback_data: Renew, ctx: BotContext, providers: Providers
+) -> None:
     """«Продлить»: тариф подписки — сразу подтверждение (3.20, 3.23); тариф в архиве у
     истёкшей подписки или подписка без тарифа — выбор тарифа (3.21, 3.35)."""
     if not await sales_allowed(ctx, query.from_user.id):
@@ -471,7 +482,7 @@ async def renew(query: CallbackQuery, callback_data: Renew, ctx: BotContext) -> 
         return
     tariff = await renewal_tariff(ctx.session, subscription, _now())
     if tariff is not None:
-        await show(query, ctx, await confirmation(ctx, tariff, subscription))
+        await show(query, ctx, await confirmation(ctx, tariff, subscription, providers))
         return
     header = (
         "tariffs.header.no_tariff"
@@ -500,16 +511,40 @@ async def try_free(query: CallbackQuery, ctx: BotContext) -> None:
 
 
 async def confirmation(
-    ctx: BotContext, tariff: Tariff, subscription: Subscription | None
+    ctx: BotContext,
+    tariff: Tariff,
+    subscription: Subscription | None,
+    providers: Providers,
+    *,
+    promo: PromoCode | None = None,
+    note: str | None = None,
+    just_applied: bool = False,
 ) -> Screen:
-    """З5: тариф, срок, цена, итог; новая дата окончания, если оплата добавит дни (3.3)."""
+    """З5: тариф, срок, цена, скидка по промокоду, итог; новая дата окончания, если
+    оплата добавит дни (3.3, 8.4). Итог ноль — «Получить» вместо «Оплатить» (8.8).
+    `note` — текст над экраном, например почему промокод не подошёл; `just_applied` —
+    над экраном «Промокод применён» (З8)."""
     trial = trial_for_purchase(await live_subscriptions(ctx.session, ctx.client.id))
     extended = subscription if subscription is not None else trial
-    offer = quote(tariff, extended, _now())
+    offer = quote(
+        tariff,
+        extended,
+        _now(),
+        discount_percent=promo.discount_percent if promo is not None else None,
+        min_amount=await providers.min_amount(ctx.session),
+    )
     price = await _money(ctx, offer.price)
     text = ctx.render(
         "confirm.body", tariff_name=tariff.name, period=_days(ctx, offer.days), price=price
     )
+    if promo is not None and just_applied:
+        discount = await _money(ctx, offer.discount)
+        note = ctx.render("promo.discount_applied", promo_code=promo.code, discount=discount)
+    if note is not None:
+        text = f"{note}\n\n{text}"
+    if promo is not None:
+        discount = await _money(ctx, offer.discount)
+        text = f"{text}\n{ctx.render('confirm.discount', promo_code=promo.code, discount=discount)}"
     text = f"{text}\n\n{ctx.render('confirm.total', total=await _money(ctx, offer.total))}"
     dates = Dates()
     if offer.new_end is not None:
@@ -521,17 +556,37 @@ async def confirmation(
         subscription_id=subscription_id,
         price=int(offer.total * _KOPECKS),
         token=secrets.token_hex(8),
+        promo=promo.id if promo is not None else 0,
     )
     back = Card(subscription_id=subscription.id).pack() if subscription is not None else BUY
+    ask = PromoAsk(tariff_id=tariff.id, subscription_id=subscription_id)
     keyboard = (
         Keyboard()
-        .action(ctx.render("btn.pay"), pay.pack(), style=SUCCESS)
+        .action(
+            ctx.render("btn.pay" if offer.total > 0 else "btn.get_free"), pay.pack(), style=SUCCESS
+        )
+        .action(ctx.render("btn.promo"), ask.pack())
         .action(ctx.render("btn.back"), back)
     )
     return Screen.plain(text, keyboard, dates)
 
 
-async def _choice(
+async def usable_discount(
+    ctx: BotContext, promo_id: int, tariff: Tariff
+) -> tuple[PromoCode | None, str | None]:
+    """Промокод на скидку с экрана подтверждения, если он всё ещё подходит. Иначе —
+    без него и с причиной (8.12): клиент продолжает без промокода."""
+    promo = await ctx.session.get(PromoCode, promo_id)
+    if promo is None or not await still_usable(ctx.session, promo, _now()):
+        return None, ctx.render("promo.error.invalid")
+    try:
+        await check_discount(ctx.session, ctx.client, promo, tariff)
+    except PromoRejectedError as error:
+        return None, ctx.render(error.reason.text_key)
+    return promo, None
+
+
+async def operation_choice(
     ctx: BotContext, tariff_id: int, subscription_id: int
 ) -> tuple[PaymentPurpose, Tariff, Subscription | None] | None:
     """Покупка или продление выбранным тариф, если это сейчас можно оформить."""
@@ -558,16 +613,18 @@ async def _choice(
     return purpose, tariff, subscription
 
 
-async def pick(query: CallbackQuery, callback_data: Pick, ctx: BotContext) -> None:
+async def pick(
+    query: CallbackQuery, callback_data: Pick, ctx: BotContext, providers: Providers
+) -> None:
     if not await sales_allowed(ctx, query.from_user.id):
         await show(query, ctx, await paused_screen(ctx))
         return
-    choice = await _choice(ctx, callback_data.tariff_id, callback_data.subscription_id)
+    choice = await operation_choice(ctx, callback_data.tariff_id, callback_data.subscription_id)
     if choice is None:
         await show(query, ctx, await main_menu(ctx))
         return
     _purpose, tariff, subscription = choice
-    await show(query, ctx, await confirmation(ctx, tariff, subscription))
+    await show(query, ctx, await confirmation(ctx, tariff, subscription, providers))
 
 
 # --- З6. Оплата ---
@@ -601,18 +658,26 @@ async def pay(
     if not await sales_allowed(ctx, query.from_user.id):
         await show(query, ctx, await paused_screen(ctx))
         return
-    choice = await _choice(ctx, callback_data.tariff_id, callback_data.subscription_id)
+    choice = await operation_choice(ctx, callback_data.tariff_id, callback_data.subscription_id)
     if choice is None:
         await show(query, ctx, await main_menu(ctx))
         return
     purpose, tariff, subscription = choice
+    promo: PromoCode | None = None
+    if callback_data.promo:
+        # Промокод перестал действовать до создания платежа — экран заново, без него
+        promo, problem = await usable_discount(ctx, callback_data.promo, tariff)
+        if promo is None:
+            screen = await confirmation(ctx, tariff, subscription, providers, note=problem)
+            await show(query, ctx, screen)
+            return
     bot = await ctx.bot.me()
     checkout = Checkout(
         client=ctx.client,
         purpose=purpose,
         tariff=tariff,
         subscription=subscription,
-        shown_price=Decimal(callback_data.price) / _KOPECKS,
+        shown_total=Decimal(callback_data.price) / _KOPECKS,
         token=callback_data.token,
         description=ctx.render(
             "payment.description",
@@ -621,12 +686,17 @@ async def pay(
             period=_days(ctx, tariff.duration_days or 0),
         ),
         return_url=f"https://t.me/{bot.username}",
+        promo=CheckoutPromo(promo.id, promo.discount_percent)
+        if promo is not None and promo.discount_percent is not None
+        else None,
     )
     try:
         payment = await open_invoice(ctx.session, providers, checkout, now=_now())
     except PriceChangedError:
-        # Цена изменилась, пока клиент смотрел экран: показываем подтверждение заново
-        await show(query, ctx, await confirmation(ctx, tariff, subscription))
+        # Итог изменился, пока клиент смотрел экран: показываем подтверждение заново
+        await show(
+            query, ctx, await confirmation(ctx, tariff, subscription, providers, promo=promo)
+        )
         return
     except PaymentUnavailableError:
         await show(query, ctx, _unavailable(ctx))
@@ -653,7 +723,9 @@ async def cancel_payment(
     await show(query, ctx, await main_menu(ctx))
 
 
-async def retry_payment(query: CallbackQuery, callback_data: RetryPay, ctx: BotContext) -> None:
+async def retry_payment(
+    query: CallbackQuery, callback_data: RetryPay, ctx: BotContext, providers: Providers
+) -> None:
     """«Попробовать снова» на «Платёж не прошёл» (3.12): подтверждение той же операции
     новым сообщением — событие не перезаписывается."""
     await query.answer()
@@ -664,9 +736,13 @@ async def retry_payment(query: CallbackQuery, callback_data: RetryPay, ctx: BotC
     elif payment is None or payment.client_id != ctx.client.id or payment.tariff_id is None:
         screen = await main_menu(ctx)
     else:
-        choice = await _choice(ctx, payment.tariff_id, payment.subscription_id or 0)
+        choice = await operation_choice(ctx, payment.tariff_id, payment.subscription_id or 0)
         if choice is not None:
-            screen = await confirmation(ctx, choice[1], choice[2])
+            # Тот же промокод, если он всё ещё подходит (8.12)
+            promo = None
+            if payment.promo_code_id is not None:
+                promo, _problem = await usable_discount(ctx, payment.promo_code_id, choice[1])
+            screen = await confirmation(ctx, choice[1], choice[2], providers, promo=promo)
         elif payment.subscription_id is None:
             screen = await tariff_choice(ctx, None, None)
         else:

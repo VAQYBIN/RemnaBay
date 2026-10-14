@@ -6,7 +6,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_FLOOR, Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -126,17 +126,38 @@ async def check_choice(
 
 @dataclass(frozen=True)
 class Quote:
-    """Экран подтверждения (3.3): тариф, срок, цена, итог; новая дата окончания —
-    если оплата добавит дни к существующей подписке."""
+    """Экран подтверждения (3.3): тариф, срок, цена, скидка по промокоду, итог; новая
+    дата окончания — если оплата добавит дни к существующей подписке."""
 
     tariff: Tariff
     days: int
     price: Decimal
+    discount: Decimal
     total: Decimal
     new_end: datetime | None
 
 
-def quote(tariff: Tariff, subscription: Subscription | None, now: datetime) -> Quote:
+def discounted_total(price: Decimal, percent: int | None, min_amount: Decimal) -> Decimal:
+    """Итог со скидкой в процентах (8.4, решение 0065): скидка округляется вниз до целой
+    единицы валюты — в пользу магазина; итог больше нуля, но меньше минимальной суммы
+    счёта у провайдера, поднимается до неё. Скидка 100% — итог ноль (8.8)."""
+    if percent is None:
+        return price
+    discount = (price * percent / 100).to_integral_value(rounding=ROUND_FLOOR)
+    total = max(price - discount, Decimal(0))
+    if 0 < total < min_amount:
+        return min_amount
+    return total
+
+
+def quote(
+    tariff: Tariff,
+    subscription: Subscription | None,
+    now: datetime,
+    *,
+    discount_percent: int | None = None,
+    min_amount: Decimal = Decimal(0),
+) -> Quote:
     days = tariff.duration_days or 0
     new_end = None
     if subscription is not None:
@@ -145,4 +166,12 @@ def quote(tariff: Tariff, subscription: Subscription | None, now: datetime) -> Q
         if base is None or base <= now:
             base = now
         new_end = base + timedelta(days=days)
-    return Quote(tariff=tariff, days=days, price=tariff.price, total=tariff.price, new_end=new_end)
+    total = discounted_total(tariff.price, discount_percent, min_amount)
+    return Quote(
+        tariff=tariff,
+        days=days,
+        price=tariff.price,
+        discount=tariff.price - total,
+        total=total,
+        new_end=new_end,
+    )

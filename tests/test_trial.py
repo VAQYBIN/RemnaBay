@@ -144,7 +144,11 @@ async def test_5_2_offer_in_main_menu_and_under_tariffs(shop: Shop) -> None:
     экрана выбора тарифа; «Купить подписку» тогда не зелёная."""
     await _enable(shop)
     menu = await _menu(shop)
-    assert _labels(menu) == ["Попробовать бесплатно", "Купить подписку"]
+    assert _labels(menu) == [
+        "Попробовать бесплатно",
+        "Купить подписку",
+        "Ввести промокод",
+    ]
     assert _button(menu, "Попробовать бесплатно").style == "success"
     assert _button(menu, "Купить подписку").style is None
 
@@ -156,7 +160,7 @@ async def test_5_2_offer_in_main_menu_and_under_tariffs(shop: Shop) -> None:
 async def test_5_2_no_offer_when_trial_disabled(shop: Shop) -> None:
     """5.2: триал выключен — предложения нет, «Купить подписку» — целевое действие."""
     menu = await _menu(shop)
-    assert _labels(menu) == ["Купить подписку"]
+    assert _labels(menu) == ["Купить подписку", "Ввести промокод"]
     assert _button(menu, "Купить подписку").style == "success"
 
 

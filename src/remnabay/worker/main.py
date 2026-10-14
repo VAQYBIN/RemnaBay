@@ -40,6 +40,7 @@ from remnabay.payments import (
     processing_notice,
 )
 from remnabay.payments.yookassa import YooKassaKind, yookassa_http
+from remnabay.promo import add_promo_days
 from remnabay.queue import RetryPolicy, TaskRegistry, Worker, WorkerConfig
 from remnabay.reminders import REMINDERS_TICK, reminders_tick, replan_reminders, send_reminders
 from remnabay.shop_settings import (
@@ -71,6 +72,7 @@ TASKS = TaskRegistry(
         trial_processing_notice,
         refresh_configs_task,
         delete_devices,
+        add_promo_days,
         reminders_tick,
         replan_reminders,
         send_reminders,

@@ -179,7 +179,7 @@ class PaymentCardOut(BaseModel):
 # --- Сборка ---
 
 
-async def _client_ref(session: DbSession, client_id: int | None) -> ClientRef | None:
+async def client_ref(session: DbSession, client_id: int | None) -> ClientRef | None:
     if client_id is None:
         return None
     account = await session.scalar(
@@ -208,7 +208,7 @@ async def _row(session: DbSession, payment: Payment, waiting: set[int] | None = 
         amount=payment.amount,
         currency=payment.currency,
         tariff_name=tariff_name if isinstance(tariff_name, str) else None,
-        client=await _client_ref(session, payment.client_id),
+        client=await client_ref(session, payment.client_id),
         created_at=payment.created_at,
         paid_at=payment.paid_at,
         waiting_panel=payment.id in (waiting or set()),

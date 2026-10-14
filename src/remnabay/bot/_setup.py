@@ -10,7 +10,7 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.session.base import BaseSession
 from aiogram.exceptions import AiogramError
 
-from remnabay.bot import _devices, _fallback, _guide, _help, _login, _shop
+from remnabay.bot import _devices, _fallback, _guide, _help, _login, _promo, _shop
 from remnabay.bot._context import (
     PANEL_KEY,
     SESSIONS_KEY,
@@ -58,6 +58,7 @@ def create_dispatcher(
     dispatcher.include_router(_guide.build_router())
     dispatcher.include_router(_devices.build_router())
     dispatcher.include_router(_help.build_router())
+    dispatcher.include_router(_promo.build_router())
     dispatcher.include_router(_fallback.build_router())
     return dispatcher
 

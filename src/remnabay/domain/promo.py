@@ -119,3 +119,41 @@ class PromoActivation(Base):
     )
     created_at: Mapped[CreatedAt]
     applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PromoInput(StrEnum):
+    """Откуда клиент вводит промокод (З8): из главного меню или с экрана подтверждения."""
+
+    MENU = "menu"
+    CONFIRM = "confirm"
+
+
+class PromoEntry(Base):
+    """Ввод промокодов клиентом: какой код бот ждёт и защита от перебора (З8, 8.13).
+
+    Не сущность предметной области, а состояние диалога с клиентом: одна строка на
+    клиента появляется при первом нажатии «Ввести промокод».
+    """
+
+    __tablename__ = "promo_entries"
+    __table_args__ = (
+        CheckConstraint("failed_attempts >= 0", name="failed_attempts_not_negative"),
+        # С экрана подтверждения код вводится к выбранному тарифу
+        CheckConstraint(
+            "(awaiting = 'confirm') = (tariff_id IS NOT NULL)", name="confirm_has_tariff"
+        ),
+        CheckConstraint("(awaiting IS NULL) = (requested_at IS NULL)", name="awaiting_has_moment"),
+    )
+
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), primary_key=True)
+    # Бот ждёт код следующим сообщением; пусто — не ждёт
+    awaiting: Mapped[PromoInput | None] = mapped_column(str_enum_type(PromoInput, "promo_input"))
+    # Экран подтверждения, с которого клиент нажал «Ввести промокод»: тариф и
+    # продлеваемая подписка (у покупки — пусто). Без внешних ключей: это след экрана,
+    # он проверяется при вводе кода и не мешает удалить тариф (2.8)
+    tariff_id: Mapped[int | None] = mapped_column(BigInteger)
+    subscription_id: Mapped[int | None] = mapped_column(BigInteger)
+    requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Неверные коды подряд — только те, на которые клиент получил нейтральный текст (8.13)
+    failed_attempts: Mapped[int] = mapped_column(Integer, server_default="0")
+    blocked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
