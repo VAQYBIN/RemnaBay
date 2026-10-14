@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from remnabay import runtime
 from remnabay.attention import attention
+from remnabay.client_actions import add_granted_days
 from remnabay.config import Settings
 from remnabay.crypto import SecretBox
 from remnabay.db import create_engine
@@ -74,6 +75,7 @@ TASKS = TaskRegistry(
         refresh_configs_task,
         delete_devices,
         add_promo_days,
+        add_granted_days,
         change_term,
         reminders_tick,
         replan_reminders,

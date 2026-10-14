@@ -110,16 +110,24 @@ class DeleteArgs(BaseModel):
     # кнопки «Удалить» (6.6). Оба пусты — удалить все устройства подписки (6.5)
     hwid: str | None = None
     device: str | None = None
+    # Сбросил участник команды из карточки клиента (10.5); пусто — сам клиент
+    member_id: int | None = None
 
     @property
     def all_devices(self) -> bool:
         return self.hwid is None and self.device is None
 
+    @property
+    def actor(self) -> Actor:
+        if self.member_id is not None:
+            return Actor.team_member(self.member_id)
+        return Actor.client(self.client_id)
+
 
 async def _journal_removed(session: AsyncSession, args: DeleteArgs, *, queued: bool) -> None:
     await record(
         session,
-        actor=Actor.client(args.client_id),
+        actor=args.actor,
         action="device.deleted_all" if args.all_devices else "device.deleted",
         outcome=Outcome.SUCCESS,
         subject=Subject(SUBSCRIPTION_SUBJECT, args.subscription_id),
@@ -152,11 +160,17 @@ async def remove_devices(
     *,
     hwid: str | None = None,
     device: str | None = None,
+    member_id: int | None = None,
 ) -> Removal:
-    """Клиент удаляет устройство или все сразу (6.4, 6.5). Панель недоступна — удаление
-    ставится в повтор (6.6). Действие клиента — в журнал."""
+    """Клиент удаляет устройство или все сразу (6.4, 6.5); участник команды сбрасывает
+    все устройства подписки (10.5, `member_id`). Панель недоступна — удаление ставится
+    в повтор (6.6). Действие — в журнал."""
     args = DeleteArgs(
-        subscription_id=subscription.id, client_id=subscription.client_id, hwid=hwid, device=device
+        subscription_id=subscription.id,
+        client_id=subscription.client_id,
+        hwid=hwid,
+        device=device,
+        member_id=member_id,
     )
     if await panel_available(session):
         try:

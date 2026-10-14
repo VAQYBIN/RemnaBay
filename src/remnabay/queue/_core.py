@@ -478,6 +478,23 @@ async def unfinished_keys(session: AsyncSession, name: str, keys: Iterable[str])
     return {key for key in found if key is not None}
 
 
+async def unfinished_counts(
+    session: AsyncSession, keys: Iterable[str], names: Iterable[str]
+) -> dict[str, int]:
+    """Сколько задач видов `names` с каждым из ключей ещё не завершено — например,
+    изменения подписки, которые ждут панель (4.30). Ключи без таких задач не входят."""
+    rows = await session.execute(
+        select(QueueTask.key, func.count())
+        .where(
+            QueueTask.key.in_(list(keys)),
+            QueueTask.name.in_(list(names)),
+            QueueTask.status.in_(UNFINISHED),
+        )
+        .group_by(QueueTask.key)
+    )
+    return {key: count for key, count in rows if key is not None}
+
+
 async def waiting_panel_count(session: AsyncSession) -> int:
     """Сколько задач «ждут панель» — отдельная строка на главной, не в счётчике
     «Требуют внимания» (4.30)."""
