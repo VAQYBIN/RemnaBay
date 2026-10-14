@@ -83,6 +83,7 @@ from remnabay.payments._team import (
     bind_unknown_payment,
     payment_card,
     payments_needing_attention,
+    release_failed_apply,
     resolve_payment_manually,
     retry_payment,
 )
@@ -147,6 +148,7 @@ __all__ = [
     "processing_notice",
     "provider_reported",
     "quote",
+    "release_failed_apply",
     "renewal_tariff",
     "resolve_payment_manually",
     "retry_callback",

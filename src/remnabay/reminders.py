@@ -117,7 +117,43 @@ def _plannable() -> ColumnElement[bool]:
         Tariff.id == Subscription.tariff_id, Tariff.type == TariffType.PACKAGE_ONLY
     )
     return and_(
-        Subscription.deleted_at.is_(None), Subscription.expires_at.is_not(None), ~package_only
+        Subscription.deleted_at.is_(None),
+        Subscription.expires_at.is_not(None),
+        ~package_only,
+        ~_ended_by_refund(),
+    )
+
+
+def _ended_by_refund() -> ColumnElement[bool]:
+    """Возврат закончил подписку сейчас: по этому сроку сообщений нет (10.13)."""
+    return and_(
+        Subscription.ended_by_refund_at.is_not(None),
+        Subscription.expires_at <= Subscription.ended_by_refund_at,
+    )
+
+
+def ended_by_refund(subscription: Subscription) -> bool:
+    return (
+        subscription.ended_by_refund_at is not None
+        and subscription.expires_at is not None
+        and subscription.expires_at <= subscription.ended_by_refund_at
+    )
+
+
+async def silence_after_refund(
+    session: AsyncSession, subscription: Subscription, now: datetime
+) -> None:
+    """10.13: возврат закончил подписку сейчас — ни напоминаний об окончании, ни
+    «Подписка истекла»: клиент получает только сообщение о возврате. Запланированное
+    отменяется; новый срок после продления снова получает сообщения."""
+    subscription.ended_by_refund_at = now
+    await session.execute(
+        update(Reminder)
+        .where(
+            Reminder.subscription_id == subscription.id,
+            Reminder.state == ReminderState.SCHEDULED,
+        )
+        .values(state=ReminderState.CANCELLED)
     )
 
 
@@ -491,8 +527,9 @@ async def send_reminders(context: TaskContext, args: SendRemindersArgs) -> None:
     )
     if not due:
         return
-    if subscription.deleted_at is not None:
-        # Клиент удалённую подписку не видит (4.6)
+    if subscription.deleted_at is not None or ended_by_refund(subscription):
+        # Клиент удалённую подписку не видит (4.6); закончил возврат — только
+        # сообщение о возврате (10.13)
         _mark(due, ReminderState.CANCELLED)
         return
     hold = await _hold(session, subscription.client_id)

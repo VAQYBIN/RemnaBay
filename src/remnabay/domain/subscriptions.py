@@ -55,6 +55,10 @@ class Subscription(Base):
     created_at: Mapped[CreatedAt]
     # Пользователя удалили в панели: клиент подписку не видит, история сохраняется (4.6)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Возврат закончил подписку сейчас: по сроку, который не позже этого момента, нет
+    # напоминаний и «Подписка истекла» (10.13). Продление даёт срок позже — сообщения
+    # о нём снова идут
+    ended_by_refund_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Пользователь панели. В панели 3.4.4 он адресуется числовым id; ссылка — по shortUuid
     panel_user_id: Mapped[int] = mapped_column(BigInteger, unique=True)

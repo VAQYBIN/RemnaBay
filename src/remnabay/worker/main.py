@@ -42,6 +42,7 @@ from remnabay.payments import (
 from remnabay.payments.yookassa import YooKassaKind, yookassa_http
 from remnabay.promo import add_promo_days
 from remnabay.queue import RetryPolicy, TaskRegistry, Worker, WorkerConfig
+from remnabay.refunds import change_term
 from remnabay.reminders import REMINDERS_TICK, reminders_tick, replan_reminders, send_reminders
 from remnabay.shop_settings import (
     RETRY_MAX_ATTEMPTS,
@@ -73,6 +74,7 @@ TASKS = TaskRegistry(
         refresh_configs_task,
         delete_devices,
         add_promo_days,
+        change_term,
         reminders_tick,
         replan_reminders,
         send_reminders,
