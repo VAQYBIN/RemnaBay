@@ -18,9 +18,10 @@ REQUIRED_ENV = {
     "TELEGRAM_LOGIN_CLIENT_SECRET": "test-oidc-client-secret",
     "PANEL_URL": "https://panel.example.com",
     "PANEL_TOKEN": "test-panel-token",
+    # По умолчанию — контейнер test-db из compose.dev.yaml, а не база разработки
     "DATABASE_URL": os.environ.get(
         "TEST_DATABASE_URL",
-        "postgresql://remnabay:remnabay@localhost:5432/remnabay_test",
+        "postgresql://remnabay:remnabay@localhost:5433/remnabay_test",
     ),
     "OWNER_TELEGRAM_ID": "100500",
     "PUBLIC_URL": "https://shop.example.com",

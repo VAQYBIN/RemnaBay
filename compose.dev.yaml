@@ -2,6 +2,8 @@
 # Не для продакшена: пароли базы — только для локальной разработки.
 #   cp .env.example .env   # и заполнить
 #   docker compose -f compose.dev.yaml up --build
+# База для pytest — отдельный контейнер, его логи не смешиваются с логами магазина:
+#   docker compose -f compose.dev.yaml up -d test-db
 name: remnabay-dev
 
 x-app: &app
@@ -26,9 +28,29 @@ services:
     volumes:
       # С PostgreSQL 18 данные монтируются на уровень выше PGDATA
       - db-data:/var/lib/postgresql
-      - ./deploy/dev/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "remnabay", "-d", "remnabay"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # База для pytest. Профиль test: обычный `up` её не поднимает, `up -d test-db` — поднимает.
+  # Данные в памяти и без гарантий записи на диск: между запусками они не нужны, а тесты
+  # идут быстрее. Схему тесты накатывают сами
+  test-db:
+    image: postgres:18.6
+    profiles: ["test"]
+    command: ["postgres", "-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off"]
+    environment:
+      POSTGRES_USER: remnabay
+      POSTGRES_PASSWORD: remnabay
+      POSTGRES_DB: remnabay_test
+    ports:
+      - "127.0.0.1:5433:5432"
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "remnabay", "-d", "remnabay_test"]
       interval: 5s
       timeout: 5s
       retries: 10

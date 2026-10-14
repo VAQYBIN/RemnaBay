@@ -24,7 +24,7 @@ uv sync
 uv run ruff check . && uv run ruff format --check .
 uv run pyright
 scripts/fetch-panel-openapi.sh  # OpenAPI панели для контрактного теста (один раз)
-uv run pytest           # нужна база: docker compose -f compose.dev.yaml up -d db
+uv run pytest           # нужна база: docker compose -f compose.dev.yaml up -d test-db
 cd admin && npm ci && npm run typecheck && npm run build
 ```
 
