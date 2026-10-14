@@ -1,5 +1,5 @@
 """Напоминания и сообщения о сроке подписки (блок 7, 7.1–7.19; 1.22; решения 0014,
-0061, 0063)."""
+0061, 0063, 0064)."""
 
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
@@ -614,6 +614,24 @@ async def test_7_18_past_moment_at_planning_is_not_sent(world: World) -> None:
         0: SKIPPED,
         -72: SKIPPED,
     }
+
+
+async def test_7_18_term_shortened_to_past_sends_no_expired(world: World) -> None:
+    """7.18, решение 0064: команда в панели сократила срок до прошлого — «Подписка истекла»
+    не отправляется; напоминание после окончания, чей момент впереди, приходит как обычно."""
+    subscription = await world.subscription(timedelta(days=10))
+    await world.plan_long_ago()
+    new_end = _now() - timedelta(hours=1)
+    world.panel_user(subscription)["expireAt"] = _iso(new_end)
+
+    with fake_runtime(panel=world.panel):
+        await reconcile(
+            world.session, subscription, ReconcileArgs(subscription_id=0, source=Source.SYNC)
+        )
+    assert subscription.expires_at == new_end
+
+    assert await world.tick() == []
+    assert await world.reminders(subscription) == {72: SKIPPED, 24: SKIPPED, 0: SKIPPED, -72: S}
 
 
 async def test_package_only_and_deleted_subscriptions_get_nothing(world: World) -> None:
