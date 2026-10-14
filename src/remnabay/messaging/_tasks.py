@@ -54,6 +54,8 @@ class SendArgs(BaseModel):
     # Клиент, если сообщение ему: язык, пометка «бот заблокирован», журнал
     client_id: int | None = None
     text_key: str
+    # Тексты следующих абзацев: добавляются к основному через пустую строку
+    extra_keys: list[str] = []
     variables: dict[str, str] = {}
     # Переменные-даты: подставляются сущностью date_time с запасным текстом во
     # времени магазина (0044) — на языке получателя, в момент отправки
@@ -119,7 +121,10 @@ async def _render(session: AsyncSession, args: SendArgs) -> OutgoingMessage:
         for name, moment in args.dates.items():
             fallback = texts.date_fallback(moment, language, time_zone)
             variables[name] = dates.mark(DateValue(moment, fallback))
-    text, entities = dates.render(texts.render(args.text_key, language, **variables))
+    paragraphs = (
+        texts.render(key, language, **variables) for key in (args.text_key, *args.extra_keys)
+    )
+    text, entities = dates.render("\n\n".join(paragraphs))
     return OutgoingMessage(text, buttons, tuple(entities))
 
 

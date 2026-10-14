@@ -64,7 +64,7 @@ from remnabay.domain.referrals import ReferralCode, ReferralLink
 from remnabay.domain.subscriptions import PanelUserStatus, Subscription
 from remnabay.domain.tariffs import Tariff, TariffState
 from remnabay.journal import Actor, Outcome, Subject, record
-from remnabay.messaging import MAIN_MENU_CALLBACK
+from remnabay.messaging import MAIN_MENU_CALLBACK, RENEW_CALLBACK_PREFIX
 from remnabay.panel_sync import panel_available
 from remnabay.payments import (
     CatalogError,
@@ -98,7 +98,9 @@ _CARD_ROW = 2
 _TARIFF_ROW = 3
 
 
-class Renew(CallbackData, prefix="renew"):
+class Renew(CallbackData, prefix=RENEW_CALLBACK_PREFIX):
+    """«Продлить» — в карточке подписки и в сообщениях о сроке (С7, С8)."""
+
     subscription_id: int
 
 

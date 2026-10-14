@@ -41,6 +41,7 @@ from remnabay.payments import (
 )
 from remnabay.payments.yookassa import YooKassaKind, yookassa_http
 from remnabay.queue import RetryPolicy, TaskRegistry, Worker, WorkerConfig
+from remnabay.reminders import REMINDERS_TICK, reminders_tick, replan_reminders, send_reminders
 from remnabay.shop_settings import (
     RETRY_MAX_ATTEMPTS,
     RETRY_WINDOW,
@@ -70,11 +71,14 @@ TASKS = TaskRegistry(
         trial_processing_notice,
         refresh_configs_task,
         delete_devices,
+        reminders_tick,
+        replan_reminders,
+        send_reminders,
     )
 )
 # Периодические задачи: сверка всех подписок с панелью (4.8), проверка связи с ней (4.13),
-# обновление конфигов Subscription Page (12.7)
-PERIODIC = (SYNC_ALL, HEALTH_CHECK, REFRESH_CONFIGS)
+# обновление конфигов Subscription Page (12.7), сообщения о сроке подписки (блок 7)
+PERIODIC = (SYNC_ALL, HEALTH_CHECK, REFRESH_CONFIGS, REMINDERS_TICK)
 # Ошибки «внешний сервис недоступен»: задача ждёт, а не проваливается (4.30)
 UNAVAILABLE: tuple[type[Exception], ...] = (PanelUnavailableError,)
 

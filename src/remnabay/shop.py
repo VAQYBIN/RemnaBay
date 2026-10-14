@@ -58,6 +58,25 @@ async def is_tester(session: AsyncSession, telegram_id: int) -> bool:
     return telegram_id in await get_setting(session, SHOP_TESTERS)
 
 
+async def is_team_or_tester(session: AsyncSession, telegram_id: int) -> bool:
+    """Для команды и тестировщиков бот работает как обычно, пока магазин не открыт или
+    временно закрыт (1.13, 1.21, 1.22)."""
+    member = await session.scalar(
+        select(
+            exists().where(TeamMember.telegram_id == telegram_id, TeamMember.revoked_at.is_(None))
+        )
+    )
+    return bool(member) or await is_tester(session, telegram_id)
+
+
+async def team_and_testers(session: AsyncSession) -> set[int]:
+    """Telegram ID команды и тестировщиков — для отбора многих клиентов сразу."""
+    members = await session.scalars(
+        select(TeamMember.telegram_id).where(TeamMember.revoked_at.is_(None))
+    )
+    return {*members, *await get_setting(session, SHOP_TESTERS)}
+
+
 async def offers_paused_for(session: AsyncSession, telegram_id: int | None) -> bool:
     """Магазин временно закрыт для этого человека (1.22): ему не предлагают купить,
     продлить и попробовать бесплатно. Для команды и тестировщиков бот работает как обычно."""
@@ -65,9 +84,4 @@ async def offers_paused_for(session: AsyncSession, telegram_id: int | None) -> b
         return False
     if telegram_id is None:
         return True
-    member = await session.scalar(
-        select(
-            exists().where(TeamMember.telegram_id == telegram_id, TeamMember.revoked_at.is_(None))
-        )
-    )
-    return not member and not await is_tester(session, telegram_id)
+    return not await is_team_or_tester(session, telegram_id)

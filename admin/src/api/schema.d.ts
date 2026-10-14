@@ -577,6 +577,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/settings/reminders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Reminder Settings */
+        get: operations["get_reminder_settings_api_admin_settings_reminders_get"];
+        /**
+         * Update Reminder Settings
+         * @description До 10 смещений в каждом расписании, повторяющиеся схлопываются (0061); запланированные
+         *     напоминания пересчитываются без перезапуска (7.3).
+         */
+        put: operations["update_reminder_settings_api_admin_settings_reminders_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/settings/payment": {
         parameters: {
             query?: never;
@@ -1303,6 +1325,7 @@ export interface components {
             /** Missing */
             missing: components["schemas"]["ItemKey"][];
         };
+        OffsetHours: number;
         /** OperationAttemptsOut */
         OperationAttemptsOut: {
             /** Task Id */
@@ -1544,6 +1567,16 @@ export interface components {
             reason: "invalid_keys" | "rejected";
             /** Message */
             message: string;
+        };
+        /**
+         * ReminderSettings
+         * @description Смещения по порядку моментов: от самого раннего до самого позднего.
+         */
+        ReminderSettings: {
+            /** Paid */
+            paid: components["schemas"]["OffsetHours"][];
+            /** Trial */
+            trial: components["schemas"]["OffsetHours"][];
         };
         /**
          * RevenueOut
@@ -2902,6 +2935,59 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_reminder_settings_api_admin_settings_reminders_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReminderSettings"];
+                };
+            };
+        };
+    };
+    update_reminder_settings_api_admin_settings_reminders_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReminderSettings"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReminderSettings"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
