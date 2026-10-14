@@ -2,6 +2,8 @@ import { createBrowserRouter, Navigate } from 'react-router'
 
 import { AppShell } from '@/components/frame/AppShell'
 import { AboutPage } from '@/pages/AboutPage'
+import { ClientCardPage } from '@/pages/clients/ClientCardPage'
+import { ClientsPage } from '@/pages/clients/ClientsPage'
 import { ExpiringPage } from '@/pages/ExpiringPage'
 import { HomePage } from '@/pages/HomePage'
 import { LoginPage } from '@/pages/LoginPage'
@@ -29,6 +31,8 @@ export const router = createBrowserRouter(
       children: [
         { index: true, Component: HomePage },
         { path: 'expiring', Component: ExpiringPage },
+        { path: 'clients', Component: ClientsPage },
+        { path: 'clients/:clientId', Component: ClientCardPage },
         { path: 'payments', Component: PaymentsPage },
         { path: 'payments/:paymentId', Component: PaymentCardPage },
         { path: 'tariffs', Component: TariffsPage },

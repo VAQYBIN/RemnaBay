@@ -1,4 +1,4 @@
-import { CreditCard, House, Info, LogOut, Settings, Tags, TicketPercent, UserRound } from 'lucide-react'
+import { CreditCard, House, Info, LogOut, Settings, Tags, TicketPercent, UserRound, UsersRound } from 'lucide-react'
 import { NavLink, Navigate, Outlet, useNavigate } from 'react-router'
 
 import { Button } from '@/components/ui/button'
@@ -23,8 +23,10 @@ type NavItem = { to: string; label: string; icon: typeof House; ownerOnly?: bool
  *  недоступное роли не показывается (03-screens, «Принципы админки»). */
 const NAV: NavItem[] = [
   { to: '/', label: 'Главная', icon: House },
+  { to: '/clients', label: 'Клиенты', icon: UsersRound },
   { to: '/payments', label: 'Платежи', icon: CreditCard },
-  { to: '/tariffs', label: 'Тарифы', icon: Tags, ownerOnly: true },
+  // Тарифы настраивают с компьютера; на телефоне нижняя панель — для работы с клиентами
+  { to: '/tariffs', label: 'Тарифы', icon: Tags, ownerOnly: true, phoneMenu: true },
   { to: '/promo-codes', label: 'Промокоды', icon: TicketPercent },
   { to: '/settings', label: 'Настройки', icon: Settings, ownerOnly: true },
   // На телефоне — в меню участника: в нижней панели помещается пять разделов

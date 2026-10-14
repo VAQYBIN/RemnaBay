@@ -27,6 +27,9 @@ const OPERATIONS: Record<string, string> = {
   'payments.apply': 'Применение платежа',
   'trials.create': 'Создание триала',
   'devices.delete': 'Удаление устройства',
+  'promo.add_days': 'Дни по промокоду',
+  'subscriptions.grant_days': 'Выдача дней',
+  'refunds.change_term': 'Смена даты при возврате',
 }
 
 export function operationName(name: string): string {
@@ -63,6 +66,7 @@ const HISTORY: Record<string, string> = {
   'payment.resolved_manually': 'Отмечен решённым вручную',
   'payment.bound': 'Привязан к клиенту',
   'payment.polling_stopped': 'Опрос статуса остановлен',
+  'payment.refunded': 'Деньги возвращены',
 }
 
 export function historyName(action: string): string {

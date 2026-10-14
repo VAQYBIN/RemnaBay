@@ -788,6 +788,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/payments/{payment_id}/refund": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Refund Preview
+         * @description Что будет при возврате: сумма по модели отрезков и новый срок (10.8–10.10).
+         */
+        get: operations["refund_preview_api_admin_payments__payment_id__refund_get"];
+        put?: never;
+        /**
+         * Refund
+         * @description «Вернуть»: владелец вернул деньги сам и отмечает возврат выполненным вручную
+         *     (10.11). Срок подписки сокращается на неиспользованную часть платежа (10.9).
+         */
+        post: operations["refund_api_admin_payments__payment_id__refund_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/tariff-options": {
         parameters: {
             query?: never;
@@ -903,6 +928,169 @@ export interface paths {
          * @description «Отметить решённым вручную» с комментарием (4.31).
          */
         post: operations["resolve_operation_api_admin_operations__task_id__resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/clients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Clients List
+         * @description А2: поиск по Telegram ID, username, имени, ссылке подписки или имени
+         *     пользователя в панели (10.1); без строки поиска — последние клиенты.
+         */
+        get: operations["clients_list_api_admin_clients_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/clients/{client_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Client Card
+         * @description А3: подписки с состоянием из панели, платежи, триал, рефералы, пометки,
+         *     запросы на возврат и журнал по клиенту (10.2).
+         */
+        get: operations["client_card_api_admin_clients__client_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/clients/{client_id}/subscriptions/{subscription_id}/devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Subscription Devices
+         * @description Устройства подписки — из панели при открытии (6.2): у магазина своих данных нет.
+         */
+        get: operations["subscription_devices_api_admin_clients__client_id__subscriptions__subscription_id__devices_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/clients/{client_id}/subscriptions/{subscription_id}/grant-days": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Grant
+         * @description «Выдать дни» с обязательным комментарием (10.3); клиент получит уведомление,
+         *     когда дни применятся в панели (10.4).
+         */
+        post: operations["grant_api_admin_clients__client_id__subscriptions__subscription_id__grant_days_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/clients/{client_id}/subscriptions/{subscription_id}/reset-devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset
+         * @description «Сбросить устройства» — удалить все устройства подписки в панели (10.5).
+         */
+        post: operations["reset_api_admin_clients__client_id__subscriptions__subscription_id__reset_devices_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/clients/{client_id}/subscriptions/{subscription_id}/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sync
+         * @description «Синхронизировать с панелью» — немедленная сверка подписки (10.5).
+         */
+        post: operations["sync_api_admin_clients__client_id__subscriptions__subscription_id__sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/clients/{client_id}/refund-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * File Refund Request
+         * @description «Зафиксировать запрос» на возврат с комментарием (10.6).
+         */
+        post: operations["file_refund_request_api_admin_clients__client_id__refund_requests_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/clients/{client_id}/refund-requests/{request_id}/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decline Refund Request
+         * @description «Отказать» в возврате с комментарием — только владелец (10.6, решение 0065).
+         */
+        post: operations["decline_refund_request_api_admin_clients__client_id__refund_requests__request_id__decline_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1302,6 +1490,47 @@ export interface components {
             /** Items */
             items: components["schemas"]["ItemOut"][];
         };
+        /** ClientCardOut */
+        ClientCardOut: {
+            client: components["schemas"]["ClientRef"];
+            /** First Seen At */
+            first_seen_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Bot Blocked */
+            bot_blocked: boolean;
+            /** Adopted */
+            adopted: boolean;
+            /** Subscriptions */
+            subscriptions: components["schemas"]["SubscriptionOut"][];
+            /** Payments */
+            payments: components["schemas"]["PaymentRow"][];
+            trial: components["schemas"]["TrialOut"] | null;
+            inviter: components["schemas"]["ClientRef"] | null;
+            /** Invited */
+            invited: components["schemas"]["ClientRef"][];
+            /** Refund Requests */
+            refund_requests: components["schemas"]["RefundRequestOut"][];
+            /** Journal */
+            journal: components["schemas"]["JournalOut"][];
+            /** Panel Available */
+            panel_available: boolean;
+            /**
+             * Min Grant Days
+             * @default 1
+             */
+            min_grant_days: number;
+            /**
+             * Max Grant Days
+             * @default 3650
+             */
+            max_grant_days: number;
+            /** Time Zone */
+            time_zone: string;
+        };
         /** ClientLookupOut */
         ClientLookupOut: {
             client: components["schemas"]["ClientRef"];
@@ -1318,6 +1547,25 @@ export interface components {
             username: string | null;
             /** Name */
             name: string | null;
+        };
+        /** ClientRowOut */
+        ClientRowOut: {
+            client: components["schemas"]["ClientRef"];
+            /** Subscriptions */
+            subscriptions: number;
+            /** Nearest End */
+            nearest_end: string | null;
+            /** Bot Blocked */
+            bot_blocked: boolean;
+            /** Adopted */
+            adopted: boolean;
+        };
+        /** ClientsOut */
+        ClientsOut: {
+            /** Clients */
+            clients: components["schemas"]["ClientRowOut"][];
+            /** Time Zone */
+            time_zone: string;
         };
         Color: string;
         /** ColorsIn */
@@ -1343,6 +1591,33 @@ export interface components {
          * @enum {string}
          */
         ConnectionState: "not_connected" | "ready" | "keys_lost" | "currency_unsupported";
+        /** DeviceOut */
+        DeviceOut: {
+            /** Hwid */
+            hwid: string;
+            /** Platform */
+            platform: string | null;
+            /** Os Version */
+            os_version: string | null;
+            /** Model */
+            model: string | null;
+            /** App */
+            app: string | null;
+            /**
+             * Connected At
+             * Format: date-time
+             */
+            connected_at: string;
+        };
+        /** DevicesOut */
+        DevicesOut: {
+            /** Enabled */
+            enabled: boolean;
+            /** Devices */
+            devices: components["schemas"]["DeviceOut"][];
+            /** Limit */
+            limit: number | null;
+        };
         /** ExpiringOut */
         ExpiringOut: {
             /** Subscription Id */
@@ -1371,6 +1646,13 @@ export interface components {
         GeneratedOut: {
             /** Code */
             code: string;
+        };
+        /** GrantIn */
+        GrantIn: {
+            /** Days */
+            days: number;
+            /** Comment */
+            comment: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1431,6 +1713,28 @@ export interface components {
          * @enum {string}
          */
         ItemStatus: "done" | "todo" | "warning" | "optional";
+        /** JournalOut */
+        JournalOut: {
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            actor_type: components["schemas"]["ActorType"];
+            /** Actor */
+            actor: string | null;
+            /** Action */
+            action: string;
+            outcome: components["schemas"]["Outcome"];
+            /** Subject Type */
+            subject_type: string | null;
+            /** Subject Id */
+            subject_id: string | null;
+            /** Details */
+            details: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+        };
         JsonValue: string | number | boolean | components["schemas"]["JsonValue"][] | {
             [key: string]: components["schemas"]["JsonValue"];
         } | null;
@@ -1522,6 +1826,18 @@ export interface components {
             missing: components["schemas"]["ItemKey"][];
         };
         OffsetHours: number;
+        /** OpenRequestOut */
+        OpenRequestOut: {
+            /** Id */
+            id: number;
+            /** Comment */
+            comment: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** OperationAttemptsOut */
         OperationAttemptsOut: {
             /** Task Id */
@@ -1621,6 +1937,12 @@ export interface components {
             /** Webpage Allowed */
             webpage_allowed: boolean | null;
         };
+        /**
+         * PanelUserStatus
+         * @description Состояние подписки определяет панель (активна, отключена, исчерпан трафик, истекла).
+         * @enum {string}
+         */
+        PanelUserStatus: "active" | "disabled" | "limited" | "expired";
         /** PaymentCardOut */
         PaymentCardOut: {
             payment: components["schemas"]["PaymentRow"];
@@ -1644,8 +1966,9 @@ export interface components {
             attempts: components["schemas"]["AttemptOut"][];
             /** History */
             history: components["schemas"]["HistoryOut"][];
+            refund: components["schemas"]["RefundOut"] | null;
             /** Actions */
-            actions: ("retry" | "apply_as_new" | "resolve" | "bind")[];
+            actions: components["schemas"]["_Action"][];
             /** Time Zone */
             time_zone: string;
         };
@@ -1859,6 +2182,78 @@ export interface components {
             /** Message */
             message: string;
         };
+        /** RefundIn */
+        RefundIn: {
+            /** Amount */
+            amount: number | string;
+            /** Request Id */
+            request_id?: number | null;
+        };
+        /** RefundOut */
+        RefundOut: {
+            /** Amount */
+            amount: string;
+            /**
+             * Performed At
+             * Format: date-time
+             */
+            performed_at: string;
+            /** Performed By */
+            performed_by: string;
+            /** Manually */
+            manually: boolean;
+        };
+        /**
+         * RefundQuoteOut
+         * @description Экран возврата (А5, 10.10): предложенная сумма, предел, как изменится срок.
+         */
+        RefundQuoteOut: {
+            /** Paid */
+            paid: string;
+            /** Suggested */
+            suggested: string;
+            /** Currency */
+            currency: string;
+            subscription: components["schemas"]["SubscriptionRef"] | null;
+            /** Current End */
+            current_end: string | null;
+            /** New End */
+            new_end: string | null;
+            /** Ends Now */
+            ends_now: boolean;
+            /** Open Requests */
+            open_requests: components["schemas"]["OpenRequestOut"][];
+            /** Time Zone */
+            time_zone: string;
+        };
+        /** RefundRequestOut */
+        RefundRequestOut: {
+            /** Id */
+            id: number;
+            state: components["schemas"]["RefundRequestState"];
+            /** Comment */
+            comment: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string;
+            /** Closed At */
+            closed_at: string | null;
+            /** Closed By */
+            closed_by: string | null;
+            /** Close Comment */
+            close_comment: string | null;
+            /** Payment Id */
+            payment_id: number | null;
+        };
+        /**
+         * RefundRequestState
+         * @enum {string}
+         */
+        RefundRequestState: "open" | "done" | "rejected";
         /**
          * ReminderSettings
          * @description Смещения по порядку моментов: от самого раннего до самого позднего.
@@ -1868,6 +2263,15 @@ export interface components {
             paid: components["schemas"]["OffsetHours"][];
             /** Trial */
             trial: components["schemas"]["OffsetHours"][];
+        };
+        /** ResetOut */
+        ResetOut: {
+            /**
+             * Result
+             * @enum {string}
+             */
+            result: "done" | "queued";
+            card: components["schemas"]["ClientCardOut"];
         };
         /**
          * RevenueOut
@@ -1962,6 +2366,34 @@ export interface components {
             error: string;
             /** Retry After */
             retry_after?: number | null;
+        };
+        /** SubscriptionOut */
+        SubscriptionOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Tariff Name */
+            tariff_name: string | null;
+            /** Is Trial */
+            is_trial: boolean;
+            status: components["schemas"]["PanelUserStatus"] | null;
+            /** Expires At */
+            expires_at: string | null;
+            /** Device Limit */
+            device_limit: number | null;
+            /** Panel Username */
+            panel_username: string;
+            /** Subscription Url */
+            subscription_url: string;
+            /** Synced At */
+            synced_at: string | null;
+            /** Deleted */
+            deleted: boolean;
+            /** Can Grant */
+            can_grant: boolean;
+            /** Changes Waiting */
+            changes_waiting: number;
         };
         /** SubscriptionRef */
         SubscriptionRef: {
@@ -2119,6 +2551,20 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** TrialOut */
+        TrialOut: {
+            /**
+             * Used At
+             * Format: date-time
+             */
+            used_at: string;
+            /** Subscription Id */
+            subscription_id: number | null;
+            /** Imported */
+            imported: boolean;
+            /** Revoked At */
+            revoked_at: string | null;
+        };
         /** TrialSettingsIn */
         TrialSettingsIn: {
             /** Enabled */
@@ -2197,6 +2643,8 @@ export interface components {
             /** Webhook Secret */
             webhook_secret: string;
         };
+        /** @enum {string} */
+        _Action: "retry" | "apply_as_new" | "resolve" | "bind" | "refund";
         _Contact: string;
         /** @enum {string} */
         _Filter: "pending" | "paid" | "applied" | "declined" | "expired" | "cancelled" | "paid_not_applied" | "resolved_manually" | "refunded" | "partially_refunded" | "unknown";
@@ -3691,6 +4139,90 @@ export interface operations {
             };
         };
     };
+    refund_preview_api_admin_payments__payment_id__refund_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                payment_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RefundQuoteOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionRejectedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refund_api_admin_payments__payment_id__refund_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                payment_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefundIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentCardOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionRejectedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     tariff_options_api_admin_tariff_options_get: {
         parameters: {
             query?: never;
@@ -3886,6 +4418,344 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AttentionOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionRejectedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clients_list_api_admin_clients_get: {
+        parameters: {
+            query?: {
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    client_card_api_admin_clients__client_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientCardOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    subscription_devices_api_admin_clients__client_id__subscriptions__subscription_id__devices_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: number;
+                subscription_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DevicesOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    grant_api_admin_clients__client_id__subscriptions__subscription_id__grant_days_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: number;
+                subscription_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GrantIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientCardOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionRejectedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_api_admin_clients__client_id__subscriptions__subscription_id__reset_devices_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: number;
+                subscription_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResetOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionRejectedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sync_api_admin_clients__client_id__subscriptions__subscription_id__sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: number;
+                subscription_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientCardOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionRejectedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    file_refund_request_api_admin_clients__client_id__refund_requests_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CommentIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientCardOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionRejectedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decline_refund_request_api_admin_clients__client_id__refund_requests__request_id__decline_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: number;
+                request_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CommentIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientCardOut"];
                 };
             };
             /** @description Conflict */
