@@ -37,6 +37,7 @@ from remnabay.promo._entry import (
     Rejection,
     check_days,
     days_targets,
+    promo_entry,
     still_usable,
 )
 from remnabay.queue import TaskContext, task
@@ -78,9 +79,12 @@ async def activate_days(
     `PromoRejectedError` — код больше не подходит или подписка — не та."""
     # Клиент и промокод блокируются: одна активация на клиента и лимит активаций (8.2)
     await session.refresh(client, with_for_update=True)
+    entry = await promo_entry(session, client.id)
     promo = await session.get(PromoCode, promo_id, with_for_update=True)
     if (
-        promo is None
+        # Только код, который клиент ввёл сам: номер в кнопке можно подделать
+        entry.accepted_promo_id != promo_id
+        or promo is None
         or promo.kind != PromoKind.DAYS
         or promo.days is None
         or not await still_usable(session, promo, now)
@@ -101,6 +105,7 @@ async def activate_days(
         created_at=now,
     )
     session.add(activation)
+    entry.accepted_promo_id = None
     await session.flush()
     await record(
         session,

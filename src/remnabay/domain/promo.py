@@ -154,6 +154,9 @@ class PromoEntry(Base):
     tariff_id: Mapped[int | None] = mapped_column(BigInteger)
     subscription_id: Mapped[int | None] = mapped_column(BigInteger)
     requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Промокод, который клиент ввёл и магазин принял: «Оплатить» и выбор подписки для
+    # дней принимают только его — данные кнопки клиент может подделать
+    accepted_promo_id: Mapped[int | None] = mapped_column(ForeignKey("promo_codes.id"))
     # Неверные коды подряд — только те, на которые клиент получил нейтральный текст (8.13)
     failed_attempts: Mapped[int] = mapped_column(Integer, server_default="0")
     blocked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

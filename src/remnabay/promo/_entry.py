@@ -275,9 +275,24 @@ async def _invalid(
     return PromoRejectedError(Rejection.INVALID)
 
 
-def _succeeded(entry: PromoEntry) -> None:
+def _succeeded(entry: PromoEntry, promo: PromoCode) -> None:
+    """Удачный ввод сбрасывает счётчик (8.13) и запоминает принятый код."""
     entry.failed_attempts = 0
     entry.blocked_until = None
+    entry.accepted_promo_id = promo.id
+
+
+async def is_accepted(session: AsyncSession, client_id: int, promo_id: int) -> bool:
+    """Клиент вводил этот код и магазин его принял. Номер промокода в данных кнопки
+    клиент может подделать: без проверки так можно подобрать код, минуя ввод (8.13)."""
+    entry = await session.get(PromoEntry, client_id)
+    return entry is not None and entry.accepted_promo_id == promo_id
+
+
+async def accept(session: AsyncSession, client_id: int, promo_id: int) -> None:
+    """Код принят без ввода: тот же промокод при «Попробовать снова» (3.12)."""
+    entry = await promo_entry(session, client_id)
+    entry.accepted_promo_id = promo_id
 
 
 async def enter_discount(
@@ -291,7 +306,7 @@ async def enter_discount(
     if promo.kind == PromoKind.DAYS:
         raise PromoRejectedError(Rejection.DAYS_ON_CONFIRM)
     await check_discount(session, client, promo, tariff)
-    _succeeded(entry)
+    _succeeded(entry, promo)
     return promo
 
 
@@ -304,5 +319,5 @@ async def enter_days(session: AsyncSession, client: Client, text: str, now: date
     if promo.kind != PromoKind.DAYS:
         raise PromoRejectedError(Rejection.DISCOUNT_IN_MENU)
     await check_days(session, client, promo)
-    _succeeded(entry)
+    _succeeded(entry, promo)
     return promo

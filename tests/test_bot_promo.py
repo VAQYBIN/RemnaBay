@@ -12,7 +12,8 @@ from aiogram.types import ForceReply
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from remnabay.bot._shop import Pick, Renew
+from remnabay.bot._promo import PromoDays
+from remnabay.bot._shop import Pay, Pick, Renew
 from remnabay.domain.clients import Client, TelegramAccount
 from remnabay.domain.payments import Payment, PaymentState
 from remnabay.domain.promo import ActivationState, PromoActivation, PromoCode, PromoKind
@@ -632,3 +633,34 @@ async def test_1_22_days_promo_works_in_paused_shop(
     await put_setting(shop.session, SHOP_STATE, ShopState.PAUSED)
     screen = await _enter(shop, await _menu(shop), "days7")
     assert _text(screen).startswith("Готово!")
+
+
+# --- Подделанные данные кнопок ---
+
+
+async def test_forged_pay_button_gives_no_discount(
+    shop: Shop, owner: TeamMember, month: Tariff
+) -> None:
+    """8.13: номер промокода в «Оплатить» клиент может подделать — скидку даёт только
+    код, который он ввёл сам; подбор по номерам не обходит защиту от перебора."""
+    secret = await _promo(shop, owner, "SECRET", 100)
+    confirm = await _confirmation(shop, month)
+    data = _button(confirm, "Оплатить").callback_data
+    assert data is not None
+    forged = Pay.unpack(data).model_copy(update={"promo": secret.id, "price": 0})
+
+    screen = await _press(shop, AnyButton(text="Оплатить", callback_data=forged.pack()))
+    assert await _payments(shop) == []
+    assert "SECRET" not in _text(screen)
+    assert "Итого: 199,00\xa0₽" in _text(screen)
+
+
+async def test_forged_days_choice_is_rejected(shop: Shop, owner: TeamMember, month: Tariff) -> None:
+    """8.10, 8.13: выбор подписки для дней принимает только введённый клиентом код."""
+    subscription = await _subscription(shop, month)
+    secret = await _promo(shop, owner, "SECRET", 30, PromoKind.DAYS)
+    forged = PromoDays(promo_id=secret.id, subscription_id=subscription.id)
+    await shop.send_text(USER, "/start")
+    screen = await _press(shop, AnyButton(text="x", callback_data=forged.pack()))
+    assert _text(screen).startswith("Такого промокода нет")
+    assert await _activations(shop) == []

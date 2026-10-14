@@ -90,7 +90,13 @@ from remnabay.payments import (
     tariffs_on_sale,
     trial_for_purchase,
 )
-from remnabay.promo import PromoRejectedError, check_discount, still_usable
+from remnabay.promo import (
+    PromoRejectedError,
+    accept,
+    check_discount,
+    is_accepted,
+    still_usable,
+)
 from remnabay.shop import SHOP_CURRENCY
 from remnabay.shop_settings import get_setting
 from remnabay.trial import GIGABYTE, request_trial, trial_available
@@ -577,7 +583,12 @@ async def usable_discount(
     """Промокод на скидку с экрана подтверждения, если он всё ещё подходит. Иначе —
     без него и с причиной (8.12): клиент продолжает без промокода."""
     promo = await ctx.session.get(PromoCode, promo_id)
-    if promo is None or not await still_usable(ctx.session, promo, _now()):
+    if (
+        promo is None
+        # Номер промокода в кнопке клиент может подделать: только код, который он ввёл
+        or not await is_accepted(ctx.session, ctx.client.id, promo_id)
+        or not await still_usable(ctx.session, promo, _now())
+    ):
         return None, ctx.render("promo.error.invalid")
     try:
         await check_discount(ctx.session, ctx.client, promo, tariff)
@@ -741,6 +752,8 @@ async def retry_payment(
             # Тот же промокод, если он всё ещё подходит (8.12)
             promo = None
             if payment.promo_code_id is not None:
+                # Промокод из своего же платежа клиент уже вводил
+                await accept(ctx.session, ctx.client.id, payment.promo_code_id)
                 promo, _problem = await usable_discount(ctx, payment.promo_code_id, choice[1])
             screen = await confirmation(ctx, choice[1], choice[2], providers, promo=promo)
         elif payment.subscription_id is None:
