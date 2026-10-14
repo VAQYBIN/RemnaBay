@@ -33,6 +33,7 @@ from remnabay.promo import (
     PromoLimits,
     add_promo_days,
     create_promo,
+    list_promos,
     set_disabled,
     without_payments,
 )
@@ -664,3 +665,32 @@ async def test_forged_days_choice_is_rejected(shop: Shop, owner: TeamMember, mon
     screen = await _press(shop, AnyButton(text="x", callback_data=forged.pack()))
     assert _text(screen).startswith("Такого промокода нет")
     assert await _activations(shop) == []
+
+
+async def test_8_8_free_payment_waiting_for_panel_uses_the_code(
+    shop: Shop, owner: TeamMember, month: Tariff
+) -> None:
+    """8.2, 8.8: платёж с нулевой суммой оплачен сразу — пока он ждёт применения, тот же
+    код второй раз не принимается и занимает место в лимите активаций."""
+    subscription = await _subscription(shop, month)
+    await _promo(shop, owner, "FREE", 100, max_activations=2)
+    await shop.send_text(USER, "/start")
+    await shop.press(USER, Renew(subscription_id=subscription.id).pack())
+    screen = await _enter(shop, shop.telegram.last(), "free")
+    await _press(shop, _button(screen, "Получить"))
+    [payment] = await _payments(shop)
+    assert payment.state == PaymentState.PAID
+
+    await shop.press(USER, Renew(subscription_id=subscription.id).pack())
+    again = await _enter(shop, shop.telegram.last(), "free")
+    assert _text(again) == "Вы уже использовали этот промокод."
+    # Новый экран продления с тем же принятым кодом второй бесплатный платёж не создаёт
+    await shop.press(USER, Renew(subscription_id=subscription.id).pack())
+    data = _button(shop.telegram.last(), "Оплатить").callback_data
+    assert data is not None
+    free = Pay.unpack(data).model_copy(update={"promo": payment.promo_code_id, "price": 0})
+    refused = await _press(shop, AnyButton(text="Получить", callback_data=free.pack()))
+    assert _text(refused).startswith("Вы уже использовали этот промокод.")
+    assert len(await _payments(shop)) == 1
+    [view] = [v for v in await list_promos(shop.session, NOW) if v.promo.code == "FREE"]
+    assert view.activations == 1

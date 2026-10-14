@@ -25,7 +25,7 @@ from remnabay.domain.subscriptions import Subscription
 from remnabay.domain.tariffs import Tariff, TariffType
 from remnabay.journal import Actor, Outcome, Subject, record
 from remnabay.payments import disabled_in_panel, live_subscriptions
-from remnabay.promo._codes import COUNTED, activations_count, normalize_code
+from remnabay.promo._codes import COUNTED, activations_count, normalize_code, paid_waiting
 from remnabay.shop_settings import ShopSetting, get_setting
 
 CLIENT_SUBJECT = "client"
@@ -141,7 +141,10 @@ async def _check_client(session: AsyncSession, client: Client, promo: PromoCode)
             )
         )
     )
-    if used:
+    waiting = await session.scalar(
+        select(exists().where(paid_waiting(promo.id), Payment.client_id == client.id))
+    )
+    if used or waiting:
         raise PromoRejectedError(Rejection.ALREADY_USED)
     if promo.only_without_payments and not await without_payments(session, client):
         raise PromoRejectedError(Rejection.NEW_ONLY)

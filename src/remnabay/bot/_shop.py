@@ -578,11 +578,16 @@ async def confirmation(
 
 
 async def usable_discount(
-    ctx: BotContext, promo_id: int, tariff: Tariff
+    ctx: BotContext, promo_id: int, tariff: Tariff, *, lock: bool = False
 ) -> tuple[PromoCode | None, str | None]:
     """Промокод на скидку с экрана подтверждения, если он всё ещё подходит. Иначе —
-    без него и с причиной (8.12): клиент продолжает без промокода."""
-    promo = await ctx.session.get(PromoCode, promo_id)
+    без него и с причиной (8.12): клиент продолжает без промокода.
+
+    `lock` — перед созданием платежа: клиент и промокод блокируются, чтобы два
+    одновременных нажатия не прошли проверку оба (одна активация на клиента, лимит)."""
+    if lock:
+        await ctx.session.refresh(ctx.client, with_for_update=True)
+    promo = await ctx.session.get(PromoCode, promo_id, with_for_update=lock)
     if (
         promo is None
         # Номер промокода в кнопке клиент может подделать: только код, который он ввёл
@@ -677,7 +682,7 @@ async def pay(
     promo: PromoCode | None = None
     if callback_data.promo:
         # Промокод перестал действовать до создания платежа — экран заново, без него
-        promo, problem = await usable_discount(ctx, callback_data.promo, tariff)
+        promo, problem = await usable_discount(ctx, callback_data.promo, tariff, lock=True)
         if promo is None:
             screen = await confirmation(ctx, tariff, subscription, providers, note=problem)
             await show(query, ctx, screen)

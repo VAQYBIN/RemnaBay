@@ -14,9 +14,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import delete, func, insert, select
+from sqlalchemy import ColumnElement, and_, delete, func, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from remnabay.domain.payments import Payment, PaymentState
 from remnabay.domain.promo import ActivationState, PromoActivation, PromoCode, PromoKind
 from remnabay.domain.promo import promo_code_tariffs as code_tariffs
 from remnabay.domain.tariffs import Tariff
@@ -113,14 +114,29 @@ def promo_state(promo: PromoCode, activations: int, now: datetime) -> PromoState
     return PromoState.ACTIVE
 
 
+def paid_waiting(promo_id: int) -> ColumnElement[bool]:
+    """Платёж с промокодом оплачен, но ещё не применён: активации пока нет (8.6), но
+    код уже использован. Особенно важно для платежа с нулевой суммой: он оплачен
+    сразу, и, пока ждёт панель, клиент мог бы получить им ещё одну подписку (8.8)."""
+    return and_(
+        Payment.promo_code_id == promo_id,
+        Payment.state.in_((PaymentState.PAID, PaymentState.PAID_NOT_APPLIED)),
+        Payment.applied_at.is_(None),
+    )
+
+
 async def activations_count(session: AsyncSession, promo_id: int) -> int:
-    """Засчитанные активации — для ограничения «общее число активаций» (8.2)."""
-    count = await session.scalar(
+    """Засчитанные активации — для ограничения «общее число активаций» (8.2), вместе с
+    оплаченными, но ещё не применёнными платежами с этим промокодом."""
+    activations = await session.scalar(
         select(func.count())
         .select_from(PromoActivation)
         .where(PromoActivation.promo_code_id == promo_id, PromoActivation.state.in_(COUNTED))
     )
-    return count or 0
+    waiting = await session.scalar(
+        select(func.count()).select_from(Payment).where(paid_waiting(promo_id))
+    )
+    return (activations or 0) + (waiting or 0)
 
 
 async def promo_tariffs(session: AsyncSession, promo_id: int) -> list[int]:
@@ -276,19 +292,9 @@ async def view_promo(session: AsyncSession, promo: PromoCode, now: datetime) -> 
 
 async def list_promos(session: AsyncSession, now: datetime) -> list[PromoView]:
     """А7: все промокоды, новые сверху, с числом активаций и состоянием (8.3)."""
-    counted = (
-        select(PromoActivation.promo_code_id, func.count().label("used"))
-        .where(PromoActivation.state.in_(COUNTED))
-        .group_by(PromoActivation.promo_code_id)
-        .subquery()
+    promos = await session.scalars(
+        select(PromoCode).order_by(PromoCode.created_at.desc(), PromoCode.id.desc())
     )
-    rows = (
-        await session.execute(
-            select(PromoCode, func.coalesce(counted.c.used, 0))
-            .outerjoin(counted, counted.c.promo_code_id == PromoCode.id)
-            .order_by(PromoCode.created_at.desc(), PromoCode.id.desc())
-        )
-    ).all()
     tariffs: dict[int, list[int]] = {}
     for promo_id, tariff_id in await session.execute(
         select(code_tariffs.c.promo_code_id, code_tariffs.c.tariff_id).order_by(
@@ -296,15 +302,18 @@ async def list_promos(session: AsyncSession, now: datetime) -> list[PromoView]:
         )
     ):
         tariffs.setdefault(promo_id, []).append(tariff_id)
-    return [
-        PromoView(
-            promo=promo,
-            tariff_ids=tariffs.get(promo.id, []),
-            activations=used,
-            state=promo_state(promo, used, now),
+    views: list[PromoView] = []
+    for promo in promos:
+        used = await activations_count(session, promo.id)
+        views.append(
+            PromoView(
+                promo=promo,
+                tariff_ids=tariffs.get(promo.id, []),
+                activations=used,
+                state=promo_state(promo, used, now),
+            )
         )
-        for promo, used in rows
-    ]
+    return views
 
 
 async def promo_activations(session: AsyncSession, promo_id: int) -> list[PromoActivation]:
