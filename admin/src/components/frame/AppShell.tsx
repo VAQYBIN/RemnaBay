@@ -1,5 +1,5 @@
-import { CreditCard, House, Info, LogOut, Settings, Tags, UserRound } from 'lucide-react'
-import { NavLink, Navigate, Outlet } from 'react-router'
+import { CreditCard, House, Info, LogOut, Settings, Tags, TicketPercent, UserRound } from 'lucide-react'
+import { NavLink, Navigate, Outlet, useNavigate } from 'react-router'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -17,7 +17,7 @@ import { cn } from '@/lib/utils'
 import { BrandLockup, BrandMark } from './BrandMark'
 import { ThemeRadioItems } from './ThemeSwitch'
 
-type NavItem = { to: string; label: string; icon: typeof House; ownerOnly?: boolean }
+type NavItem = { to: string; label: string; icon: typeof House; ownerOnly?: boolean; phoneMenu?: boolean }
 
 /** Разделы, которые уже есть. Остальные появятся вместе со своими блоками;
  *  недоступное роли не показывается (03-screens, «Принципы админки»). */
@@ -25,8 +25,10 @@ const NAV: NavItem[] = [
   { to: '/', label: 'Главная', icon: House },
   { to: '/payments', label: 'Платежи', icon: CreditCard },
   { to: '/tariffs', label: 'Тарифы', icon: Tags, ownerOnly: true },
+  { to: '/promo-codes', label: 'Промокоды', icon: TicketPercent },
   { to: '/settings', label: 'Настройки', icon: Settings, ownerOnly: true },
-  { to: '/about', label: 'О программе', icon: Info },
+  // На телефоне — в меню участника: в нижней панели помещается пять разделов
+  { to: '/about', label: 'О программе', icon: Info, phoneMenu: true },
 ]
 
 function visibleNav(member: Member): NavItem[] {
@@ -35,6 +37,9 @@ function visibleNav(member: Member): NavItem[] {
 
 function MemberMenu({ member, compact = false }: { member: Member; compact?: boolean }) {
   const logout = useLogout()
+  const navigate = useNavigate()
+  // На телефоне — разделы, которым нет места в нижней панели
+  const extra = compact ? visibleNav(member).filter((item) => item.phoneMenu) : []
   const role = isOwner(member) ? 'Владелец' : 'Помощник'
   return (
     <DropdownMenu>
@@ -61,6 +66,12 @@ function MemberMenu({ member, compact = false }: { member: Member; compact?: boo
         <DropdownMenuLabel className="text-xs text-muted-foreground">Тема</DropdownMenuLabel>
         <ThemeRadioItems />
         <DropdownMenuSeparator />
+        {extra.map(({ to, label, icon: Icon }) => (
+          <DropdownMenuItem key={to} onSelect={() => void navigate(to)}>
+            <Icon />
+            {label}
+          </DropdownMenuItem>
+        ))}
         <DropdownMenuItem onSelect={logout}>
           <LogOut />
           Выйти
@@ -86,6 +97,7 @@ export function AppShell() {
   if (me.isError || !me.data) return <Navigate to="/login" replace />
   const member = me.data
   const items = visibleNav(member)
+  const phoneBar = items.filter((item) => !item.phoneMenu)
 
   return (
     <div className="flex min-h-dvh">
@@ -119,7 +131,7 @@ export function AppShell() {
           className="glass-float fixed inset-x-3 bottom-3 z-20 flex justify-around rounded-2xl p-1 md:hidden"
           aria-label="Разделы"
         >
-          {items.map(({ to, label, icon: Icon }) => (
+          {phoneBar.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}

@@ -909,6 +909,151 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/promo-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Promo Codes
+         * @description А7: список — код, вид, значение, активации, срок, состояние (8.3).
+         */
+        get: operations["promo_codes_api_admin_promo_codes_get"];
+        put?: never;
+        /**
+         * Create
+         * @description 8.1, 8.2: новый промокод.
+         */
+        post: operations["create_api_admin_promo_codes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/promo-codes/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Generate
+         * @description Свободный код из 8 знаков без похожих символов (8.1).
+         */
+        get: operations["generate_api_admin_promo_codes_generate_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/promo-codes/{promo_id}/limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Change Limits
+         * @description 8.16: ограничения меняются в любой момент; код, вид и значение — нет.
+         */
+        put: operations["change_limits_api_admin_promo_codes__promo_id__limits_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/promo-codes/{promo_id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Disable
+         * @description 8.3: отключённый промокод ведёт себя как несуществующий.
+         */
+        post: operations["disable_api_admin_promo_codes__promo_id__disable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/promo-codes/{promo_id}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enable
+         * @description 8.3: отключённый промокод можно включить снова.
+         */
+        post: operations["enable_api_admin_promo_codes__promo_id__enable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/promo-codes/{promo_id}/activations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Activations
+         * @description Активации промокода (8.3): кто, когда, к какому платежу или подписке.
+         */
+        get: operations["activations_api_admin_promo_codes__promo_id__activations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/settings/promo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Promo Settings */
+        get: operations["promo_settings_api_admin_settings_promo_get"];
+        /**
+         * Update Promo Settings
+         * @description «Настройки → Промокоды»: защита от перебора (8.13); изменение — в журнал.
+         */
+        put: operations["update_promo_settings_api_admin_settings_promo_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/about": {
         parameters: {
             query?: never;
@@ -954,6 +1099,31 @@ export interface components {
             /** Message */
             message: string;
         };
+        /** ActivationOut */
+        ActivationOut: {
+            /** Id */
+            id: number;
+            client: components["schemas"]["ClientRef"] | null;
+            state: components["schemas"]["ActivationState"];
+            /** Payment Id */
+            payment_id: number | null;
+            /** Subscription Id */
+            subscription_id: number | null;
+            /** Subscription Name */
+            subscription_name: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Applied At */
+            applied_at: string | null;
+        };
+        /**
+         * ActivationState
+         * @enum {string}
+         */
+        ActivationState: "pending" | "applied" | "cancelled";
         /**
          * ActorType
          * @description Кто вызвал событие: роль команды, клиент или действующее лицо без доступа.
@@ -1197,6 +1367,11 @@ export interface components {
             /** First Name */
             first_name: string | null;
         };
+        /** GeneratedOut */
+        GeneratedOut: {
+            /** Code */
+            code: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1269,6 +1444,27 @@ export interface components {
             reason: "last_on_sale";
             /** Message */
             message: string;
+        };
+        /**
+         * LimitsIn
+         * @description Ограничения (8.2); пусто — без ограничения. Тарифы — только у скидки. Срок —
+         *     последний день действия в часовом поясе магазина, включительно.
+         */
+        LimitsIn: {
+            /** Valid Until */
+            valid_until?: string | null;
+            /** Max Activations */
+            max_activations?: number | null;
+            /**
+             * Only Without Payments
+             * @default false
+             */
+            only_without_payments: boolean;
+            /**
+             * Tariff Ids
+             * @default []
+             */
+            tariff_ids: number[];
         };
         /** LoginPollOut */
         LoginPollOut: {
@@ -1539,6 +1735,101 @@ export interface components {
             /** Message */
             message: string;
         };
+        /** PromoCodesOut */
+        PromoCodesOut: {
+            /** Promo Codes */
+            promo_codes: components["schemas"]["PromoOut"][];
+            /** Tariffs */
+            tariffs: components["schemas"]["TariffRefOut"][];
+            /** Time Zone */
+            time_zone: string;
+        };
+        /**
+         * PromoIn
+         * @description Новый промокод (8.1): код, вид — скидка в процентах или дни, значение.
+         */
+        PromoIn: {
+            /** Valid Until */
+            valid_until?: string | null;
+            /** Max Activations */
+            max_activations?: number | null;
+            /**
+             * Only Without Payments
+             * @default false
+             */
+            only_without_payments: boolean;
+            /**
+             * Tariff Ids
+             * @default []
+             */
+            tariff_ids: number[];
+            /** Code */
+            code: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "percent_discount" | "days";
+            /** Value */
+            value: number;
+        };
+        /**
+         * PromoKind
+         * @description Вид выгоды. В MVP — скидка в процентах и дни; остальное — v1.
+         * @enum {string}
+         */
+        PromoKind: "percent_discount" | "days" | "fixed_discount" | "bonus";
+        /** PromoOut */
+        PromoOut: {
+            /** Id */
+            id: number;
+            /** Code */
+            code: string;
+            kind: components["schemas"]["PromoKind"];
+            /** Value */
+            value: number;
+            /** Valid Until */
+            valid_until: string | null;
+            /** Max Activations */
+            max_activations: number | null;
+            /** Only Without Payments */
+            only_without_payments: boolean;
+            /** Tariff Ids */
+            tariff_ids: number[];
+            /** Disabled */
+            disabled: boolean;
+            state: components["schemas"]["PromoState"];
+            /** Activations */
+            activations: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** PromoSettingsIn */
+        PromoSettingsIn: {
+            /** Max Failed Attempts */
+            max_failed_attempts: number;
+            /** Pause Minutes */
+            pause_minutes: number;
+        };
+        /**
+         * PromoSettingsOut
+         * @description «Защита от перебора»: после N неверных кодов подряд — пауза (8.13).
+         */
+        PromoSettingsOut: {
+            /** Max Failed Attempts */
+            max_failed_attempts: number;
+            /** Pause Minutes */
+            pause_minutes: number;
+        };
+        /**
+         * PromoState
+         * @description Состояние промокода в списке (А7).
+         * @enum {string}
+         */
+        PromoState: "active" | "disabled" | "expired" | "exhausted";
         /** ProviderKeysIn */
         ProviderKeysIn: {
             /** Credentials */
@@ -1736,6 +2027,14 @@ export interface components {
             squad_uuids: string[];
             /** In Use */
             in_use: boolean;
+        };
+        /** TariffRefOut */
+        TariffRefOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            state: components["schemas"]["TariffState"];
         };
         /**
          * TariffState
@@ -3596,6 +3895,295 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ActionRejectedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    promo_codes_api_admin_promo_codes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromoCodesOut"];
+                };
+            };
+        };
+    };
+    create_api_admin_promo_codes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromoIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromoOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_api_admin_promo_codes_generate_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeneratedOut"];
+                };
+            };
+        };
+    };
+    change_limits_api_admin_promo_codes__promo_id__limits_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                promo_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LimitsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromoOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disable_api_admin_promo_codes__promo_id__disable_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                promo_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromoOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enable_api_admin_promo_codes__promo_id__enable_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                promo_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromoOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    activations_api_admin_promo_codes__promo_id__activations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                promo_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivationOut"][];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    promo_settings_api_admin_settings_promo_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromoSettingsOut"];
+                };
+            };
+        };
+    };
+    update_promo_settings_api_admin_settings_promo_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromoSettingsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromoSettingsOut"];
                 };
             };
             /** @description Validation Error */
