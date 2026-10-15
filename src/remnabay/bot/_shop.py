@@ -61,6 +61,8 @@ from remnabay.bot._screens import (
     rich_link,
     rich_relative,
 )
+from remnabay.broadcasts import BUY_CALLBACK as BROADCAST_BUY
+from remnabay.broadcasts import RENEW_CALLBACK as BROADCAST_RENEW
 from remnabay.domain.payments import Payment, PaymentPurpose, PaymentState
 from remnabay.domain.promo import PromoCode
 from remnabay.domain.referrals import ReferralCode, ReferralLink
@@ -290,7 +292,7 @@ async def back_to_menu(query: CallbackQuery, ctx: BotContext) -> None:
 # --- З2, З3. Подписки ---
 
 
-async def subscriptions_list(query: CallbackQuery, ctx: BotContext) -> None:
+async def subscriptions_screen(ctx: BotContext) -> Screen:
     """З2: каждая подписка — отдельной кнопкой с названием и статусом (3.24)."""
     now = _now()
     keyboard = Keyboard()
@@ -298,7 +300,11 @@ async def subscriptions_list(query: CallbackQuery, ctx: BotContext) -> None:
         label = await _summary(ctx, subscription, None, now)
         keyboard.action(label, Card(subscription_id=subscription.id).pack())
     keyboard.action(ctx.render("btn.back"), BACK_TO_MENU)
-    await show(query, ctx, Screen.plain(ctx.render("subscriptions.list.header"), keyboard))
+    return Screen.plain(ctx.render("subscriptions.list.header"), keyboard)
+
+
+async def subscriptions_list(query: CallbackQuery, ctx: BotContext) -> None:
+    await show(query, ctx, await subscriptions_screen(ctx))
 
 
 def _row(label: str, value: RichTextUnion) -> list[RichBlockTableCell]:
@@ -509,16 +515,50 @@ async def renew(
     if subscription is None or not can_renew(subscription):
         await show(query, ctx, await main_menu(ctx))
         return
+    await show(query, ctx, await renewal_screen(ctx, subscription, providers))
+
+
+async def renewal_screen(
+    ctx: BotContext, subscription: Subscription, providers: Providers
+) -> Screen:
+    """Продление подписки: тем же тарифом — сразу подтверждение (3.20, 3.23), иначе —
+    выбор тарифа (3.21, 3.35)."""
     tariff = await renewal_tariff(ctx.session, subscription, _now())
     if tariff is not None:
-        await show(query, ctx, await confirmation(ctx, tariff, subscription, providers))
-        return
+        return await confirmation(ctx, tariff, subscription, providers)
     header = (
         "tariffs.header.no_tariff"
         if subscription.tariff_id is None
         else "tariffs.header.archived_expired"
     )
-    await show(query, ctx, await tariff_choice(ctx, subscription, header))
+    return await tariff_choice(ctx, subscription, header)
+
+
+async def broadcast_action(query: CallbackQuery, ctx: BotContext, providers: Providers) -> None:
+    """«Купить» и «Продлить» в рассылке (11.10) ведут в одно место: «Купить» у клиента с
+    платной подпиской — как «Продлить», «Продлить» без подписок или с единственной
+    триальной — к выбору тарифа (решение 0065, 3.36). Закрытый магазин — «Магазин
+    временно закрыт», ещё не открытый — «Магазин скоро откроется» (11.12, 1.13).
+    Экран — новым сообщением: рассылка не перезаписывается."""
+    await query.answer()
+    await (await _broadcast_target(ctx, query.from_user.id, providers)).send(
+        ctx.bot, query.from_user.id
+    )
+
+
+async def _broadcast_target(ctx: BotContext, telegram_id: int, providers: Providers) -> Screen:
+    if not await sales_allowed(ctx, telegram_id):
+        return await paused_screen(ctx)
+    subscriptions = await live_subscriptions(ctx.session, ctx.client.id)
+    if can_purchase(subscriptions):
+        return await tariff_choice(ctx, None, None)
+    if not any(can_renew(s) for s in subscriptions):
+        # Подписки отключены в панели: продлить нельзя, в меню — «обратитесь в поддержку»
+        return await main_menu(ctx)
+    if len(subscriptions) > 1:
+        # Несколько подписок — выбор подписки, продление — с её экрана (3.24, 3.40)
+        return await subscriptions_screen(ctx)
+    return await renewal_screen(ctx, subscriptions[0], providers)
 
 
 async def change_tariff(query: CallbackQuery, callback_data: ChangeTariff, ctx: BotContext) -> None:
@@ -818,6 +858,7 @@ def build_router() -> Router:
     router.callback_query.register(buy, F.data == BUY)
     router.callback_query.register(try_free, F.data == TRY_FREE)
     router.callback_query.register(renew, Renew.filter())
+    router.callback_query.register(broadcast_action, F.data.in_({BROADCAST_BUY, BROADCAST_RENEW}))
     router.callback_query.register(change_tariff, ChangeTariff.filter())
     router.callback_query.register(pick, Pick.filter())
     router.callback_query.register(pay, Pay.filter())

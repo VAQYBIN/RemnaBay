@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from remnabay import runtime
 from remnabay.attention import attention
+from remnabay.broadcasts import send_step
 from remnabay.client_actions import add_granted_days
 from remnabay.config import Settings
 from remnabay.crypto import SecretBox
@@ -80,6 +81,7 @@ TASKS = TaskRegistry(
         reminders_tick,
         replan_reminders,
         send_reminders,
+        send_step,
     )
 )
 # Периодические задачи: сверка всех подписок с панелью (4.8), проверка связи с ней (4.13),
