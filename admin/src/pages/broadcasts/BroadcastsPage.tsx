@@ -15,12 +15,13 @@ import { type Broadcast, headline, SEGMENTS, STATES } from './broadcasts'
 // Пока рассылка идёт, прогресс обновляется сам (11.5)
 const PROGRESS_REFRESH_MS = 2000
 
-/** Итог строкой: доставлено, бот заблокирован, ошибки (11.8). */
+/** Итог строкой: доставлено, бот заблокирован, не открывали бот, ошибки (11.8, решение 0069). */
 export function totalsText(broadcast: Broadcast): string {
   const { totals } = broadcast
   if (broadcast.state === 'draft') return SEGMENTS[broadcast.segment.kind]
   const parts = [`доставлено ${formatCount(totals.delivered)} из ${formatCount(totals.recipients)}`]
   if (totals.bot_blocked > 0) parts.push(`бот заблокирован ${formatCount(totals.bot_blocked)}`)
+  if (totals.not_started > 0) parts.push(`не открывали бот ${formatCount(totals.not_started)}`)
   if (totals.failed > 0) parts.push(`ошибки ${formatCount(totals.failed)}`)
   if (totals.skipped > 0) parts.push(`не отправлено ${formatCount(totals.skipped)}`)
   return parts.join(' · ')
@@ -44,7 +45,7 @@ function BroadcastRow({ broadcast, timeZone }: { broadcast: Broadcast; timeZone:
   const moment = broadcast.confirmed_at ?? broadcast.created_at
   return (
     <li>
-      <Link to={`/broadcasts/${broadcast.id}`} className="flex items-center gap-3 py-3 hover:bg-muted/40">
+      <Link to={`/broadcasts/${broadcast.id}`} className="-mx-3 flex items-center gap-3 rounded-lg px-3 py-3 transition-colors duration-150 hover:bg-muted/40">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <p className="truncate font-medium">{headline(broadcast)}</p>
@@ -74,7 +75,12 @@ export function BroadcastsPage() {
   const start = () => {
     setError(null)
     create.mutate(
-      { body: { content: { text: '', buy: false, renew: false, links: [] }, segment: { kind: 'all' } } },
+      {
+        body: {
+          content: { text: '', buy: false, buy_style: 'success', renew: false, renew_style: 'success', links: [] },
+          segment: { kind: 'all' },
+        },
+      },
       {
         onSuccess: (broadcast) => {
           void queryClient.invalidateQueries({ queryKey: ['get', '/api/admin/broadcasts'] })

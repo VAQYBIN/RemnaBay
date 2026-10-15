@@ -56,6 +56,8 @@ class DeliveryState(StrEnum):
     SENDING = "sending"
     DELIVERED = "delivered"
     BOT_BLOCKED = "bot_blocked"
+    # Клиент ни разу не открывал бот: Telegram не даёт написать первым (решение 0069)
+    NOT_STARTED = "not_started"
     FAILED = "failed"
     # Рассылку остановили до отправки этому получателю (11.7)
     SKIPPED = "skipped"

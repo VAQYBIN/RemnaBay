@@ -42,6 +42,8 @@ from remnabay.messaging._dates import DATE_FORMAT, DateEntity
 # Меньше таймаута задачи очереди (30 с): иначе зависшую отправку прервала бы очередь,
 # и магазин не узнал бы, что случилось с сообщением
 DEFAULT_TIMEOUT = timedelta(seconds=10)
+# Ответ 403, если человек ни разу не открывал бот: «bot can't initiate conversation with a user»
+_NOT_STARTED = "can't initiate conversation"
 
 
 class DeliveryError(Exception):
@@ -50,6 +52,11 @@ class DeliveryError(Exception):
 
 class RecipientBlockedError(DeliveryError):
     """Получатель заблокировал бот или удалил аккаунт (ответ 403)."""
+
+
+class RecipientNotStartedError(DeliveryError):
+    """Получатель ни разу не открывал бот: Telegram не даёт боту написать первым (ответ 403).
+    Это не блокировка — пометки «бот заблокирован» нет (решение 0069)."""
 
 
 class NotAcceptedError(DeliveryError):
@@ -173,6 +180,8 @@ def _entities(message: OutgoingMessage) -> list[MessageEntity] | None:
 def classify(error: AiogramError) -> DeliveryError:
     """Чем закончилась отправка: по ошибке aiogram — вид недоставки."""
     match error:
+        case TelegramForbiddenError() if _NOT_STARTED in str(error):
+            return RecipientNotStartedError(str(error))
         case TelegramForbiddenError():
             return RecipientBlockedError(str(error))
         case TelegramRetryAfter() | RestartingTelegram() | TelegramUnauthorizedError():

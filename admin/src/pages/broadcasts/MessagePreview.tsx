@@ -4,6 +4,8 @@ import type { Schemas } from '@/api/client'
 import type { MarkupNode } from '@/lib/telegramMarkup'
 import { cn } from '@/lib/utils'
 
+import { type ButtonStyle, previewClass } from './ButtonColor'
+
 type Content = Schemas['BroadcastContent']
 
 /** Скрытый текст: закрыт, пока по нему не нажали, — как в Telegram. */
@@ -61,21 +63,16 @@ function renderNodes(nodes: MarkupNode[]): ReactNode[] {
   })
 }
 
-function PreviewButton({ children, target }: { children: ReactNode; target?: boolean }) {
+function PreviewButton({ children, style }: { children: ReactNode; style?: ButtonStyle | null }) {
   return (
-    <span
-      className={cn(
-        'flex min-h-9 items-center justify-center rounded-lg px-3 text-center text-sm',
-        target ? 'bg-success-soft font-medium text-success-text' : 'bg-muted',
-      )}
-    >
+    <span className={cn('flex min-h-9 items-center justify-center rounded-lg px-3 text-center text-sm', previewClass(style))}>
       {children}
     </span>
   )
 }
 
-/** Сообщение рассылки так, как его увидит клиент (С13): изображение, текст, кнопки;
- *  «Главное меню» — всегда (11.1). Одно целевое действие — зелёное, два — без цвета. */
+/** Сообщение рассылки так, как его увидит клиент (С13): изображение, текст, кнопки
+ *  в выбранных владельцем цветах (решение 0069); «Главное меню» — всегда (11.1). */
 export function MessagePreview({
   nodes,
   content,
@@ -85,7 +82,6 @@ export function MessagePreview({
   content: Content
   imageUrl: string | null
 }) {
-  const target = content.buy !== content.renew
   const empty = nodes.length === 0
   return (
     <div className="flex flex-col gap-1.5">
@@ -97,10 +93,10 @@ export function MessagePreview({
           </p>
         )}
       </div>
-      {content.buy && <PreviewButton target={target}>Купить подписку</PreviewButton>}
-      {content.renew && <PreviewButton target={target}>Продлить</PreviewButton>}
+      {content.buy && <PreviewButton style={content.buy_style}>Купить подписку</PreviewButton>}
+      {content.renew && <PreviewButton style={content.renew_style}>Продлить</PreviewButton>}
       {content.links.map((link, index) => (
-        <PreviewButton key={index}>
+        <PreviewButton key={index} style={link.style}>
           {link.text || 'Подпись кнопки'}
           <span className="ml-1 text-muted-foreground" aria-hidden>
             ↗

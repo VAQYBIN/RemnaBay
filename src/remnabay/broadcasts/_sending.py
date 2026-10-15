@@ -21,7 +21,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from remnabay import runtime
-from remnabay.broadcasts._content import BroadcastContent
+from remnabay.broadcasts._content import BroadcastContent, ButtonStyle
 from remnabay.broadcasts._format import check_length, parse
 from remnabay.broadcasts._totals import totals_of
 from remnabay.domain.broadcasts import (
@@ -41,6 +41,7 @@ from remnabay.messaging import (
     OutgoingMessage,
     Photo,
     RecipientBlockedError,
+    RecipientNotStartedError,
     Sender,
     UndeliverableError,
     load_texts,
@@ -58,7 +59,6 @@ RENEW_CALLBACK = "bcast:renew"
 SEND_INTERVAL = timedelta(milliseconds=50)
 # Сколько рассылка ждёт, уступив очередь служебным сообщениям (11.13)
 YIELD_DELAY = timedelta(seconds=1)
-_SUCCESS = "success"
 # Прошлая попытка точно не отправила сообщение: её не было или Telegram отказал
 _SAFE_TO_SEND = (None, AttemptResult.REJECTED)
 _ERROR_LIMIT = 500
@@ -77,27 +77,37 @@ def build_message(
     content: BroadcastContent, texts: Texts, language: str | None, photo: Photo | None
 ) -> OutgoingMessage:
     """Сообщение рассылки (С13): текст, изображение и кнопки; «Главное меню» — всегда.
-
-    Целевое действие одно — «Купить» или «Продлить» — зелёное; если владелец добавил
-    обе, ни одна не выделяется: на экране не больше одной зелёной кнопки (03-screens).
-    """
+    Цвет каждой кнопки выбирает владелец (решение 0069)."""
     formatted = parse(content.text)
     check_length(formatted, with_image=photo is not None)
-    style = _SUCCESS if content.buy != content.renew else None
     buttons: list[Button] = []
     if content.buy:
         buttons.append(
-            Button(texts.render("btn.buy", language), callback_data=BUY_CALLBACK, style=style)
+            Button(
+                texts.render("btn.buy", language),
+                callback_data=BUY_CALLBACK,
+                style=_style(content.buy_style),
+            )
         )
     if content.renew:
         buttons.append(
-            Button(texts.render("btn.renew", language), callback_data=RENEW_CALLBACK, style=style)
+            Button(
+                texts.render("btn.renew", language),
+                callback_data=RENEW_CALLBACK,
+                style=_style(content.renew_style),
+            )
         )
-    buttons.extend(Button(link.text, url=link.url) for link in content.links)
+    buttons.extend(
+        Button(link.text, url=link.url, style=_style(link.style)) for link in content.links
+    )
     buttons.append(
         Button(texts.render("btn.main_menu", language), callback_data=MAIN_MENU_CALLBACK)
     )
     return OutgoingMessage(formatted.text, tuple(buttons), entities=formatted.entities, photo=photo)
+
+
+def _style(style: ButtonStyle | None) -> str | None:
+    return style.value if style is not None else None
 
 
 def _photo(image: BroadcastImage | None) -> Photo | None:
@@ -208,6 +218,9 @@ async def _deliver(session: AsyncSession, recipient: BroadcastRecipient) -> None
         # Пометка «бот заблокирован» снимается, когда клиент снова откроет бот (11.9)
         await mark_blocked(session, client.id)
         _finish_recipient(recipient, DeliveryState.BOT_BLOCKED, str(error))
+    except RecipientNotStartedError as error:
+        # Ни разу не открывал бот — не блокировка, пометки нет (решение 0069)
+        _finish_recipient(recipient, DeliveryState.NOT_STARTED, str(error))
     except NotAcceptedError as error:
         # Telegram точно не принял — повтор того же шага безопасен
         raise RejectedError(str(error)) from error

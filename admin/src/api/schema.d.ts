@@ -1644,11 +1644,15 @@ export interface components {
              * @default false
              */
             buy: boolean;
+            /** @default success */
+            buy_style: components["schemas"]["ButtonStyle"] | null;
             /**
              * Renew
              * @default false
              */
             renew: boolean;
+            /** @default success */
+            renew_style: components["schemas"]["ButtonStyle"] | null;
             /**
              * Links
              * @default []
@@ -1687,6 +1691,13 @@ export interface components {
             /** Time Zone */
             time_zone: string;
         };
+        /**
+         * ButtonStyle
+         * @description Цвет кнопки в Telegram; без значения — без цвета. Цвет каждой кнопки рассылки
+         *     выбирает владелец (решение 0069).
+         * @enum {string}
+         */
+        ButtonStyle: "primary" | "success" | "danger";
         /** ChecklistOut */
         ChecklistOut: {
             state: components["schemas"]["ShopState"];
@@ -2002,6 +2013,7 @@ export interface components {
             text: string;
             /** Url */
             url: string;
+            style?: components["schemas"]["ButtonStyle"] | null;
         };
         /** LoginPollOut */
         LoginPollOut: {
@@ -2817,6 +2829,8 @@ export interface components {
             delivered: number;
             /** Bot Blocked */
             bot_blocked: number;
+            /** Not Started */
+            not_started: number;
             /** Failed */
             failed: number;
             /** Skipped */

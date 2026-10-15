@@ -48,6 +48,7 @@ import {
 import { cn } from '@/lib/utils'
 
 import { type Broadcast, imageUrl, SEGMENTS, type SegmentKind } from './broadcasts'
+import { ButtonColor } from './ButtonColor'
 import { StateBadge } from './BroadcastsPage'
 import { MessagePreview } from './MessagePreview'
 
@@ -271,39 +272,62 @@ function ButtonsField({ content, onChange }: { content: Content; onChange: (cont
     onChange({ ...content, links: content.links.map((link, other) => (other === index ? { ...link, ...patch } : link)) })
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-        <label className="flex items-center gap-2">
-          <Checkbox checked={content.buy} onCheckedChange={(checked) => onChange({ ...content, buy: checked === true })} />
-          «Купить подписку»
-        </label>
-        <label className="flex items-center gap-2">
-          <Checkbox checked={content.renew} onCheckedChange={(checked) => onChange({ ...content, renew: checked === true })} />
-          «Продлить»
-        </label>
+      <div className="flex flex-col gap-2 text-sm">
+        <div className="flex min-h-9 flex-wrap items-center justify-between gap-2">
+          <label className="flex items-center gap-2">
+            <Checkbox checked={content.buy} onCheckedChange={(checked) => onChange({ ...content, buy: checked === true })} />
+            «Купить подписку»
+          </label>
+          {content.buy && (
+            <ButtonColor
+              label="Цвет кнопки «Купить подписку»"
+              value={content.buy_style}
+              onChange={(style) => onChange({ ...content, buy_style: style })}
+            />
+          )}
+        </div>
+        <div className="flex min-h-9 flex-wrap items-center justify-between gap-2">
+          <label className="flex items-center gap-2">
+            <Checkbox checked={content.renew} onCheckedChange={(checked) => onChange({ ...content, renew: checked === true })} />
+            «Продлить»
+          </label>
+          {content.renew && (
+            <ButtonColor
+              label="Цвет кнопки «Продлить»"
+              value={content.renew_style}
+              onChange={(style) => onChange({ ...content, renew_style: style })}
+            />
+          )}
+        </div>
       </div>
       <p className="text-xs text-muted-foreground">
         Клиент с платной подпиской по обеим кнопкам попадает к продлению, без подписок — к выбору тарифа.
-        «Главное меню» добавляется всегда.
+        Цвет каждой кнопки выбираете вы. «Главное меню» добавляется всегда, без цвета.
       </p>
       {content.links.map((link, index) => {
         const problem = link.text || link.url !== 'https://' ? linkProblem(link) : null
         return (
           <div key={index} className="flex flex-col gap-1">
-            <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
+            <div className="flex flex-wrap items-center gap-2">
               <Input
                 aria-label="Подпись кнопки"
                 placeholder="Подпись кнопки"
                 maxLength={MAX_BUTTON_TEXT}
                 value={link.text}
                 onChange={(event) => setLink(index, { text: event.target.value })}
-                className="sm:w-48"
+                className="sm:w-44"
               />
               <Input
                 aria-label="Адрес ссылки"
                 placeholder="https://"
                 value={link.url}
                 onChange={(event) => setLink(index, { url: event.target.value })}
-                className="min-w-0 flex-1"
+                className="min-w-56 flex-1"
+              />
+              <ButtonColor
+                label="Цвет кнопки-ссылки"
+                value={link.style}
+                onChange={(style) => setLink(index, { style })}
               />
               <Button
                 type="button"
@@ -325,7 +349,7 @@ function ButtonsField({ content, onChange }: { content: Content; onChange: (cont
           variant="outline"
           size="sm"
           className="self-start"
-          onClick={() => onChange({ ...content, links: [...content.links, { text: '', url: 'https://' }] })}
+          onClick={() => onChange({ ...content, links: [...content.links, { text: '', url: 'https://', style: null }] })}
         >
           <Plus />
           Кнопка-ссылка
@@ -607,9 +631,10 @@ function SentBroadcast({ broadcast, timeZone }: { broadcast: Broadcast; timeZone
                 {broadcast.state === 'sending' && ` · осталось ${formatCount(totals.pending)}`}
               </p>
             </div>
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
               <Stat label="Доставлено" value={totals.delivered} />
               <Stat label="Бот заблокирован" value={totals.bot_blocked} tone="warning" />
+              <Stat label="Не открывали бот" value={totals.not_started} />
               <Stat label="Ошибки" value={totals.failed} tone="danger" />
               <Stat label="Не отправлено" value={totals.skipped} />
             </div>

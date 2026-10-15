@@ -18,6 +18,7 @@ from remnabay.broadcasts import (
     RENEW_CALLBACK,
     BroadcastBusyError,
     BroadcastContent,
+    ButtonStyle,
     FormatError,
     LinkButton,
     NoRecipientsError,
@@ -50,8 +51,10 @@ from remnabay.journal import JournalEntry, Subject, entries_for
 from remnabay.messaging import (
     MAIN_MENU_CALLBACK,
     AmbiguousDeliveryError,
+    DeliveryError,
     NotAcceptedError,
     RecipientBlockedError,
+    RecipientNotStartedError,
     SendArgs,
     TextEntity,
     UndeliverableError,
@@ -229,8 +232,9 @@ def test_11_1_up_to_three_links() -> None:
 
 
 async def test_11_1_buttons_and_main_menu(db_session: AsyncSession) -> None:
-    """11.1: «Купить», «Продлить», ссылки владельца; «Главное меню» — всегда. Одно
-    целевое действие — зелёное; если их два, ни одно не выделяется (03-screens)."""
+    """11.1, решение 0069: «Купить», «Продлить», ссылки владельца; «Главное меню» —
+    всегда и без цвета. Цвет каждой кнопки выбирает владелец; по умолчанию «Купить» и
+    «Продлить» — зелёные, ссылки — без цвета."""
     texts = await load_texts(db_session)
     content = BroadcastContent(
         text="Новости",
@@ -243,9 +247,21 @@ async def test_11_1_buttons_and_main_menu(db_session: AsyncSession) -> None:
         ("Канал", "https://t.me/channel", None),
         ("Главное меню", MAIN_MENU_CALLBACK, None),
     ]
-    both = build_message(content.model_copy(update={"renew": True}), texts, "ru", None)
-    assert [b.callback_data for b in both.buttons[:2]] == [BUY_CALLBACK, RENEW_CALLBACK]
-    assert all(b.style is None for b in both.buttons)
+    chosen = BroadcastContent(
+        text="Новости",
+        buy=True,
+        buy_style=None,
+        renew=True,
+        renew_style=ButtonStyle.DANGER,
+        links=[LinkButton(text="Канал", url="https://t.me/channel", style=ButtonStyle.PRIMARY)],
+    )
+    both = build_message(chosen, texts, "ru", None)
+    assert [(b.callback_data or b.url, b.style) for b in both.buttons] == [
+        (BUY_CALLBACK, None),
+        (RENEW_CALLBACK, "danger"),
+        ("https://t.me/channel", "primary"),
+        (MAIN_MENU_CALLBACK, None),
+    ]
     bare = build_message(BroadcastContent(text="x"), texts, "ru", None)
     assert [b.callback_data for b in bare.buttons] == [MAIN_MENU_CALLBACK]
 
@@ -308,9 +324,10 @@ async def test_11_4_recipients_fixed_at_confirmation(db_session: AsyncSession) -
 
 
 async def test_11_5_11_6_11_8_each_recipient_once(db_session: AsyncSession) -> None:
-    """11.5, 11.6, 11.8, 11.9, 11.11: каждый получает сообщение один раз; итог —
-    доставлено, бот заблокирован, ошибки; заблокировавший получает пометку."""
-    clients = [await make_client(db_session, telegram_id=4000 + n) for n in range(4)]
+    """11.5, 11.6, 11.8, 11.9, 11.11, решение 0069: каждый получает сообщение один раз;
+    итог — доставлено, бот заблокирован, не открывали бот, ошибки; пометку «бот
+    заблокирован» получает только заблокировавший."""
+    clients = [await make_client(db_session, telegram_id=4000 + n) for n in range(5)]
     broadcast_id = await _draft(db_session, kind=SegmentKind.ALL)
     owner = await _owner(db_session)
     await confirm(db_session, broadcast_id, member_id=owner.id, now=NOW)
@@ -328,13 +345,18 @@ async def test_11_5_11_6_11_8_each_recipient_once(db_session: AsyncSession) -> N
     assert final[ours[1]] == DeliveryState.BOT_BLOCKED
     assert final[ours[2]] == DeliveryState.FAILED
     assert final[ours[3]] == DeliveryState.DELIVERED
+    assert final[ours[4]] == DeliveryState.NOT_STARTED
     await db_session.refresh(clients[1])
     assert clients[1].bot_blocked_at is not None
+    # Ни разу не открывал бот — не блокировка (решение 0069)
+    await db_session.refresh(clients[4])
+    assert clients[4].bot_blocked_at is None
     assert await _state(db_session, broadcast_id) == BroadcastState.FINISHED
     [*_, finished] = await entries_for(db_session, Subject("broadcast", broadcast_id))
     assert finished.action == "broadcast.finished"
     assert finished.details["bot_blocked"] == 1
     assert finished.details["failed"] == 1
+    assert finished.details["not_started"] == 1
 
     # Повторное выполнение уже сделанного шага ничего не отправляет (11.6)
     with fake_runtime(sender):
@@ -344,9 +366,13 @@ async def test_11_5_11_6_11_8_each_recipient_once(db_session: AsyncSession) -> N
 
 
 async def _run_steps_with_errors(session: AsyncSession, sender: FakeSender, ours: list[int]) -> int:
-    """Шаги по цепочке; второму и третьему из `ours` Telegram отвечает ошибкой."""
+    """Шаги по цепочке; второму, третьему и пятому из `ours` Telegram отвечает ошибкой."""
     ran = 0
-    errors = {ours[1]: RecipientBlockedError("blocked"), ours[2]: UndeliverableError("bad")}
+    errors: dict[int, DeliveryError] = {
+        ours[1]: RecipientBlockedError("blocked"),
+        ours[2]: UndeliverableError("bad"),
+        ours[4]: RecipientNotStartedError("can't initiate conversation"),
+    }
     while rows := await queued(session, send_step):
         for task in rows:
             error = errors.get(int(str(task.args["client_id"])))

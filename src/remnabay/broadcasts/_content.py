@@ -14,6 +14,15 @@ MAX_BUTTON_TEXT = 64
 MAX_URL_LENGTH = 2048
 
 
+class ButtonStyle(StrEnum):
+    """Цвет кнопки в Telegram; без значения — без цвета. Цвет каждой кнопки рассылки
+    выбирает владелец (решение 0069)."""
+
+    PRIMARY = "primary"  # синий
+    SUCCESS = "success"  # зелёный
+    DANGER = "danger"  # красный
+
+
 class LinkButton(BaseModel):
     """Кнопка-ссылка с подписью владельца."""
 
@@ -27,6 +36,7 @@ class LinkButton(BaseModel):
             strip_whitespace=True, max_length=MAX_URL_LENGTH, pattern=r"^(https?|tg)://\S+$"
         ),
     ]
+    style: ButtonStyle | None = None
 
 
 class BroadcastContent(BaseModel):
@@ -35,7 +45,10 @@ class BroadcastContent(BaseModel):
 
     text: Annotated[str, Field(max_length=MAX_MARKUP_LENGTH)] = ""
     buy: bool = False
+    # Целевые действия по умолчанию — зелёные, как в остальном боте (03-screens)
+    buy_style: ButtonStyle | None = ButtonStyle.SUCCESS
     renew: bool = False
+    renew_style: ButtonStyle | None = ButtonStyle.SUCCESS
     links: Annotated[list[LinkButton], Field(max_length=MAX_LINKS)] = []
 
 

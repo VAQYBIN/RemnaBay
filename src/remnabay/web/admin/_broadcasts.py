@@ -38,6 +38,7 @@ from remnabay.messaging import (
     DeliveryError,
     NotAcceptedError,
     RecipientBlockedError,
+    RecipientNotStartedError,
     TelegramSender,
     UndeliverableError,
 )
@@ -54,6 +55,7 @@ class TotalsOut(BaseModel):
     recipients: int
     delivered: int
     bot_blocked: int
+    not_started: int
     failed: int
     skipped: int
     pending: int
@@ -110,6 +112,7 @@ def _out(view: BroadcastView) -> BroadcastOut:
             recipients=totals.recipients,
             delivered=totals.delivered,
             bot_blocked=totals.bot_blocked,
+            not_started=totals.not_started,
             failed=totals.failed,
             skipped=totals.skipped,
             pending=totals.pending,
@@ -260,10 +263,14 @@ async def image(broadcast_id: int, session: DbSession, owner: Owner) -> Response
 
 def _test_failure(error: DeliveryError) -> str:
     match error:
+        case RecipientNotStartedError():
+            return (
+                "Telegram не доставил сообщение: вы ещё не открывали бот. Откройте его и повторите"
+            )
         case RecipientBlockedError():
             return (
-                "Telegram не доставил сообщение: бот у вас заблокирован или вы ещё не "
-                "открывали его. Откройте бот и повторите"
+                "Telegram не доставил сообщение: бот у вас заблокирован. "
+                "Разблокируйте его и повторите"
             )
         case UndeliverableError():
             return f"Telegram не принял сообщение: {error}"
