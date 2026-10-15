@@ -2,6 +2,8 @@ import { createBrowserRouter, Navigate } from 'react-router'
 
 import { AppShell } from '@/components/frame/AppShell'
 import { AboutPage } from '@/pages/AboutPage'
+import { BroadcastPage } from '@/pages/broadcasts/BroadcastPage'
+import { BroadcastsPage } from '@/pages/broadcasts/BroadcastsPage'
 import { ClientCardPage } from '@/pages/clients/ClientCardPage'
 import { ClientsPage } from '@/pages/clients/ClientsPage'
 import { ExpiringPage } from '@/pages/ExpiringPage'
@@ -37,6 +39,8 @@ export const router = createBrowserRouter(
         { path: 'payments/:paymentId', Component: PaymentCardPage },
         { path: 'tariffs', Component: TariffsPage },
         { path: 'promo-codes', Component: PromoCodesPage },
+        { path: 'broadcasts', Component: BroadcastsPage },
+        { path: 'broadcasts/:broadcastId', Component: BroadcastPage },
         {
           path: 'settings',
           Component: SettingsLayout,

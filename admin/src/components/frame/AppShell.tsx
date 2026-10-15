@@ -1,4 +1,4 @@
-import { CreditCard, House, Info, LogOut, Settings, Tags, TicketPercent, UserRound, UsersRound } from 'lucide-react'
+import { CreditCard, House, Info, LogOut, Megaphone, Settings, Tags, TicketPercent, UserRound, UsersRound } from 'lucide-react'
 import { NavLink, Navigate, Outlet, useNavigate } from 'react-router'
 
 import { Button } from '@/components/ui/button'
@@ -28,6 +28,8 @@ const NAV: NavItem[] = [
   // Тарифы настраивают с компьютера; на телефоне нижняя панель — для работы с клиентами
   { to: '/tariffs', label: 'Тарифы', icon: Tags, ownerOnly: true, phoneMenu: true },
   { to: '/promo-codes', label: 'Промокоды', icon: TicketPercent },
+  // Рассылки — только владельцу (01-domain); пишут их с компьютера
+  { to: '/broadcasts', label: 'Рассылки', icon: Megaphone, ownerOnly: true, phoneMenu: true },
   { to: '/settings', label: 'Настройки', icon: Settings, ownerOnly: true },
   // На телефоне — в меню участника: в нижней панели помещается пять разделов
   { to: '/about', label: 'О программе', icon: Info, phoneMenu: true },

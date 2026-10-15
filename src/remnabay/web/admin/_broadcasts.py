@@ -41,6 +41,7 @@ from remnabay.messaging import (
     TelegramSender,
     UndeliverableError,
 )
+from remnabay.shop_settings import shop_time_zone
 from remnabay.web._body import read_limited
 from remnabay.web.admin._deps import DbSession, Owner
 
@@ -72,6 +73,7 @@ class BroadcastOut(BaseModel):
 
 class BroadcastsOut(BaseModel):
     broadcasts: list[BroadcastOut]
+    time_zone: str
 
 
 class SegmentOut(BaseModel):
@@ -130,7 +132,10 @@ def _conflict(error: Exception) -> HTTPException:
 async def broadcasts(session: DbSession, owner: Owner) -> BroadcastsOut:
     """История рассылок с итогами (11.8)."""
     del owner
-    return BroadcastsOut(broadcasts=[_out(view) for view in await list_broadcasts(session)])
+    return BroadcastsOut(
+        broadcasts=[_out(view) for view in await list_broadcasts(session)],
+        time_zone=(await shop_time_zone(session)).key,
+    )
 
 
 @router.get("/segments")

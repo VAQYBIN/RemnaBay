@@ -1242,6 +1242,154 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/broadcasts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Broadcasts
+         * @description История рассылок с итогами (11.8).
+         */
+        get: operations["broadcasts_api_admin_broadcasts_get"];
+        put?: never;
+        /** Create */
+        post: operations["create_api_admin_broadcasts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/broadcasts/segments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Segments
+         * @description Сегменты с числом получателей сейчас (11.2).
+         */
+        get: operations["segments_api_admin_broadcasts_segments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/broadcasts/{broadcast_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Broadcast
+         * @description Рассылка: содержимое, а у идущей — прогресс (11.5).
+         */
+        get: operations["broadcast_api_admin_broadcasts__broadcast_id__get"];
+        /** Update */
+        put: operations["update_api_admin_broadcasts__broadcast_id__put"];
+        post?: never;
+        /** Delete */
+        delete: operations["delete_api_admin_broadcasts__broadcast_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/broadcasts/{broadcast_id}/image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Image
+         * @description Изображение для предпросмотра в админке.
+         */
+        get: operations["image_api_admin_broadcasts__broadcast_id__image_get"];
+        /**
+         * Upload Image
+         * @description Изображение — телом запроса: JPEG или PNG до 10 МБ (11.1).
+         */
+        put: operations["upload_image_api_admin_broadcasts__broadcast_id__image_put"];
+        post?: never;
+        /** Delete Image */
+        delete: operations["delete_image_api_admin_broadcasts__broadcast_id__image_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/broadcasts/{broadcast_id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test
+         * @description Тестовое сообщение себе (11.3): то же, что получат клиенты.
+         */
+        post: operations["test_api_admin_broadcasts__broadcast_id__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/broadcasts/{broadcast_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start
+         * @description Подтверждение (11.4): получатели фиксируются сейчас, рассылка начинается.
+         */
+        post: operations["start_api_admin_broadcasts__broadcast_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/broadcasts/{broadcast_id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Halt
+         * @description «Остановить» (11.7).
+         */
+        post: operations["halt_api_admin_broadcasts__broadcast_id__stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/about": {
         parameters: {
             query?: never;
@@ -1480,6 +1628,65 @@ export interface components {
             bot_short_description: string;
             telegram: components["schemas"]["TelegramApplied"] | null;
         };
+        /**
+         * BroadcastContent
+         * @description Текст в разметке Telegram и кнопки; изображение хранится отдельно (`BroadcastImage`).
+         *     «Главное меню» добавляется всегда и не хранится (11.1).
+         */
+        BroadcastContent: {
+            /**
+             * Text
+             * @default
+             */
+            text: string;
+            /**
+             * Buy
+             * @default false
+             */
+            buy: boolean;
+            /**
+             * Renew
+             * @default false
+             */
+            renew: boolean;
+            /**
+             * Links
+             * @default []
+             */
+            links: components["schemas"]["LinkButton"][];
+        };
+        /** BroadcastOut */
+        BroadcastOut: {
+            /** Id */
+            id: number;
+            state: components["schemas"]["BroadcastState"];
+            content: components["schemas"]["BroadcastContent"];
+            segment: components["schemas"]["Segment"];
+            /** Has Image */
+            has_image: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Confirmed At */
+            confirmed_at: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            totals: components["schemas"]["TotalsOut"];
+        };
+        /**
+         * BroadcastState
+         * @enum {string}
+         */
+        BroadcastState: "draft" | "sending" | "stopped" | "finished";
+        /** BroadcastsOut */
+        BroadcastsOut: {
+            /** Broadcasts */
+            broadcasts: components["schemas"]["BroadcastOut"][];
+            /** Time Zone */
+            time_zone: string;
+        };
         /** ChecklistOut */
         ChecklistOut: {
             state: components["schemas"]["ShopState"];
@@ -1591,6 +1798,12 @@ export interface components {
              */
             confirm_last: boolean;
         };
+        /** ConfirmedOut */
+        ConfirmedOut: {
+            /** Recipients */
+            recipients: number;
+            broadcast: components["schemas"]["BroadcastOut"];
+        };
         /**
          * ConnectionState
          * @enum {string}
@@ -1622,6 +1835,11 @@ export interface components {
             devices: components["schemas"]["DeviceOut"][];
             /** Limit */
             limit: number | null;
+        };
+        /** DraftIn */
+        DraftIn: {
+            content: components["schemas"]["BroadcastContent"];
+            segment: components["schemas"]["Segment"];
         };
         /** ExpiringOut */
         ExpiringOut: {
@@ -1774,6 +1992,16 @@ export interface components {
              * @default []
              */
             tariff_ids: number[];
+        };
+        /**
+         * LinkButton
+         * @description Кнопка-ссылка с подписью владельца.
+         */
+        LinkButton: {
+            /** Text */
+            text: string;
+            /** Url */
+            url: string;
         };
         /** LoginPollOut */
         LoginPollOut: {
@@ -2291,6 +2519,31 @@ export interface components {
             payments: number;
         };
         /**
+         * Segment
+         * @description Описание сегмента, которое хранит рассылка, — а не список условий в коде (0065).
+         */
+        Segment: {
+            /** @default all */
+            kind: components["schemas"]["SegmentKind"];
+        };
+        /**
+         * SegmentKind
+         * @description Сегменты MVP (11.2). Новый сегмент — новое значение и его фильтр в `_segments`.
+         * @enum {string}
+         */
+        SegmentKind: "all" | "active" | "expired";
+        /** SegmentOut */
+        SegmentOut: {
+            kind: components["schemas"]["SegmentKind"];
+            /** Recipients */
+            recipients: number;
+        };
+        /** SegmentsOut */
+        SegmentsOut: {
+            /** Segments */
+            segments: components["schemas"]["SegmentOut"][];
+        };
+        /**
          * Semantic
          * @enum {string}
          */
@@ -2555,6 +2808,21 @@ export interface components {
             dark: {
                 [key: string]: string;
             };
+        };
+        /** TotalsOut */
+        TotalsOut: {
+            /** Recipients */
+            recipients: number;
+            /** Delivered */
+            delivered: number;
+            /** Bot Blocked */
+            bot_blocked: number;
+            /** Failed */
+            failed: number;
+            /** Skipped */
+            skipped: number;
+            /** Pending */
+            pending: number;
         };
         /** TrialOut */
         TrialOut: {
@@ -5060,6 +5328,471 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PromoSettingsOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    broadcasts_api_admin_broadcasts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BroadcastsOut"];
+                };
+            };
+        };
+    };
+    create_api_admin_broadcasts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DraftIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BroadcastOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    segments_api_admin_broadcasts_segments_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SegmentsOut"];
+                };
+            };
+        };
+    };
+    broadcast_api_admin_broadcasts__broadcast_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                broadcast_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BroadcastOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_api_admin_broadcasts__broadcast_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                broadcast_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DraftIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BroadcastOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_api_admin_broadcasts__broadcast_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                broadcast_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    image_api_admin_broadcasts__broadcast_id__image_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                broadcast_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_image_api_admin_broadcasts__broadcast_id__image_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                broadcast_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BroadcastOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Content Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_image_api_admin_broadcasts__broadcast_id__image_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                broadcast_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BroadcastOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_api_admin_broadcasts__broadcast_id__test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                broadcast_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    start_api_admin_broadcasts__broadcast_id__confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                broadcast_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfirmedOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    halt_api_admin_broadcasts__broadcast_id__stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                broadcast_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BroadcastOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
