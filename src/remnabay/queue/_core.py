@@ -14,6 +14,7 @@ from sqlalchemy.orm import aliased
 
 from remnabay.journal import Actor, JsonValue, Outcome, Subject, record
 from remnabay.queue._models import (
+    RUNNABLE,
     UNFINISHED,
     AttemptResult,
     QueueAttempt,
@@ -463,6 +464,21 @@ async def tasks_for(
     if status is not None:
         query = query.where(QueueTask.status == status)
     return list(await session.scalars(query.order_by(QueueTask.id)))
+
+
+async def due_tasks_exist(session: AsyncSession, name: str) -> bool:
+    """Есть ли задачи вида `name`, которым уже пора выполняться, — например, служебные
+    сообщения, которые идут раньше сообщений рассылки (11.13)."""
+    found = await session.scalar(
+        select(QueueTask.id)
+        .where(
+            QueueTask.name == name,
+            QueueTask.status.in_(RUNNABLE),
+            QueueTask.run_at <= func.clock_timestamp(),
+        )
+        .limit(1)
+    )
+    return found is not None
 
 
 async def unfinished_keys(session: AsyncSession, name: str, keys: Iterable[str]) -> set[str]:

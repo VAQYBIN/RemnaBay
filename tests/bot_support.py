@@ -19,6 +19,7 @@ from aiogram.methods import (
     GetMyName,
     GetMyShortDescription,
     SendMessage,
+    SendPhoto,
     SendRichMessage,
     SetMyCommands,
     SetMyDescription,
@@ -41,6 +42,7 @@ from aiogram.types import (
     InputRichBlockDetails,
     InputRichBlockUnion,
     Message,
+    PhotoSize,
     RichMessageButton,
     Update,
     User,
@@ -98,6 +100,14 @@ class FakeTelegram(BaseSession):
                     date=datetime.now(UTC),
                     chat=Chat(id=chat_id, type="private"),
                     text=method.text,
+                )
+            case SendPhoto():
+                photo = method.photo if isinstance(method.photo, str) else f"photo-{next(_ids)}"
+                return Message(
+                    message_id=next(_ids),
+                    date=datetime.now(UTC),
+                    chat=Chat(id=cast(int, method.chat_id), type="private"),
+                    photo=[PhotoSize(file_id=photo, file_unique_id=photo, width=1, height=1)],
                 )
             case SendRichMessage():
                 return Message(

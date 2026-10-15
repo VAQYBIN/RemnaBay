@@ -284,10 +284,14 @@ class FakeSender:
         default_factory=list[tuple[int, OutgoingMessage]]
     )
 
-    async def send(self, chat_id: int, message: OutgoingMessage) -> None:
+    async def send(self, chat_id: int, message: OutgoingMessage) -> str | None:
         if self.errors:
             raise self.errors.pop(0)
         self.sent.append((chat_id, message))
+        if message.photo is None:
+            return None
+        # Загруженное изображение получает file_id, как в Telegram
+        return message.photo.file_id or f"file-{len(self.sent)}"
 
 
 @contextmanager

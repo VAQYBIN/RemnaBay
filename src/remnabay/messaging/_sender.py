@@ -29,6 +29,7 @@ from aiogram.exceptions import (
     TelegramUnauthorizedError,
 )
 from aiogram.types import (
+    BufferedInputFile,
     CopyTextButton,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -81,17 +82,50 @@ class Button:
 
 
 @dataclass(frozen=True)
+class TextEntity:
+    """Форматирование части текста: жирный, ссылка, цитата и т. п. (сущность Telegram).
+    Смещение и длина — в единицах UTF-16."""
+
+    type: str
+    offset: int
+    length: int
+    url: str | None = None
+    language: str | None = None
+
+
+@dataclass(frozen=True)
+class Photo:
+    """Изображение сообщения: файл, уже загруженный в Telegram (`file_id`), или данные
+    для первой загрузки."""
+
+    file_id: str | None = None
+    data: bytes | None = None
+    filename: str = "image"
+
+    def __post_init__(self) -> None:
+        if (self.file_id is None) == (self.data is None):
+            raise ValueError("У изображения — ровно одно: file_id или данные")
+
+
+@dataclass(frozen=True)
 class OutgoingMessage:
     text: str
     buttons: tuple[Button, ...] = ()
     # Даты текста — сущностью date_time (0044)
     dates: tuple[DateEntity, ...] = ()
+    # Форматирование текста (рассылка, 11.1)
+    entities: tuple[TextEntity, ...] = ()
+    # С изображением текст становится подписью к нему
+    photo: Photo | None = None
 
 
 class Sender(Protocol):
-    """Отправитель сообщений. Ошибки — подклассы `DeliveryError`."""
+    """Отправитель сообщений. Ошибки — подклассы `DeliveryError`.
 
-    async def send(self, chat_id: int, message: OutgoingMessage) -> None: ...
+    Возвращает `file_id` отправленного изображения, если оно было: следующие
+    сообщения с ним не загружают файл заново."""
+
+    async def send(self, chat_id: int, message: OutgoingMessage) -> str | None: ...
 
 
 def _keyboard(buttons: tuple[Button, ...]) -> InlineKeyboardMarkup | None:
@@ -112,10 +146,18 @@ def _keyboard(buttons: tuple[Button, ...]) -> InlineKeyboardMarkup | None:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _entities(dates: tuple[DateEntity, ...]) -> list[MessageEntity] | None:
-    if not dates:
-        return None
-    return [
+def _entities(message: OutgoingMessage) -> list[MessageEntity] | None:
+    entities = [
+        MessageEntity(
+            type=entity.type,
+            offset=entity.offset,
+            length=entity.length,
+            url=entity.url,
+            language=entity.language,
+        )
+        for entity in message.entities
+    ]
+    entities.extend(
         MessageEntity(
             type="date_time",
             offset=date.offset,
@@ -123,8 +165,9 @@ def _entities(dates: tuple[DateEntity, ...]) -> list[MessageEntity] | None:
             unix_time=date.unix_time,
             date_time_format=DATE_FORMAT,
         )
-        for date in dates
-    ]
+        for date in message.dates
+    )
+    return entities or None
 
 
 def classify(error: AiogramError) -> DeliveryError:
@@ -164,16 +207,42 @@ class TelegramSender:
         session = AiohttpSession(api=api, timeout=timeout.total_seconds())
         self._bot = Bot(token, session=session)
 
-    async def send(self, chat_id: int, message: OutgoingMessage) -> None:
+    @classmethod
+    def for_bot(cls, bot: Bot) -> TelegramSender:
+        """Отправитель поверх готового бота — например, бота веб-процесса для тестового
+        сообщения рассылки (11.3). Сессию бота закрывает его владелец, не `close()`."""
+        sender = cls.__new__(cls)
+        sender._bot = bot
+        return sender
+
+    async def send(self, chat_id: int, message: OutgoingMessage) -> str | None:
+        markup = _keyboard(message.buttons)
         try:
-            await self._bot.send_message(
+            if message.photo is None:
+                await self._bot.send_message(
+                    chat_id=chat_id,
+                    text=message.text,
+                    entities=_entities(message),
+                    reply_markup=markup,
+                )
+                return None
+            photo = message.photo
+            upload = (
+                BufferedInputFile(photo.data, filename=photo.filename)
+                if photo.data is not None
+                else photo.file_id or ""
+            )
+            sent = await self._bot.send_photo(
                 chat_id=chat_id,
-                text=message.text,
-                entities=_entities(message.dates),
-                reply_markup=_keyboard(message.buttons),
+                photo=upload,
+                caption=message.text or None,
+                caption_entities=_entities(message),
+                reply_markup=markup,
             )
         except AiogramError as error:
             raise classify(error) from error
+        # Самый большой размер — последний (Bot API, PhotoSize)
+        return sent.photo[-1].file_id if sent.photo else photo.file_id
 
     async def close(self) -> None:
         await self._bot.session.close()

@@ -128,7 +128,7 @@ async def _render(session: AsyncSession, args: SendArgs) -> OutgoingMessage:
     return OutgoingMessage(text, buttons, tuple(entities))
 
 
-async def _mark_blocked(session: AsyncSession, client_id: int) -> None:
+async def mark_blocked(session: AsyncSession, client_id: int) -> None:
     """Пометка «бот заблокирован»; снимается, когда клиент снова открывает бот (11.9)."""
     await session.execute(
         update(Client)
@@ -154,7 +154,7 @@ async def send_message(context: TaskContext, args: SendArgs) -> None:
         await runtime.current().sender.send(args.chat_id, message)
     except RecipientBlockedError as error:
         if args.client_id is not None:
-            await _mark_blocked(session, args.client_id)
+            await mark_blocked(session, args.client_id)
         await not_delivered(session, args, "blocked", str(error))
     except UndeliverableError as error:
         await not_delivered(session, args, "rejected", str(error))
