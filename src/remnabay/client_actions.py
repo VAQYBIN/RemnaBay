@@ -27,7 +27,7 @@ from remnabay.domain.subscriptions import (
 )
 from remnabay.domain.tariffs import Tariff, TariffType
 from remnabay.journal import Actor, Outcome, Subject, record
-from remnabay.messaging import MAIN_MENU_BUTTON, load_texts, send_to_client, tell_action_failed
+from remnabay.messaging import MAIN_MENU_BUTTON, load_texts, send_to_client
 from remnabay.panel import PanelClient, PanelError, UpdateUser
 from remnabay.panel_sync import (
     ReconcileArgs,
@@ -199,8 +199,8 @@ async def add_granted_days(context: TaskContext, args: GrantArgs) -> None:
 
 @add_granted_days.on_cancelled
 async def _grant_cancelled(session: AsyncSession, _task_id: int, args: GrantArgs) -> None:
-    """4.32: команда отменила выдачу дней — дни не добавлены, клиент получает «Не
-    удалось выполнить действие»."""
+    """4.32: команда отменила выдачу дней — дни не добавлены. Выдачу начала команда,
+    поэтому клиенту ничего не отправляется: о сбое знает только она (0067)."""
     subscription = await session.get(Subscription, args.subscription_id)
     if subscription is None:
         return
@@ -212,7 +212,6 @@ async def _grant_cancelled(session: AsyncSession, _task_id: int, args: GrantArgs
         subject=_subject(subscription.id),
         details={"days": args.days, "granted_by": args.member_id},
     )
-    await tell_action_failed(session, subscription.client_id)
 
 
 # --- Сбросить устройства, синхронизировать (10.5) ---

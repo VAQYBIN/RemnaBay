@@ -205,5 +205,8 @@ async def delete_devices(context: TaskContext, args: DeleteArgs) -> None:
 
 @delete_devices.on_cancelled
 async def _delete_cancelled(session: AsyncSession, _task_id: int, args: DeleteArgs) -> None:
-    """4.32: команда отменила удаление — клиент получает «Не удалось выполнить действие»."""
-    await tell_action_failed(session, args.client_id)
+    """4.32: команда отменила удаление, которое начал клиент, — он получает «Не удалось
+    выполнить действие». Сброс устройств из карточки клиента начала команда: клиенту
+    ничего не отправляется (0067)."""
+    if args.member_id is None:
+        await tell_action_failed(session, args.client_id)

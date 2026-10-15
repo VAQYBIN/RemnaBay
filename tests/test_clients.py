@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from remnabay.client_actions import add_granted_days
+from remnabay.devices import delete_devices, remove_devices
 from remnabay.domain.clients import Client, TelegramAccount
 from remnabay.domain.payments import PaymentState, RefundRequest, RefundRequestState
 from remnabay.domain.referrals import ReferralLink
@@ -346,11 +347,10 @@ async def test_4_15_granted_days_are_not_added_twice_after_lost_answer(shop: Sho
 
 
 @pytest.mark.usefixtures("assistant")
-async def test_4_32_cancelled_grant_tells_client_action_failed(
-    shop: Shop, owner: TeamMember
-) -> None:
-    """4.31, 4.32: проваленную выдачу дней можно отменить — дни не добавлены, клиент
-    получает «Не удалось выполнить действие»."""
+async def test_4_32_cancelled_grant_is_not_told_to_client(shop: Shop, owner: TeamMember) -> None:
+    """4.31, 4.32: проваленную выдачу дней можно отменить — дни не добавлены. Выдачу
+    начала команда, поэтому клиенту ничего не отправляется: отмена — только в журнале
+    (0067)."""
     client = await _client(shop, 777)
     subscription = await _subscription(shop, client)
     await _grant(shop, client, subscription)
@@ -364,14 +364,45 @@ async def test_4_32_cancelled_grant_tells_client_action_failed(
         shop.session, TASKS, task.id, actor=Actor.team_member(owner.id), comment="Не нужно"
     )
 
-    [message] = await _messages(shop.session)
-    assert message.text_key == "event.action_failed"
+    assert await _messages(shop.session) == []
+    actions = [
+        e.action for e in await entries_for(shop.session, Subject("subscription", subscription.id))
+    ]
+    assert "subscription.days_grant_cancelled" in actions
     assert (
         await shop.session.scalar(
             select(TermSegment.id).where(TermSegment.subscription_id == subscription.id).offset(1)
         )
         is None
     )
+
+
+@pytest.mark.parametrize(("by_team", "told"), [(True, False), (False, True)])
+async def test_4_32_cancelled_device_removal_is_told_only_if_client_started_it(
+    shop: Shop, owner: TeamMember, by_team: bool, told: bool
+) -> None:
+    """4.32: отменённое удаление устройств, которое начал клиент, — «Не удалось выполнить
+    действие»; сброс из карточки клиента начала команда — клиенту ничего (0067)."""
+    client = await _client(shop, 777)
+    subscription = await _subscription(shop, client)
+    shop.panel.down = True
+    await add(shop.session, PanelOutage(started_at=_now()))
+    await remove_devices(
+        shop.session, shop.app.state.panel, subscription, member_id=owner.id if by_team else None
+    )
+    [task] = await queued(shop.session, delete_devices)
+    task.status = TaskStatus.FAILED
+    await add(
+        shop.session,
+        QueueAttempt(task_id=task.id, number=1, retry_round=1, result=AttemptResult.ERROR),
+    )
+
+    await cancel_failed(
+        shop.session, TASKS, task.id, actor=Actor.team_member(owner.id), comment="Не нужно"
+    )
+
+    keys = [message.text_key for message in await _messages(shop.session)]
+    assert keys == (["event.action_failed"] if told else [])
 
 
 # --- Сбросить устройства, синхронизировать (10.5) ---
