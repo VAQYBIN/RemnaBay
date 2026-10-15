@@ -62,6 +62,7 @@
 | `btn.promo` | Ввести промокод |
 | `btn.support` | Поддержка |
 | `btn.renew` | Продлить |
+| `btn.change_tariff` | Сменить тариф |
 | `btn.copy_link` | Скопировать ссылку |
 | `btn.how_to_connect` | Как подключить |
 | `btn.devices` | Устройства |

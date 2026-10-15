@@ -80,6 +80,7 @@ from remnabay.payments import (
     can_purchase,
     can_renew,
     cancel_by_client,
+    change_tariffs,
     check_choice,
     disabled_in_panel,
     is_active,
@@ -111,6 +112,12 @@ _TARIFF_ROW = 3
 
 class Renew(CallbackData, prefix=RENEW_CALLBACK_PREFIX):
     """«Продлить» — в карточке подписки и в сообщениях о сроке (С7, С8)."""
+
+    subscription_id: int
+
+
+class ChangeTariff(CallbackData, prefix="chtariff"):
+    """«Сменить тариф» в карточке истёкшей подписки (3.41)."""
 
     subscription_id: int
 
@@ -223,6 +230,14 @@ async def main_menu(ctx: BotContext) -> Screen:
         )
     elif subscriptions:
         keyboard.action(ctx.render("btn.my_subscriptions"), SUBSCRIPTIONS)
+    if any(can_renew(s) for s in subscriptions):
+        # «Продлить» — к продлению единственной подписки или к списку подписок (3.40)
+        target = (
+            Renew(subscription_id=subscriptions[0].id).pack()
+            if len(subscriptions) == 1
+            else SUBSCRIPTIONS
+        )
+        keyboard.action(ctx.render("btn.renew"), target, style=SUCCESS)
     trial = await trial_available(ctx.session, ctx.client)
     if trial:
         # Триал доступен — целевое действие «Попробовать бесплатно» (5.2, З1)
@@ -376,6 +391,9 @@ async def subscription_card(ctx: BotContext, subscription: Subscription) -> Scre
     elif can_renew(subscription):
         renew = Renew(subscription_id=subscription.id).pack()
         actions.append(rich_action(ctx.render("btn.renew"), renew, style=SUCCESS))
+        if await change_tariffs(ctx.session, subscription, now):
+            change = ChangeTariff(subscription_id=subscription.id).pack()
+            actions.append(rich_action(ctx.render("btn.change_tariff"), change))
     if devices is not None:
         devices_screen = DevicesScreen(subscription_id=subscription.id).pack()
         actions.append(rich_action(ctx.render("btn.devices"), devices_screen))
@@ -401,11 +419,16 @@ async def open_card(query: CallbackQuery, callback_data: Card, ctx: BotContext) 
 
 
 async def tariff_choice(
-    ctx: BotContext, subscription: Subscription | None, header: str | None
+    ctx: BotContext,
+    subscription: Subscription | None,
+    header: str | None,
+    tariffs: list[Tariff] | None = None,
 ) -> Screen:
     """З4 — rich: тарифы в продаже по порядку (2.4, 3.1); шапка — для продления (3.21, 3.35);
-    кнопки тарифов — внутри сообщения (0044, 0060)."""
-    tariffs = await tariffs_on_sale(ctx.session)
+    кнопки тарифов — внутри сообщения (0044, 0060). `tariffs` — свой список, например
+    для смены тарифа (3.41)."""
+    if tariffs is None:
+        tariffs = await tariffs_on_sale(ctx.session)
     head = [
         RichBlockTableCell(align="left", valign="top", text=ctx.render(key), is_header=True)
         for key in (
@@ -496,6 +519,23 @@ async def renew(
         else "tariffs.header.archived_expired"
     )
     await show(query, ctx, await tariff_choice(ctx, subscription, header))
+
+
+async def change_tariff(query: CallbackQuery, callback_data: ChangeTariff, ctx: BotContext) -> None:
+    """«Сменить тариф» у истёкшей подписки: тарифы в продаже, кроме текущего; выбранный
+    применяется к этой же подписке (3.41, решение 0068)."""
+    if not await sales_allowed(ctx, query.from_user.id):
+        await show(query, ctx, await paused_screen(ctx))
+        return
+    subscription = await own_subscription(ctx, callback_data.subscription_id)
+    tariffs = (
+        await change_tariffs(ctx.session, subscription, _now()) if subscription is not None else []
+    )
+    if subscription is None or not tariffs:
+        # Кнопка из старого сообщения: подписку уже продлили или тарифов для смены нет
+        await show(query, ctx, await main_menu(ctx))
+        return
+    await show(query, ctx, await tariff_choice(ctx, subscription, None, tariffs))
 
 
 # --- Триал ---
@@ -778,6 +818,7 @@ def build_router() -> Router:
     router.callback_query.register(buy, F.data == BUY)
     router.callback_query.register(try_free, F.data == TRY_FREE)
     router.callback_query.register(renew, Renew.filter())
+    router.callback_query.register(change_tariff, ChangeTariff.filter())
     router.callback_query.register(pick, Pick.filter())
     router.callback_query.register(pay, Pay.filter())
     router.callback_query.register(cancel_payment, CancelPay.filter())
