@@ -443,7 +443,7 @@ function PaymentsModule({ card }: { card: Card }) {
         <ul className="divide-y">
           {card.payments.map((payment) => (
             <li key={payment.id}>
-              <Link to={`/payments/${payment.id}`} className="flex items-center gap-3 py-2.5 hover:bg-muted/40">
+              <Link to={`/payments/${payment.id}`} className="-mx-3 flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors duration-150 hover:bg-muted/40">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm">
                     {payment.purpose ? PURPOSES[payment.purpose] : 'Платёж'}

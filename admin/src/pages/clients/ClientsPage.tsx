@@ -36,7 +36,7 @@ function subscriptionsText(row: Row, timeZone: string): string {
 function ClientRowItem({ row, timeZone }: { row: Row; timeZone: string }) {
   return (
     <li>
-      <Link to={`/clients/${row.client.id}`} className="flex items-center gap-3 py-3 hover:bg-muted/40">
+      <Link to={`/clients/${row.client.id}`} className="-mx-3 flex items-center gap-3 rounded-lg px-3 py-3 transition-colors duration-150 hover:bg-muted/40">
         <div className="min-w-0 flex-1">
           <p className="truncate font-medium">{clientLabel(row.client)}</p>
           <p className="truncate text-sm text-muted-foreground">

@@ -58,7 +58,7 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
 function PaymentRowItem({ row, timeZone }: { row: Row; timeZone: string }) {
   return (
     <li>
-      <Link to={`/payments/${row.id}`} className="flex items-center gap-3 py-3 hover:bg-muted/40">
+      <Link to={`/payments/${row.id}`} className="-mx-3 flex items-center gap-3 rounded-lg px-3 py-3 transition-colors duration-150 hover:bg-muted/40">
         <div className="min-w-0 flex-1">
           <p className="truncate font-medium">
             {row.is_unknown ? 'Неизвестный платёж' : clientLabel(row.client)}
