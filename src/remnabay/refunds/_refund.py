@@ -31,7 +31,7 @@ from remnabay.domain.subscriptions import Subscription, TermSegment, operations_
 from remnabay.journal import Actor, JsonValue, Outcome, Subject, record
 from remnabay.messaging import MAIN_MENU_BUTTON, send_to_client
 from remnabay.panel import PanelError, UpdateUser
-from remnabay.panel_sync import Source, accept_access, accept_user, enqueue_reconcile, term_end
+from remnabay.panel_sync import Source, accept_user, enqueue_reconcile, term_end
 from remnabay.payments import payment_subject, release_failed_apply
 from remnabay.queue import TaskContext, task
 from remnabay.refunds._requests import close_by_refund, open_requests, request_closed_by
@@ -45,6 +45,9 @@ REFUNDABLE = frozenset(
 _CENT = Decimal("0.01")
 # Панель хранит дату с точностью до миллисекунд: даты ближе секунды — одна и та же
 _SAME_MOMENT = timedelta(seconds=1)
+# Дату окончания в прошлом панель не принимает: подписка, которую возврат закончил,
+# действует в панели до ближайшего момента, который та примет
+_PANEL_LEAD = timedelta(minutes=1)
 
 
 class RefundError(Exception):
@@ -254,10 +257,13 @@ async def _notify(
     payment: Payment,
     subscription: Subscription | None,
     end: datetime | None,
+    *,
+    ended: bool = False,
 ) -> None:
     """Сообщение о возврате (10.11): С11 с новой датой окончания или «подписка
     завершена» (10.13); у платежа без подписки — «Мы разобрались с вашим платежом:
-    деньги возвращены» (С12)."""
+    деньги возвращены» (С12). `ended` — возврат закончил подписку, даже если панель
+    закроет её через минуту."""
     if payment.client_id is None:
         return
     if subscription is None or end is None:
@@ -270,7 +276,7 @@ async def _notify(
         return
     payment_date = payment.paid_at or payment.created_at
     variables = {"subscription_name": subscription.name}
-    if end <= datetime.now(UTC):
+    if ended or end <= datetime.now(UTC):
         await send_to_client(
             session,
             payment.client_id,
@@ -341,12 +347,13 @@ async def change_term(context: TaskContext, args: TermArgs) -> None:
     if user is None:
         raise PanelError("Пользователя подписки удалили в панели — сменить дату некуда")
     at = args.refunded_at
+    now = datetime.now(UTC)
     removed = unused_time(await _segments(session, subscription.id), payment.id, at)
     known_end = await term_end(session, subscription)
     applied_before = (
         bool(removed)
         and known_end is not None
-        and abs(user.expire_at - max(known_end - removed, at)) < _SAME_MOMENT
+        and _panel_has(user.expire_at, max(known_end - removed, at), now)
     )
     if not applied_before:
         # Магазин сначала узнаёт, что сейчас в панели, и только потом меняет её сам
@@ -354,15 +361,25 @@ async def change_term(context: TaskContext, args: TermArgs) -> None:
         removed = unused_time(await _segments(session, subscription.id), payment.id, at)
         known_end = await term_end(session, subscription)
         if removed and known_end is not None:
-            user = await panel.update_user(
-                UpdateUser(id=user.id, expire_at=max(known_end - removed, at))
-            )
+            end = max(known_end - removed, at, now + _PANEL_LEAD)
+            user = await panel.update_user(UpdateUser(id=user.id, expire_at=end))
     await cut_term(session, await _segments(session, subscription.id), payment.id, at)
-    accept_access(subscription, user)
+    # Срок магазина — как в панели: минута, на которую панель продлила закончившуюся
+    # подписку, остаётся отрезком без оплаты
+    await accept_user(session, subscription, user)
     await _journal_term(session, subscription, args, user.expire_at)
-    if user.expire_at - at < _SAME_MOMENT:
-        await silence_after_refund(session, subscription, datetime.now(UTC))
-    await _notify(session, payment, subscription, user.expire_at)
+    ended = user.expire_at <= now + _PANEL_LEAD
+    if ended:
+        await silence_after_refund(session, subscription, user.expire_at)
+    await _notify(session, payment, subscription, user.expire_at, ended=ended)
+
+
+def _panel_has(panel_end: datetime, wanted: datetime, now: datetime) -> bool:
+    """Прошлая попытка уже поставила в панели срок после возврата (4.15): ту же дату,
+    а если она в прошлом — ближайший момент, который панель приняла."""
+    if abs(panel_end - wanted) < _SAME_MOMENT:
+        return True
+    return wanted < now + _PANEL_LEAD and wanted <= panel_end <= now + _PANEL_LEAD
 
 
 @change_term.on_resolved
@@ -374,7 +391,8 @@ async def _term_resolved(session: AsyncSession, _task_id: int, args: TermArgs) -
     if subscription is None or payment is None:
         return
     if args.ends_now:
-        await silence_after_refund(session, subscription, datetime.now(UTC))
+        # Команда тоже не может поставить дату в прошлом — только ближайший момент
+        await silence_after_refund(session, subscription, datetime.now(UTC) + _PANEL_LEAD)
     if subscription.deleted_at is None:
         await enqueue_reconcile(session, subscription.id, Source.SYNC, "refund")
     await _notify(
@@ -382,4 +400,5 @@ async def _term_resolved(session: AsyncSession, _task_id: int, args: TermArgs) -
         payment,
         subscription if subscription.deleted_at is None else None,
         args.refunded_at if args.ends_now else args.expected_end,
+        ended=args.ends_now,
     )

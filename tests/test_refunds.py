@@ -376,7 +376,10 @@ async def test_10_9_fully_used_payment_keeps_term_and_notifies_at_once(world: Wo
 async def test_10_13_refund_ending_subscription_silences_reminders(world: World) -> None:
     """10.13: подписка, которую возврат закончил сейчас, не получает напоминаний и
     «Подписка истекла» — только сообщение о возврате с текстом о завершении. После
-    продления сообщения о сроке снова идут."""
+    продления сообщения о сроке снова идут.
+
+    Дату в прошлом панель не принимает, а задача идёт после возврата: в панели подписка
+    действует ещё минуту, и срок магазина такой же."""
     now = _now()
     payment = await world.paid(now - 28 * DAY)
     await plan_new(world.session, now - 60 * DAY)
@@ -386,7 +389,11 @@ async def test_10_13_refund_ending_subscription_silences_reminders(world: World)
     )
     await world.run_term_changes()
 
-    assert world.subscription.expires_at == now
+    end = world.subscription.expires_at
+    assert end is not None
+    assert now < end <= datetime.now(UTC) + timedelta(minutes=1)
+    assert world.panel_end() == end
+    assert max(s.ends_at for s in await world.segments()) == end
     [message] = await world.messages()
     assert message.text_key == "event.refunded.ended"
     states = set(
@@ -399,7 +406,7 @@ async def test_10_13_refund_ending_subscription_silences_reminders(world: World)
     assert states == {ReminderState.CANCELLED}
 
     # Проходы планировщика после окончания: ни «Подписка истекла», ни «через 3 дня»
-    for moment in (now + timedelta(minutes=1), now + 4 * DAY):
+    for moment in (now + timedelta(minutes=2), now + 4 * DAY):
         await plan_new(world.session, moment)
         await dispatch_due(world.session, moment)
     assert (
@@ -415,7 +422,7 @@ async def test_10_13_refund_ending_subscription_silences_reminders(world: World)
 
     # Продлили — новый срок планируется как обычно
     await world.set_end(now + 30 * DAY)
-    await plan_new(world.session, now + timedelta(minutes=2))
+    await plan_new(world.session, now + timedelta(minutes=3))
     assert (
         await world.session.scalar(
             select(Reminder.id).where(
@@ -451,6 +458,34 @@ async def test_4_15_term_change_is_not_applied_twice_after_lost_answer(world: Wo
     patches = [body for name, body in world.panel.writes if name == "PATCH /api/users"]
     assert len(patches) == 1
     assert [s.ends_at for s in await world.segments()] == [now + 20 * DAY]
+
+
+async def test_4_15_ending_term_change_is_not_applied_twice_after_lost_answer(
+    world: World,
+) -> None:
+    """4.15, 10.13: панель уже закрыла подписку через минуту, а ответ потерялся — повтор
+    не меняет дату второй раз и записывает отрезки по дате панели."""
+    now = _now()
+    payment = await world.paid(now - 10 * DAY)
+    await refund_payment(world.session, payment.id, amount=PRICE, member_id=world.owner.id, now=now)
+    [task] = await queued(world.session, change_term)
+
+    world.panel.lose_next_write = True
+    context = TaskContext(session=world.session, task_id=task.id, attempt_number=1)
+    with fake_runtime(panel=world.panel), pytest.raises(PanelUnavailableError):
+        async with world.session.begin_nested():
+            await change_term.run(context, task.args)
+    end = world.panel_end()
+    assert now < end <= datetime.now(UTC) + timedelta(minutes=1)
+
+    await world.run_term_changes()
+
+    patches = [body for name, body in world.panel.writes if name == "PATCH /api/users"]
+    assert len(patches) == 1
+    assert world.panel_end() == end
+    assert max(s.ends_at for s in await world.segments()) == end
+    [message] = await world.messages()
+    assert message.text_key == "event.refunded.ended"
 
 
 async def _failed(world: World, task: QueueTask) -> None:

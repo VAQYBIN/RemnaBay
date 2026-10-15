@@ -141,12 +141,14 @@ def ended_by_refund(subscription: Subscription) -> bool:
 
 
 async def silence_after_refund(
-    session: AsyncSession, subscription: Subscription, now: datetime
+    session: AsyncSession, subscription: Subscription, end: datetime
 ) -> None:
     """10.13: возврат закончил подписку сейчас — ни напоминаний об окончании, ни
-    «Подписка истекла»: клиент получает только сообщение о возврате. Запланированное
-    отменяется; новый срок после продления снова получает сообщения."""
-    subscription.ended_by_refund_at = now
+    «Подписка истекла»: клиент получает только сообщение о возврате. `end` — срок,
+    который поставил возврат: панель не принимает дату в прошлом, и подписка
+    заканчивается через минуту. Запланированное отменяется; новый срок после
+    продления снова получает сообщения."""
+    subscription.ended_by_refund_at = end
     await session.execute(
         update(Reminder)
         .where(
