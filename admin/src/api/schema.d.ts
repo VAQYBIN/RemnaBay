@@ -1516,6 +1516,11 @@ export interface components {
             refund_requests: components["schemas"]["RefundRequestOut"][];
             /** Journal */
             journal: components["schemas"]["JournalOut"][];
+            /**
+             * Journal Limit
+             * @default 100
+             */
+            journal_limit: number;
             /** Panel Available */
             panel_available: boolean;
             /**

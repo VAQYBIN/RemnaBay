@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ChevronRight, Plus, RefreshCw, Smartphone, TriangleAlert } from 'lucide-react'
+import { ArrowLeft, ChevronDown, ChevronRight, ChevronUp, Plus, RefreshCw, Smartphone, TriangleAlert } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useLocation, useNavigate, useOutletContext, useParams } from 'react-router'
 
@@ -308,6 +308,27 @@ function SubscriptionModule({ card, subscription }: { card: Card; subscription: 
 }
 
 /** Запросы на возврат: зафиксировать — любой участник, отказать — только владелец (10.6). */
+// Длинные списки карточки свёрнуты до последних записей: у давнего клиента их сотни
+const FOLDED = 5
+
+/** Свёрнутый список: первые `FOLDED` строк (или `shown`, если больше) и кнопка
+ *  «Показать все». */
+function useFolded<T>(items: T[], shown = FOLDED) {
+  const [expanded, setExpanded] = useState(false)
+  const visible = Math.max(FOLDED, shown)
+  return {
+    items: expanded ? items : items.slice(0, visible),
+    toggle:
+      items.length > visible ? (
+        <Button variant="ghost" size="sm" className="-ml-2 mt-2" onClick={() => setExpanded(!expanded)}>
+          {expanded ? <ChevronUp aria-hidden /> : <ChevronDown aria-hidden />}
+          {expanded ? 'Свернуть' : `Показать все (${items.length})`}
+        </Button>
+      ) : null,
+    expanded,
+  }
+}
+
 function RefundRequestsModule({ card, member }: { card: Card; member: Member }) {
   const refresh = useRefreshCard()
   const [dialog, setDialog] = useState<{ kind: 'file' } | { kind: 'decline'; id: number } | null>(null)
@@ -322,6 +343,8 @@ function RefundRequestsModule({ card, member }: { card: Card; member: Member }) 
   const owner = isOwner(member)
   const zone = card.time_zone
   const open = card.refund_requests.filter((request) => request.state === 'open')
+  // Открытые запросы — сверху и всегда видны: по ним нужно решение
+  const folded = useFolded(card.refund_requests, open.length)
 
   return (
     <Module
@@ -336,7 +359,7 @@ function RefundRequestsModule({ card, member }: { card: Card; member: Member }) 
         <p className="text-sm text-muted-foreground">Клиент не просил вернуть деньги.</p>
       ) : (
         <ul className="divide-y text-sm">
-          {card.refund_requests.map((request) => (
+          {folded.items.map((request) => (
             <li key={request.id} className="flex flex-col gap-1 py-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <Badge
@@ -372,6 +395,7 @@ function RefundRequestsModule({ card, member }: { card: Card; member: Member }) 
           ))}
         </ul>
       )}
+      {folded.toggle}
       {open.length > 0 && (
         <p className="mt-3 text-xs text-muted-foreground">
           {owner
@@ -482,13 +506,14 @@ function TrialAndReferrals({ card }: { card: Card }) {
 
 /** Журнал по клиенту: кто, что и когда сделал (10.2, 10.7). */
 function JournalModule({ card }: { card: Card }) {
+  const folded = useFolded(card.journal)
   return (
     <Module title="Журнал">
       {card.journal.length === 0 ? (
         <p className="text-sm text-muted-foreground">Записей пока нет.</p>
       ) : (
         <ol className="divide-y text-sm">
-          {card.journal.map((entry, index) => {
+          {folded.items.map((entry, index) => {
             const details = journalDetails(entry)
             return (
               <li key={index} className="flex flex-col gap-0.5 py-2">
@@ -507,6 +532,10 @@ function JournalModule({ card }: { card: Card }) {
           })}
         </ol>
       )}
+      {folded.expanded && card.journal.length >= card.journal_limit && (
+        <p className="mt-2 text-xs text-muted-foreground">Показаны последние {card.journal_limit} записей.</p>
+      )}
+      {folded.toggle}
     </Module>
   )
 }

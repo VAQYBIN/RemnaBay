@@ -25,6 +25,7 @@ from remnabay.client_actions import (
     sync_subscription,
 )
 from remnabay.client_card import (
+    CARD_LIMIT,
     changes_waiting,
     journal_of,
     nearest_end,
@@ -188,6 +189,8 @@ class ClientCardOut(BaseModel):
     invited: list[ClientRef]
     refund_requests: list[RefundRequestOut]
     journal: list[JournalOut]
+    # Сколько последних записей журнала отдаёт карточка
+    journal_limit: int = CARD_LIMIT
     # Панель недоступна — состояние подписок может быть неактуальным (4.12)
     panel_available: bool
     min_grant_days: int = MIN_GRANT_DAYS
