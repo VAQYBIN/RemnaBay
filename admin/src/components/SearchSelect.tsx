@@ -21,6 +21,7 @@ export function SearchSelect({
   onChange,
   searchPlaceholder,
   emptyText = 'Ничего не найдено',
+  labels,
 }: {
   id: string
   value: string
@@ -28,8 +29,11 @@ export function SearchSelect({
   onChange: (value: string) => void
   searchPlaceholder: string
   emptyText?: string
+  /** Подписи значений, если значение — идентификатор (например, тариф по id) */
+  labels?: Readonly<Record<string, string>>
 }) {
   const [open, setOpen] = useState(false)
+  const label = (option: string) => labels?.[option] ?? option
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -40,7 +44,7 @@ export function SearchSelect({
           aria-expanded={open}
           className="h-9 w-full justify-between font-normal"
         >
-          <span className="truncate">{value}</span>
+          <span className="truncate">{label(value)}</span>
           <ChevronsUpDown className="opacity-60" />
         </Button>
       </PopoverTrigger>
@@ -52,7 +56,8 @@ export function SearchSelect({
             {options.map((option) => (
               <CommandItem
                 key={option}
-                value={option}
+                // Поиск — по подписи; значение добавлено, чтобы одинаковые подписи не слились
+                value={labels ? `${label(option)} ${option}` : option}
                 onSelect={() => {
                   onChange(option)
                   setOpen(false)
@@ -60,7 +65,7 @@ export function SearchSelect({
                 className={cn(option === value && 'font-medium text-brand-text')}
               >
                 <Check className={cn('size-4 text-brand-text', option === value ? 'opacity-100' : 'opacity-0')} />
-                {option}
+                {label(option)}
               </CommandItem>
             ))}
           </CommandList>

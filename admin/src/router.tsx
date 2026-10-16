@@ -9,6 +9,8 @@ import { ClientsPage } from '@/pages/clients/ClientsPage'
 import { ExpiringPage } from '@/pages/ExpiringPage'
 import { HomePage } from '@/pages/HomePage'
 import { LoginPage } from '@/pages/LoginPage'
+import { MigrationPage } from '@/pages/migration/MigrationPage'
+import { MigrationRunPage } from '@/pages/migration/MigrationRunPage'
 import { PaymentCardPage } from '@/pages/payments/PaymentCardPage'
 import { PaymentsPage } from '@/pages/payments/PaymentsPage'
 import { PromoCodesPage } from '@/pages/PromoCodesPage'
@@ -41,6 +43,8 @@ export const router = createBrowserRouter(
         { path: 'promo-codes', Component: PromoCodesPage },
         { path: 'broadcasts', Component: BroadcastsPage },
         { path: 'broadcasts/:broadcastId', Component: BroadcastPage },
+        { path: 'migration', Component: MigrationPage },
+        { path: 'migration/:runId', Component: MigrationRunPage },
         {
           path: 'settings',
           Component: SettingsLayout,
