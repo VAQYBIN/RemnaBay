@@ -1,6 +1,6 @@
 # Эксперимент: несколько подписок с одним Telegram ID в чужих ботах
 
-**Статус:** проведён 2026-10-05 (этап 1 из [plan.md](../plan.md), последний пункт «Проверить на реальных данных»); предложение по спеке принято владельцем
+**Статус:** проведён 2026-10-05 (этап 1 из [plan.md](../plan.md), последний пункт «Проверить на реальных данных»); предложение по спеке принято владельцем. Дополнен 2026-10-16 к этапу 10: платежи, триал, рефералы — раздел «Этап 10: данные для адаптера»
 
 ## Зачем
 Адаптер remnawave-tg-shop (9.9) и усыновление (9.4: пользователи панели с одним Telegram ID становятся одним клиентом с несколькими подписками) опираются на то, как бот-источник хранит подписки и связывает их с пользователями панели. Ответ нужен до реализации блока 9 (этап 10).
@@ -72,3 +72,211 @@
 ## Предложения по спеке
 
 > **Принято владельцем 2026-10-05, внесено в [06-scope.md](../06-scope.md):** обоснование «Привязка по ссылке подписки — v1» было «У клиентов автора Telegram ID есть», но в магазине автора есть веб-клиенты без Telegram ID, у единиц из них — активные подписки. Обоснование уточнено: Telegram ID есть почти у всех клиентов автора, единичных клиентов без Telegram владелец переносит вручную. Срок функции (v1) не меняется.
+
+## Этап 10: данные для адаптера
+
+### Зачем
+Адаптер remnawave-tg-shop (9.9) заполняет поля промежуточного формата: язык, дату появления, «Триал использован», «Платил в старом боте» ([решение 0070](../decisions/0070-migrated-paid-clients.md)), реферальные коды и пригласившего. Нужно было понять, где старый бот это хранит и можно ли по его базе надёжно понять, кто платил.
+
+### Как проводили
+Разбор исходников оригинала (тег `v2.7.0`) и форка владельца (тег `v4.0.2`) в `~/code/spike-bots`, вне репозитория. Код ботов в проект не переносится. Проверка на копии данных форка — запросы ниже, владелец запускает их сам и присылает только счётчики.
+
+### База
+- Только PostgreSQL: оба бота строят адрес `postgresql+asyncpg://…` и пользуются возможностями PostgreSQL. Адаптеру хватает драйвера `psycopg`, который уже есть в магазине.
+- Схема ведётся Alembic, миграции применяются при запуске бота. Многие столбцы созданы без значений по умолчанию на стороне базы: `NULL` в `language_code` значит `ru`.
+- В форке столбцы появляются по миграциям: `trial_activations` — 0008, `trial_reset_grants` — 0009, новые столбцы `payments` и таблицы тарифов — 0010, `users.panel_user_id` и `subscriptions.panel_user_id` — 0021. Адаптер определяет, что есть в базе, по `information_schema`, а не по номеру версии.
+
+### Клиент
+| Поле формата | Оригинал v2.7.0 | Форк v4.0.2 |
+|---|---|---|
+| Telegram ID | `users.user_id` | `users.user_id > 0`; отрицательные — веб-клиенты, в файл не попадают |
+| username, имя | `users.username`, `first_name`, `last_name` | так же |
+| Язык | `users.language_code`: `ru` или `en` | так же; вход через Telegram на сайте пишет код языка Telegram как есть (`uk`, `pt-br`) |
+| Дата появления | `users.registration_date` — момент первого /start | так же |
+| Пользователи панели | имя `tg_<Telegram ID>` (UUID панели v2 в `panel_user_uuid` для панели v3 непригоден) | `users.panel_user_id` / `subscriptions.panel_user_id`; у старых записей — только имя `tg_<Telegram ID>` |
+
+### Платежи
+- Таблица `payments`: `user_id`, `provider`, `amount` (итог после скидки, `Float`), `currency`, `status`, `created_at`. В форке ещё `activation_status` и связь с правами на тариф `entitlement_payments` (`purpose`: `purchase`, `renewal`, `trial`).
+- Провайдеры: ЮКасса (`RUB`), Звёзды Telegram (`telegram_stars`, валюта `XTR`, сумма — число звёзд), CryptoPay (валюта — настроенный актив), FreeKassa, Platega, SeverPay; в форке ещё LavaPay.
+- **Успешный платёж — только `status = 'succeeded'`.** Так считает и сам бот: число оплат, выручка, «приглашённый купил». Остальные состояния:
+  - ожидание — `pending_<провайдер>`, `pending`, `waiting_for_capture`;
+  - промежуточное — `processing` (может застрять, если бот упал во время активации);
+  - неуспех — `canceled`, `failed`, `failed_creation`, `failed_user_not_found`, `failed_metadata_error`; в форке ещё `expired`.
+- **Без платежа:** триал, бонусные дни по промокоду (`promo_code_activations` без `payment_id`), реферальные бонусные дни, дни, добавленные админом в боте или веб-админке форка (только запись в `message_logs`). Подарков другому человеку и внутреннего баланса нет ни в одной версии. Админ не может создать платёж руками.
+- **Возвраты в базе не видны.** Ни одна версия возвраты не записывает: возврат через личный кабинет ЮКассы оставляет платёж `succeeded`.
+- **Поздние уведомления могут затереть `succeeded`:** chargeback в Platega → `canceled`, отказ SeverPay → `failed`, в форке — уведомления LavaPay. Такой клиент выглядит не платившим.
+- **В форке веб-платежи остаются у веб-клиента.** Когда веб-аккаунт привязывают к Telegram, подписка переходит к Telegram-клиенту, а платежи остаются на отрицательном `site_user_id` аккаунта (`accounts.telegram_user_id`, `accounts.site_user_id`).
+- **Удалённые админом клиенты** удаляются вместе с платежами.
+
+### Можно ли понять, кто платил (решение 0070)
+**Да.** Правило «у клиента есть хотя бы один платёж `succeeded` с суммой больше нуля» отделяет платные дни от подаренных: подаренные дни платежей не создают. Уточнения:
+- **Провайдер любой**, включая Звёзды и криптовалюту: клиент платил деньгами в любой форме.
+- **Форк:** учитываются и платежи привязанного веб-аккаунта (`accounts.site_user_id`). Подтверждением оплаты считается и активация: `activation_status = 'succeeded'` или связь `entitlement_payments` с `purpose` `purchase` или `renewal`. Это спасает оплату, статус которой позже затёрло уведомление провайдера. Сумма больше нуля обязательна: у пробного тарифа форка цена 0.
+- **Не видно и не исправить по базе:**
+  - вернувший деньги клиент остаётся «платившим»;
+  - клиент с оспоренным платежом (chargeback) — «не платившим», если других оплат нет;
+  - `processing` и `expired` считаются неоплатой, хотя деньги могли прийти.
+- **Клиенты, которых бот подтянул из панели синхронизацией** (`/sync` в админке бота), создаются без истории платежей: `username`, `first_name`, `last_name` пустые, язык `ru`, `registration_date` — момент синхронизации. Если такой клиент платил раньше — в другом боте или до синхронизации, — правило запишет ему «не платил». Сколько таких в данных владельца, покажет запрос 4. Если найдутся, поле им не передаётся: усыновлённый клиент без поля считается платившим (0070). Признак определяется по итогам запроса.
+
+### Триал
+- **Оригинал:** явной отметки нет. Бот отказывает в триале, если у клиента есть **любая** строка `subscriptions` (`has_any_subscription_for_user`). Строку триала покупка перезаписывает: одна строка на пользователя панели.
+- **Форк:** отказывает, если есть действующая (`reset_at IS NULL`) строка `trial_activations` клиента или его веб-аккаунта, **или** есть любая строка `subscriptions`. Строку `subscriptions` форк не проверяет, если админ выдал неиспользованное разрешение на повторный триал (`trial_reset_grants.used_at IS NULL`). Миграция 0008 не заполнила `trial_activations` по прошлым триалам, поэтому без проверки подписок старые триалы потерялись бы.
+- **Правило адаптера** (утверждено владельцем): «Триал использован», если старый бот сейчас отказал бы в триале по этим же условиям.
+
+### Рефералы
+- Код клиента — `users.referral_code`: 9 знаков из `A–Z` и `0–9`. Ссылка бота — `?start=ref_u<код>`.
+- Бот принимает параметр `start` по шаблону `^ref_((?:[uU][A-Za-z0-9]{9})|(?:[A-Za-z0-9]{9})|\d+)$`:
+  - `ref_u<код>` и `ref_U<код>` — основной вид;
+  - `ref_<код>` — код без буквы `u`;
+  - `ref_<Telegram ID>` — старый вид ссылки, если включено `LEGACY_REFS` (по умолчанию включено).
+  Код бот ищет без учёта регистра.
+- `promo_<код>` — промокод старого бота; любой другой параметр — метка рекламной кампании. Промокоды и метки не переносятся.
+- Пригласивший — `users.referred_by_id` (Telegram ID). Бот записывает его при первом /start и позже, если поле пусто и у клиента нет активной подписки. Ссылка на сайт форка (`/register?ref=<код>`) к боту не относится.
+> **Предложение (не утверждено):** адаптер выдаёт каждому клиенту коды `ref_u<код>`, `ref_U<код>`, `ref_<код>` и `ref_<Telegram ID>` — значения параметра `start` целиком, как их получит новый бот ([решение 0071](../decisions/0071-stage-10-preparation.md)).
+
+### Что адаптер берёт из каждой версии
+| | Оригинал | Форк |
+|---|---|---|
+| Как узнать | нет `users.panel_user_id` | есть `users.panel_user_id` |
+| Клиенты | все `users` | `users.user_id > 0` |
+| Платил | `payments` клиента: `succeeded`, сумма > 0 | то же для клиента и его веб-аккаунта, плюс `activation_status` и `entitlement_payments` |
+| Триал | любая строка `subscriptions` | `trial_activations` или любая строка `subscriptions` без неиспользованного разрешения |
+| Пользователи панели | имя `tg_<ID>`, если у клиента есть строки `subscriptions` | `panel_user_id` из `users` и `subscriptions`; имя `tg_<ID>`, если числового ID нет |
+| Коды | `ref_u…`, `ref_U…`, `ref_…`, `ref_<ID>` | так же |
+| Пригласивший | `referred_by_id > 0` | так же |
+
+### Запросы для копии данных форка
+Только чтение. Каждый запрос возвращает только счётчики — без Telegram ID и имён. Запускать на копии базы форка, например через `psql`.
+
+**1. Клиенты и веб-клиенты**
+```sql
+SELECT count(*) FILTER (WHERE user_id > 0) AS telegram_clients,
+       count(*) FILTER (WHERE user_id < 0) AS web_clients
+FROM users;
+```
+
+**2. Состояния платежей**
+```sql
+SELECT provider, status, count(*) AS payments, count(DISTINCT user_id) AS clients
+FROM payments GROUP BY provider, status ORDER BY provider, status;
+```
+
+**3. Кто платил по правилу адаптера**
+```sql
+WITH ids AS (
+  SELECT user_id AS tg_id, user_id AS pay_id FROM users WHERE user_id > 0
+  UNION
+  SELECT telegram_user_id, site_user_id FROM accounts
+  WHERE telegram_user_id > 0 AND site_user_id IS NOT NULL
+),
+evidence AS (
+  SELECT ids.tg_id, p.provider,
+         p.status = 'succeeded' AS by_status,
+         p.activation_status = 'succeeded'
+           OR EXISTS (SELECT 1 FROM entitlement_payments ep
+                      WHERE ep.payment_id = p.payment_id
+                        AND ep.purpose IN ('purchase', 'renewal')) AS by_activation
+  FROM ids JOIN payments p ON p.user_id = ids.pay_id
+  WHERE p.amount > 0
+)
+SELECT
+  (SELECT count(DISTINCT tg_id) FROM evidence WHERE by_status OR by_activation) AS paid,
+  (SELECT count(DISTINCT tg_id) FROM evidence WHERE by_activation AND NOT by_status
+     AND tg_id NOT IN (SELECT tg_id FROM evidence WHERE by_status)) AS paid_only_by_activation,
+  (SELECT count(DISTINCT tg_id) FROM evidence e WHERE (by_status OR by_activation)
+     AND NOT EXISTS (SELECT 1 FROM evidence e2 WHERE e2.tg_id = e.tg_id
+                     AND (e2.by_status OR e2.by_activation)
+                     AND e2.provider <> 'telegram_stars')) AS paid_only_with_stars,
+  (SELECT count(DISTINCT ids.tg_id) FROM ids JOIN payments p ON p.user_id = ids.pay_id
+     WHERE ids.pay_id < 0 AND p.status = 'succeeded' AND p.amount > 0) AS paid_via_web_account;
+```
+
+**4. Похожие на подтянутых синхронизацией**
+Клиент ни разу не открывал бот (нет имени: у любого аккаунта Telegram оно есть), но у него есть подписка.
+```sql
+WITH paid AS (
+  SELECT DISTINCT user_id FROM payments WHERE status = 'succeeded' AND amount > 0
+)
+SELECT
+  count(*) FILTER (WHERE first_name IS NULL AND username IS NULL) AS without_name,
+  count(*) FILTER (WHERE first_name IS NULL AND username IS NULL
+                   AND EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.user_id))
+    AS without_name_with_subscription,
+  count(*) FILTER (WHERE first_name IS NULL AND username IS NULL
+                   AND EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.user_id)
+                   AND u.user_id NOT IN (SELECT user_id FROM paid))
+    AS without_name_with_subscription_unpaid,
+  count(*) FILTER (WHERE EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.user_id)
+                   AND u.user_id NOT IN (SELECT user_id FROM paid)
+                   AND NOT EXISTS (SELECT 1 FROM message_logs m WHERE m.user_id = u.user_id
+                                   AND m.event_type = 'command:/start'))
+    AS subscription_unpaid_no_start_in_logs
+FROM users u WHERE u.user_id > 0;
+```
+
+**5. Моменты появления: сколько клиентов появилось в одну минуту** (всплеск — след синхронизации)
+```sql
+SELECT date_trunc('minute', registration_date) AS minute, count(*) AS clients
+FROM users WHERE user_id > 0
+GROUP BY 1 HAVING count(*) >= 20 ORDER BY 2 DESC LIMIT 10;
+```
+
+**6. Триал по правилу адаптера**
+```sql
+WITH ids AS (
+  SELECT u.user_id AS tg_id, a.id AS account_id, a.site_user_id
+  FROM users u LEFT JOIN accounts a ON a.telegram_user_id = u.user_id
+  WHERE u.user_id > 0
+),
+flags AS (
+  SELECT tg_id,
+    EXISTS (SELECT 1 FROM trial_activations t WHERE t.reset_at IS NULL
+            AND (t.user_id IN (tg_id, site_user_id) OR t.telegram_user_id = tg_id
+                 OR t.site_user_id = ids.site_user_id OR t.account_id = ids.account_id)) AS activation,
+    EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id IN (tg_id, site_user_id)) AS any_subscription,
+    EXISTS (SELECT 1 FROM trial_reset_grants g WHERE g.used_at IS NULL
+            AND (g.user_id IN (tg_id, site_user_id) OR g.telegram_user_id = tg_id
+                 OR g.site_user_id = ids.site_user_id OR g.account_id = ids.account_id)) AS reset_grant
+  FROM ids
+)
+SELECT count(*) FILTER (WHERE activation OR (any_subscription AND NOT reset_grant)) AS trial_used,
+       count(*) FILTER (WHERE activation) AS by_activation,
+       count(*) FILTER (WHERE any_subscription AND NOT activation AND NOT reset_grant) AS only_by_subscription,
+       count(*) FILTER (WHERE reset_grant) AS unused_reset_grant
+FROM flags;
+```
+
+**7. Рефералы**
+```sql
+SELECT
+  count(*) FILTER (WHERE referral_code IS NOT NULL) AS with_code,
+  count(*) FILTER (WHERE referral_code ~ '^[0-9]+$') AS digits_only_code,
+  count(*) FILTER (WHERE referred_by_id IS NOT NULL) AS with_inviter,
+  count(*) FILTER (WHERE referred_by_id < 0) AS inviter_is_web_client,
+  count(*) FILTER (WHERE referred_by_id IS NOT NULL
+                   AND referred_by_id NOT IN (SELECT user_id FROM users)) AS inviter_missing
+FROM users WHERE user_id > 0;
+```
+
+**8. Языки**
+```sql
+SELECT coalesce(language_code, '(пусто)') AS language, count(*) AS clients
+FROM users WHERE user_id > 0 GROUP BY 1 ORDER BY 2 DESC;
+```
+
+**9. Связь с панелью**
+```sql
+SELECT
+  count(*) FILTER (WHERE EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.user_id)) AS with_subscription_rows,
+  count(*) FILTER (WHERE u.panel_user_id IS NOT NULL
+                   OR EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.user_id
+                              AND s.panel_user_id IS NOT NULL)) AS with_panel_id,
+  count(*) FILTER (WHERE EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.user_id)
+                   AND u.panel_user_id IS NULL
+                   AND NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.user_id
+                                   AND s.panel_user_id IS NOT NULL)) AS only_by_name
+FROM users u WHERE u.user_id > 0;
+```
+
+### Итоги на копии данных
+_Заполняется после запуска запросов владельцем — только доли и выводы, без абсолютных чисел._
