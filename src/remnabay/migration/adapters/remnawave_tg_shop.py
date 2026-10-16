@@ -191,11 +191,16 @@ def _subscriptions(
 
 
 def _codes(telegram_id: int, code: str | None) -> list[str]:
-    """Параметры `start`, которые старый бот принимает как ссылку на этого клиента."""
+    """Параметры `start`, которые старый бот принимает как ссылку на этого клиента.
+
+    `ref_<только цифры>` старый бот читает как Telegram ID, а не как код: у кода из
+    одних цифр такой ссылки нет — она ведёт на клиента с этим Telegram ID."""
     codes: list[str] = []
     if code and code.strip():
         code = code.strip()
-        codes += [f"ref_u{code}", f"ref_U{code}", f"ref_{code}"]
+        codes += [f"ref_u{code}", f"ref_U{code}"]
+        if not code.isdigit():
+            codes.append(f"ref_{code}")
     codes.append(f"ref_{telegram_id}")
     return codes
 

@@ -222,22 +222,23 @@ GROUP BY 1 HAVING count(*) >= 20 ORDER BY 2 DESC LIMIT 10;
 ```
 
 **6. Триал по правилу адаптера**
+Столбец веб-аккаунта назван `web_id`: у `trial_activations` есть свой `site_user_id`, и без явного имени подзапрос сравнивал бы строку саму с собой (так было в первой версии запроса).
 ```sql
 WITH ids AS (
-  SELECT u.user_id AS tg_id, a.id AS account_id, a.site_user_id
+  SELECT u.user_id AS tg_id, a.id AS account_id, a.site_user_id AS web_id
   FROM users u LEFT JOIN accounts a ON a.telegram_user_id = u.user_id
   WHERE u.user_id > 0
 ),
 flags AS (
-  SELECT tg_id,
+  SELECT i.tg_id,
     EXISTS (SELECT 1 FROM trial_activations t WHERE t.reset_at IS NULL
-            AND (t.user_id IN (tg_id, site_user_id) OR t.telegram_user_id = tg_id
-                 OR t.site_user_id = ids.site_user_id OR t.account_id = ids.account_id)) AS activation,
-    EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id IN (tg_id, site_user_id)) AS any_subscription,
+            AND (t.user_id IN (i.tg_id, i.web_id) OR t.telegram_user_id = i.tg_id
+                 OR t.site_user_id = i.web_id OR t.account_id = i.account_id)) AS activation,
+    EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id IN (i.tg_id, i.web_id)) AS any_subscription,
     EXISTS (SELECT 1 FROM trial_reset_grants g WHERE g.used_at IS NULL
-            AND (g.user_id IN (tg_id, site_user_id) OR g.telegram_user_id = tg_id
-                 OR g.site_user_id = ids.site_user_id OR g.account_id = ids.account_id)) AS reset_grant
-  FROM ids
+            AND (g.user_id IN (i.tg_id, i.web_id) OR g.telegram_user_id = i.tg_id
+                 OR g.site_user_id = i.web_id OR g.account_id = i.account_id)) AS reset_grant
+  FROM ids i
 )
 SELECT count(*) FILTER (WHERE activation OR (any_subscription AND NOT reset_grant)) AS trial_used,
        count(*) FILTER (WHERE activation) AS by_activation,
@@ -278,5 +279,64 @@ SELECT
 FROM users u WHERE u.user_id > 0;
 ```
 
+**10. Успешные платежи: клиенты Telegram и веб-клиенты**
+```sql
+SELECT
+  count(DISTINCT user_id) FILTER (WHERE status = 'succeeded') AS succeeded_clients,
+  count(DISTINCT user_id) FILTER (WHERE status = 'succeeded' AND user_id > 0) AS succeeded_telegram,
+  count(DISTINCT user_id) FILTER (WHERE status = 'succeeded' AND user_id < 0) AS succeeded_web,
+  count(DISTINCT user_id) FILTER (WHERE status = 'succeeded' AND user_id < 0
+    AND user_id IN (SELECT site_user_id FROM accounts WHERE telegram_user_id > 0)) AS succeeded_web_linked,
+  count(*) FILTER (WHERE status = 'succeeded' AND amount <= 0) AS succeeded_zero_amount,
+  count(DISTINCT user_id) FILTER (WHERE status = 'succeeded' AND user_id > 0
+    AND user_id IN (SELECT user_id FROM payments p2 WHERE p2.status = 'succeeded'
+                    GROUP BY user_id HAVING count(DISTINCT provider) > 1)) AS paid_with_several_providers
+FROM payments;
+```
+
+**11. Клиенты без имени с подпиской и без оплат: откуда они**
+Имя может быть пустым не только после синхронизации: при /start форк стирает имя и username, в которых есть ссылки или «запрещённые» слова (`telegram`, `t.me` и похожие).
+```sql
+WITH nameless AS (
+  SELECT u.user_id FROM users u
+  WHERE u.user_id > 0 AND u.first_name IS NULL AND u.username IS NULL
+    AND EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.user_id)
+    AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.user_id = u.user_id
+                    AND p.status = 'succeeded' AND p.amount > 0)
+)
+SELECT
+  count(*) AS nameless,
+  count(*) FILTER (WHERE EXISTS (SELECT 1 FROM accounts a WHERE a.telegram_user_id = n.user_id))
+    AS with_web_account,
+  count(*) FILTER (WHERE EXISTS (SELECT 1 FROM trial_activations t
+                                 WHERE t.telegram_user_id = n.user_id OR t.user_id = n.user_id))
+    AS with_trial_activation,
+  count(*) FILTER (WHERE EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = n.user_id
+                                 AND s.status_from_panel = 'TRIAL')) AS with_trial_subscription,
+  count(*) FILTER (WHERE EXISTS (SELECT 1 FROM payments p WHERE p.user_id = n.user_id))
+    AS with_any_payment_attempt,
+  count(*) FILTER (WHERE EXISTS (SELECT 1 FROM message_logs m WHERE m.user_id = n.user_id))
+    AS with_any_log,
+  count(*) FILTER (WHERE EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = n.user_id
+                                 AND s.end_date > now())) AS with_active_subscription
+FROM nameless n;
+```
+
+**12. Ведётся ли журнал сообщений бота**
+```sql
+SELECT
+  (SELECT count(*) FROM users WHERE user_id > 0) AS telegram_clients,
+  count(DISTINCT user_id) FILTER (WHERE event_type = 'command:/start') AS clients_with_start_in_logs,
+  min(timestamp) AS first_log_at
+FROM message_logs;
+```
+
 ### Итоги на копии данных
-_Заполняется после запуска запросов владельцем — только доли и выводы, без абсолютных чисел._
+Только доли и выводы, без абсолютных чисел. Запросы 1–9 — 2026-10-17; уточняющие 6, 10–12 — следом.
+- **Платили** — около пятой части клиентов Telegram. Успешных оплат Звёздами нет, оплат через веб-аккаунт нет; подтверждение активации ни одного клиента не добавило.
+- **CryptoPay хранит свои состояния счёта как есть:** `active` (счёт ещё не оплачен) и `expired`. Это не оплата, правило адаптера их не считает.
+- **Языки** — только `ru` и `en`.
+- **Связь с панелью:** у всех клиентов со строками подписок есть числовой ID панели; по имени `tg_<ID>` искать не придётся.
+- **Синхронизация из панели:** всплеска появлений в одну минуту нет. Без имени, с подпиской и без оплат — единицы клиентов (около 2 %); откуда они — запрос 11.
+- **Код из одних цифр** встретился у единиц клиентов. Ссылку `ref_<только цифры>` старый бот читает как Telegram ID, поэтому адаптер такой код без буквы `u` не выдаёт.
+- **Триал:** первая версия запроса 6 из-за ошибки в запросе находила активацию у всех клиентов; адаптер считает на Python и этой ошибки не повторяет. Итог — после исправленного запроса.

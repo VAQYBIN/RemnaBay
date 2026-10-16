@@ -70,6 +70,7 @@ INSERT INTO users (user_id, username, first_name, last_name, language_code, regi
  (108, NULL, 'Приглашён', NULL, 'pt-br', now(), 'ABCDEF123', 101, NULL),
  (109, NULL, 'Старый', NULL, 'en', now(), 'AAAAAAAA9', -7, NULL),
  (110, NULL, 'Ноль', NULL, 'ru', now(), NULL, 110, NULL),
+ (111, NULL, 'Цифры', NULL, 'ru', now(), '123456789', NULL, NULL),
  (-7, 'web_abc', 'mail@example.com', NULL, 'ru', now(), 'WEBWEBWEB', NULL, NULL);
 INSERT INTO accounts (id, telegram_user_id, site_user_id) VALUES
  ('00000000-0000-0000-0000-000000000001', 105, -7);
@@ -158,6 +159,7 @@ def test_9_9_fork_paid_in_old_bot(old_bot: dict[str, str]) -> None:
         108: False,
         109: False,
         110: False,
+        111: False,
     }
 
 
@@ -182,6 +184,8 @@ def test_9_9_fork_trial_panel_users_codes(old_bot: dict[str, str]) -> None:
         "ref_108",
     ]
     assert clients[110].referral_codes == ["ref_110"]
+    # `ref_123456789` старый бот прочитал бы как Telegram ID — такого кода нет
+    assert clients[111].referral_codes == ["ref_u123456789", "ref_U123456789", "ref_111"]
     assert (clients[108].invited_by, clients[109].invited_by, clients[110].invited_by) == (
         101,
         None,
@@ -226,7 +230,7 @@ def test_9_9_command_writes_file_in_format(old_bot: dict[str, str], tmp_path: Pa
     assert code == 0
     file = parse_file(output.read_bytes())
     assert file.source.name == "remnawave-tg-shop"
-    assert len(file.clients) == 10
+    assert len(file.clients) == 11
     raw = json.loads(output.read_text(encoding="utf-8"))
     assert "paid_in_old_bot" in raw["clients"][0]
 
