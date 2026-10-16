@@ -31,11 +31,12 @@ from remnabay.migration import (
     rerun,
     start_dry_run,
 )
-from remnabay.migration._runs import APPLY_BATCH, PAGE_SIZE, apply_step, plan_run, read_panel
-from remnabay.queue import Ending, TaskContext, TaskStatus
+from remnabay.migration._runs import APPLY_BATCH, PAGE_SIZE, read_panel
+from remnabay.queue import Ending
 from remnabay.trial import trial_available
 from tests.domain_support import add, make_client, make_subscription, make_tariff
 from tests.guide_support import queued
+from tests.migration_support import run_chain
 from tests.panel_support import FakePanel, fake_runtime
 
 SQUAD_A = "6f0b2c3e-1d2a-4b5c-8d9e-0f1a2b3c4d5e"
@@ -77,23 +78,6 @@ def _user(panel: FakePanel, user_id: int, telegram_id: int | None, **overrides: 
     )
 
 
-async def _run_chain(session: AsyncSession) -> None:
-    """Выполняет задачи прогона по цепочке, пока они ставятся."""
-    while True:
-        rows = [
-            (definition, row)
-            for definition in (read_panel, plan_run, apply_step)
-            for row in await queued(session, definition)
-        ]
-        if not rows:
-            return
-        for definition, row in rows:
-            context = TaskContext(session=session, task_id=row.id, attempt_number=1)
-            await definition.run(context, row.args)
-            row.status = TaskStatus.DONE
-        await session.flush()
-
-
 async def _dry_run(
     session: AsyncSession,
     owner: TeamMember,
@@ -102,14 +86,14 @@ async def _dry_run(
     file: MigrationFile | None = None,
 ) -> MigrationRun:
     run = await start_dry_run(session, member_id=owner.id, mapping=mapping or [], file=file)
-    await _run_chain(session)
+    await run_chain(session)
     await session.refresh(run)
     return run
 
 
 async def _apply(session: AsyncSession, owner: TeamMember, dry: MigrationRun) -> MigrationRun:
     run = await apply_dry_run(session, run_id=dry.id, member_id=owner.id, now=datetime.now(UTC))
-    await _run_chain(session)
+    await run_chain(session)
     await session.refresh(run)
     return run
 
@@ -309,7 +293,7 @@ async def test_9_15_mapping_groups_and_differences(
     ]
     rule = MappingRule(squads=[UUID(SQUAD_A)], device_limit=3, tariff_id=tariff.id)
     second = await rerun(db_session, run_id=first.id, member_id=owner.id, mapping=[rule])
-    await _run_chain(db_session)
+    await run_chain(db_session)
     await db_session.refresh(second)
     report = _report(second)
     assert (report.no_tariff, report.differs) == (1, 1)
@@ -347,7 +331,7 @@ async def test_9_3_apply_only_latest_fresh_dry_run(
     with pytest.raises(MigrationRunError) as busy:
         await start_dry_run(db_session, member_id=owner.id, mapping=[])
     assert busy.value.reason == RunError.BUSY
-    await _run_chain(db_session)
+    await run_chain(db_session)
     with pytest.raises(MigrationRunError) as applied:
         await apply_dry_run(db_session, run_id=latest.id, member_id=owner.id, now=now)
     assert applied.value.reason == RunError.ALREADY_APPLIED
@@ -379,7 +363,7 @@ async def test_4_28_large_panel_is_read_and_applied_in_steps(
         _user(panel, 1000 + index, 50_000 + index)
 
     run = await start_dry_run(db_session, member_id=owner.id, mapping=[])
-    await _run_chain(db_session)
+    await run_chain(db_session)
     await db_session.refresh(run)
     applied = await _apply(db_session, owner, run)
 
