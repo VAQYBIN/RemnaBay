@@ -4,7 +4,7 @@
 (`on_failed`, `on_cancelled`, `on_resolved`), поставить её в своей транзакции
 (`TaskDefinition.enqueue`), запустить воркер (`Worker`), разобрать проваленную
 (`retry_failed`, `cancel_failed`, `resolve_failed`) и показать, что требует
-внимания (`failed_tasks`, `waiting_panel_count`).
+внимания (`failed_tasks`, `waiting_panel_count`), узнать, ждут ли задачи вида (`due_tasks_exist`).
 
 Правила для задач (0024):
 - задача сверяет состояние перед внешним действием (4.15): «оживший» после
@@ -25,6 +25,7 @@ from remnabay.queue._core import (
     WaitingTask,
     attempts_of,
     cancel_failed,
+    due_tasks_exist,
     failed_tasks,
     resolve_failed,
     retry_failed,
@@ -32,6 +33,7 @@ from remnabay.queue._core import (
     task_status,
     task_subject,
     tasks_for,
+    unfinished_counts,
     unfinished_keys,
     waiting_behind,
     waiting_panel_count,
@@ -72,6 +74,7 @@ __all__ = [
     "WorkerConfig",
     "attempts_of",
     "cancel_failed",
+    "due_tasks_exist",
     "failed_tasks",
     "last_periodic_start",
     "resolve_failed",
@@ -80,6 +83,7 @@ __all__ = [
     "task_status",
     "task_subject",
     "tasks_for",
+    "unfinished_counts",
     "unfinished_keys",
     "waiting_behind",
     "waiting_panel_count",

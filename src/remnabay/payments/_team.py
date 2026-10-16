@@ -2,7 +2,7 @@
 
 Действия: применить повторно, применить созданием новой подписки, отметить решённым
 вручную (с комментарием), привязать неизвестный платёж к клиенту. Вернуть деньги —
-блок 10. Каждое действие — в журнале с участником команды (4.25); после решения
+`remnabay.refunds` (блок 10). Каждое действие — в журнале с участником команды (4.25); после решения
 клиент получает уведомление о результате (4.24).
 """
 
@@ -161,6 +161,18 @@ async def bind_unknown_payment(
         "payment.bound",
         details={"client_id": client_id, "purpose": purpose.value},
     )
+
+
+async def release_failed_apply(
+    session: AsyncSession, payment_id: int, *, member_id: int, comment: str
+) -> None:
+    """Возврат по неприменённому платежу (10.14): проваленное применение больше не
+    нужно — оно закрывается, и следующие операции подписки идут дальше (4.27)."""
+    task_id = await _failed_apply_task(session, payment_id)
+    if task_id is not None:
+        await resolve_failed(
+            session, _TASKS, task_id, actor=Actor.team_member(member_id), comment=comment
+        )
 
 
 @dataclass(frozen=True)

@@ -235,7 +235,7 @@ def _checkout(client: Client, tariff: Tariff) -> Checkout:
         purpose=PaymentPurpose.PURCHASE,
         tariff=tariff,
         subscription=None,
-        shown_price=tariff.price,
+        shown_total=tariff.price,
         token="screen-1",  # noqa: S106 — токен экрана подтверждения, не секрет
         description="Магазин: Месяц, 30 дней",
         return_url=RETURN_URL,

@@ -25,8 +25,8 @@ from remnabay.domain.subscriptions import Subscription
 from remnabay.domain.tariffs import Tariff
 from remnabay.journal import Actor, Outcome
 from remnabay.messaging import MAIN_MENU_BUTTON, ButtonArgs, send_to_client
-from remnabay.payments._apply import journal_payment
-from remnabay.payments._catalog import check_choice
+from remnabay.payments._apply import enqueue_apply, journal_payment
+from remnabay.payments._catalog import check_choice, discounted_total
 from remnabay.payments._confirm import confirm_payment
 from remnabay.payments._provider import (
     InvoiceRequest,
@@ -72,21 +72,32 @@ class PaymentUnavailableError(CheckoutError):
 
 
 @dataclass(frozen=True)
+class CheckoutPromo:
+    """Промокод на скидку с экрана подтверждения (8.4). Действует ли он, проверяет
+    вызывающий; дальше скидка фиксируется в платеже (сквозное правило 2, 8.7)."""
+
+    promo_code_id: int
+    percent: int
+
+
+@dataclass(frozen=True)
 class Checkout:
-    """Что клиент оплачивает: на экране подтверждения он видел `shown_price`."""
+    """Что клиент оплачивает: на экране подтверждения он видел итог `shown_total`."""
 
     client: Client
     purpose: PaymentPurpose
     tariff: Tariff
     # Продлеваемая подписка; у покупки — нет
     subscription: Subscription | None
-    shown_price: Decimal
+    shown_total: Decimal
     # Токен экрана подтверждения: повторное «Оплатить» на нём не создаёт второй счёт (3.5)
     token: str
     # Назначение платежа на странице провайдера (`payment.description`)
     description: str
     # Куда вернуть клиента после оплаты — в бот (3.32)
     return_url: str
+    # К одному платежу — не больше одного промокода (8.5)
+    promo: CheckoutPromo | None = None
 
 
 async def _same_token(session: AsyncSession, token: str) -> Payment | None:
@@ -136,10 +147,12 @@ async def _operation_of(
 async def open_invoice(
     session: AsyncSession, providers: Providers, checkout: Checkout, *, now: datetime
 ) -> Payment:
-    """Создаёт платёж и счёт у провайдера на сумму с экрана подтверждения (3.4).
+    """Создаёт платёж и счёт у провайдера на итог с экрана подтверждения (3.4, 8.4).
 
     Повторное нажатие на том же экране возвращает уже созданный платёж (3.5).
-    `PriceChangedError` — цена изменилась: экран подтверждения нужно показать заново.
+    Итог ноль (скидка 100%) — платёж без счёта у провайдера, подписка создаётся или
+    продлевается сразу (8.8).
+    `PriceChangedError` — итог изменился: экран подтверждения нужно показать заново.
     `PaymentUnavailableError` — провайдер недоступен, ничего не создано (3.30).
     """
     # Счета одного клиента создаются по очереди: иначе два экрана подтверждения
@@ -158,13 +171,17 @@ async def open_invoice(
         subscription=checkout.subscription,
         now=now,
     )
-    if checkout.tariff.price != checkout.shown_price:
-        raise PriceChangedError("Цена тарифа изменилась")
+    currency = await get_setting(session, SHOP_CURRENCY)
     available = await providers.available(session)
-    if not available:
-        raise PaymentUnavailableError("Нет доступного способа оплаты")
     # Один провайдер — без выбора (сквозное правило 5); выбор способа — с появлением второго
-    provider = available[0]
+    provider = available[0] if available else None
+    min_amount = provider.min_amount(currency) if provider is not None else Decimal(0)
+    percent = checkout.promo.percent if checkout.promo is not None else None
+    total = discounted_total(checkout.tariff.price, percent, min_amount)
+    if total != checkout.shown_total:
+        raise PriceChangedError("Итог к оплате изменился")
+    if total > 0 and provider is None:
+        raise PaymentUnavailableError("Нет доступного способа оплаты")
 
     replaced = await _unpaid_same_operation(session, checkout)
     lifetime = await get_setting(session, INVOICE_LIFETIME)
@@ -177,30 +194,40 @@ async def open_invoice(
         state=PaymentState.PENDING,
         tariff_id=checkout.tariff.id,
         tariff_snapshot=snapshot.stored(),
-        amount=snapshot.price,
-        currency=await get_setting(session, SHOP_CURRENCY),
+        promo_code_id=checkout.promo.promo_code_id if checkout.promo is not None else None,
+        amount=total,
+        discount_amount=snapshot.price - total,
+        currency=currency,
         idempotency_key=checkout.token,
         operation_id=operation_id,
-        expires_at=now + lifetime,
     )
     try:
         async with session.begin_nested():
             session.add(payment)
-            await session.flush()
-            invoice = await provider.create_invoice(
-                InvoiceRequest(
-                    payment_id=payment.id,
-                    amount=payment.amount,
-                    currency=payment.currency,
-                    description=checkout.description,
-                    idempotency_key=checkout.token,
-                    return_url=checkout.return_url,
+            if total == 0 or provider is None:
+                # Итог ноль: оплачивать нечего, счёта у провайдера нет (8.8)
+                payment.state = PaymentState.PAID
+                payment.paid_at = now
+                payment.paid_amount = total
+                payment.paid_currency = currency
+                await session.flush()
+            else:
+                payment.expires_at = now + lifetime
+                await session.flush()
+                invoice = await provider.create_invoice(
+                    InvoiceRequest(
+                        payment_id=payment.id,
+                        amount=payment.amount,
+                        currency=payment.currency,
+                        description=checkout.description,
+                        idempotency_key=checkout.token,
+                        return_url=checkout.return_url,
+                    )
                 )
-            )
-            payment.provider = provider.code
-            payment.provider_payment_id = invoice.provider_payment_id
-            payment.payment_url = invoice.payment_url
-            await session.flush()
+                payment.provider = provider.code
+                payment.provider_payment_id = invoice.provider_payment_id
+                payment.payment_url = invoice.payment_url
+                await session.flush()
     except IntegrityError:
         # Второе одновременное нажатие на том же экране: первое уже создало платёж
         existing = await _same_token(session, checkout.token)
@@ -217,15 +244,21 @@ async def open_invoice(
         actor,
         "payment.created",
         details={
-            "provider": provider.code,
+            "provider": payment.provider,
             "amount": str(payment.amount),
+            "discount": str(payment.discount_amount),
+            "promo_code_id": payment.promo_code_id,
             "currency": payment.currency,
             "tariff_id": checkout.tariff.id,
             "purpose": checkout.purpose.value,
         },
     )
     for old in replaced:
-        await _cancel(session, provider, old, actor, "payment.replaced", {"by": payment.id})
+        old_provider = await providers.get(session, old.provider) if old.provider else None
+        await _cancel(session, old_provider, old, actor, "payment.replaced", {"by": payment.id})
+    if payment.provider is None:
+        await enqueue_apply(session, payment)
+        return payment
     await expire_invoice.enqueue(session, InvoiceArgs(payment_id=payment.id), delay=lifetime)
     await poll_invoice.enqueue(
         session, InvoiceArgs(payment_id=payment.id), delay=await get_setting(session, POLL_INTERVAL)

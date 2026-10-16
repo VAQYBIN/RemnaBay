@@ -1,5 +1,5 @@
 """Покупка и продление в боте: экраны З1–З6 (блок 3; 1.22, 3.1–3.5, 3.12, 3.15, 3.20–3.24,
-3.30, 3.32, 3.35, 3.36, 3.38, 4.7)."""
+3.30, 3.32, 3.35, 3.36, 3.38, 3.40, 3.41, 4.7)."""
 
 import json
 from collections.abc import AsyncGenerator
@@ -169,7 +169,7 @@ async def test_3_1_3_2_buy_shows_tariffs_on_sale_in_owner_order(shop: Shop) -> N
     """3.1, 3.2, 2.4: новый клиент видит «Купить подписку»; список — тарифы в продаже в
     порядке владельца, архивного нет."""
     menu = await _menu(shop)
-    assert _labels(menu) == ["Купить подписку"]
+    assert _labels(menu) == ["Купить подписку", "Ввести промокод"]
     assert _button(menu, "Купить подписку").style == "success"
 
     choice = await _press(shop, _button(menu, "Купить подписку"))
@@ -195,7 +195,7 @@ async def test_3_3_confirmation_shows_tariff_period_price_total(
     assert "Тариф: Месяц" in _text(screen)
     assert "Срок: 30 дней" in _text(screen)
     assert "Итого: 199,00\xa0₽" in _text(screen)
-    assert _labels(screen) == ["Оплатить", "Назад"]
+    assert _labels(screen) == ["Оплатить", "Ввести промокод", "Назад"]
     assert _button(screen, "Оплатить").style == "success"
 
 
@@ -330,7 +330,7 @@ async def test_3_23_3_20_single_subscription_renews_with_its_tariff(
     month = tariffs[0]
     subscription = await _subscription(shop, month)
     menu = await _menu(shop)
-    assert _labels(menu) == ["Моя подписка"]
+    assert _labels(menu) == ["Моя подписка", "Продлить", "Ввести промокод"]
     assert _entities(menu)  # дата окончания в сводке — date_time
 
     card = await _press(shop, _button(menu, "Моя подписка"))
@@ -410,7 +410,7 @@ async def test_3_24_several_subscriptions_each_shown_separately(
     await shop.session.flush()
 
     menu = await _menu(shop)
-    assert _labels(menu) == ["Мои подписки"]
+    assert _labels(menu) == ["Мои подписки", "Продлить", "Ввести промокод"]
     listing = await _press(shop, _button(menu, "Мои подписки"))
     labels = _labels(listing)
     assert any(label.startswith("Основная — активна до") for label in labels)
@@ -424,6 +424,86 @@ async def test_3_24_several_subscriptions_each_shown_separately(
     assert first.id != second.id
 
 
+async def test_3_40_main_menu_renew_leads_to_renewal_or_list(
+    shop: Shop, tariffs: list[Tariff]
+) -> None:
+    """3.40: «Продлить» в главном меню — при одной подписке сразу к её продлению тем же
+    тарифом, в том числе у истёкшей; при нескольких — к списку подписок."""
+    subscription = await _subscription(shop, tariffs[0], expires_in=-timedelta(days=1))
+    menu = await _menu(shop)
+    renew = _button(menu, "Продлить")
+    assert renew.callback_data == Renew(subscription_id=subscription.id).pack()
+    confirm = await _press(shop, renew)
+    assert "Тариф: Месяц" in _text(confirm)
+
+    await _subscription(shop, tariffs[0], panel_user_id=2)
+    menu = await _menu(shop)
+    listing = await _press(shop, _button(menu, "Продлить"))
+    assert len([label for label in _labels(listing) if label != "Назад"]) == 2
+
+
+async def test_3_40_no_renew_in_menu_for_disabled_subscription(
+    shop: Shop, tariffs: list[Tariff]
+) -> None:
+    """3.40, 4.7: единственная подписка отключена в панели — «Продлить» в меню нет."""
+    await _subscription(shop, tariffs[0], status=PanelUserStatus.DISABLED)
+    assert "Продлить" not in _labels(await _menu(shop))
+
+
+async def test_3_41_expired_subscription_changes_tariff(shop: Shop, tariffs: list[Tariff]) -> None:
+    """3.41: у истёкшей подписки — «Сменить тариф»: тарифы в продаже, кроме текущего;
+    выбранный тариф применяется к этой же подписке, срок — от оплаты."""
+    month, year, _archived = tariffs
+    subscription = await _subscription(shop, month, expires_in=-timedelta(days=1))
+    await _menu(shop)
+    await shop.press(USER, Card(subscription_id=subscription.id).pack())
+    card = shop.telegram.last()
+    assert _labels(card)[:2] == ["Продлить", "Сменить тариф"]
+
+    choice = await _press(shop, _button(card, "Сменить тариф"))
+    picks = [label for label in _labels(choice) if label != "Назад"]
+    assert len(picks) == 1
+    assert picks[0].startswith("Год")
+
+    confirm = await _press(shop, _buttons(choice)[0])
+    assert "Тариф: Год" in _text(confirm)
+    [entity] = _entities(confirm)
+    expected = datetime.now(UTC) + timedelta(days=365)
+    assert entity.unix_time is not None
+    assert abs(entity.unix_time - expected.timestamp()) < 60
+    await _press(shop, _button(confirm, "Оплатить"))
+    [payment] = await _payments(shop)
+    assert (payment.purpose, payment.subscription_id) == (PaymentPurpose.RENEWAL, subscription.id)
+    assert payment.tariff_id == year.id
+
+
+async def test_3_41_active_subscription_cannot_change_tariff(
+    shop: Shop, tariffs: list[Tariff]
+) -> None:
+    """3.41: у действующей подписки «Сменить тариф» нет (v1), а продление другим
+    тарифом по подделанной или старой кнопке не оформляется."""
+    month, year, _archived = tariffs
+    subscription = await _subscription(shop, month)
+    await _menu(shop)
+    await shop.press(USER, Card(subscription_id=subscription.id).pack())
+    assert "Сменить тариф" not in _labels(shop.telegram.last())
+
+    await shop.press(USER, Pick(tariff_id=year.id, subscription_id=subscription.id).pack())
+    assert "Оплатить" not in _labels(shop.telegram.last())
+    assert await _payments(shop) == []
+
+
+async def test_3_41_no_change_tariff_when_tariff_is_archived(
+    shop: Shop, tariffs: list[Tariff]
+) -> None:
+    """3.41, 3.21: тариф истёкшей подписки в архиве — выбор тарифа даёт сама
+    «Продлить», отдельной «Сменить тариф» нет."""
+    subscription = await _subscription(shop, tariffs[2], expires_in=-timedelta(days=1))
+    await _menu(shop)
+    await shop.press(USER, Card(subscription_id=subscription.id).pack())
+    assert "Сменить тариф" not in _labels(shop.telegram.last())
+
+
 async def test_3_36_only_trial_offers_buy_instead_of_renew(
     shop: Shop, tariffs: list[Tariff]
 ) -> None:
@@ -432,7 +512,7 @@ async def test_3_36_only_trial_offers_buy_instead_of_renew(
     del tariffs
     trial = await _subscription(shop, None, is_trial=True)
     menu = await _menu(shop)
-    assert _labels(menu) == ["Моя подписка", "Купить подписку"]
+    assert _labels(menu) == ["Моя подписка", "Купить подписку", "Ввести промокод"]
     await shop.press(USER, Card(subscription_id=trial.id).pack())
     card = shop.telegram.last()
     assert "Продлить" not in _labels(card)

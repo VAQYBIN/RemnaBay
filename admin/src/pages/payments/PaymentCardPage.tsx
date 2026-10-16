@@ -20,6 +20,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { formatDateTime, formatMoney } from '@/lib/format'
 import { actorName, clientLabel, historyName, PAYMENT_STATES, PURPOSES } from '@/lib/payments'
+import { cn } from '@/lib/utils'
 
 import { CommentDialog } from './CommentDialog'
 
@@ -156,10 +157,155 @@ function BindDialog({ card, open, onOpenChange }: { card: Card; open: boolean; o
   )
 }
 
-/** Действия по ситуации (4.22, 4.23); возврат — этап 9. */
+/** «2 00,50» → «200.50»; не сумма с точностью до копейки — `null`. */
+function parseAmount(text: string): string | null {
+  const normalized = text.replace(/\s/g, '').replace(',', '.')
+  return /^\d+(\.\d{1,2})?$/.test(normalized) ? normalized : null
+}
+
+/** «200.00» → «200», «200.50» → «200,50» — так, как оператор набирает сумму. */
+function amountText(amount: string): string {
+  return String(Number(amount)).replace('.', ',')
+}
+
+/** Экран возврата (А5, 10.8–10.12): предложенная сумма, способ, новая дата окончания
+ *  подписки и запрос клиента, который закроет возврат. */
+function RefundDialog({ card, open, onOpenChange }: { card: Card; open: boolean; onOpenChange: (open: boolean) => void }) {
+  const queryClient = useQueryClient()
+  const path = { params: { path: { payment_id: card.payment.id } } }
+  const { data: quote, error } = $api.useQuery('get', '/api/admin/payments/{payment_id}/refund', path, {
+    enabled: open,
+    retry: false,
+  })
+  const [typed, setTyped] = useState<string | null>(null)
+  const [chosen, setChosen] = useState<number | null>(null)
+  const refund = $api.useMutation('post', '/api/admin/payments/{payment_id}/refund', {
+    onSuccess: () => {
+      close(false)
+      void queryClient.invalidateQueries()
+    },
+  })
+  const close = (next: boolean) => {
+    if (!next) {
+      setTyped(null)
+      setChosen(null)
+      refund.reset()
+    }
+    onOpenChange(next)
+  }
+  const text = typed ?? (quote ? amountText(quote.suggested) : '')
+  const amount = parseAmount(text)
+  const tooMuch = quote !== undefined && amount !== null && Number(amount) > Number(quote.paid)
+  const valid = quote !== undefined && amount !== null && Number(amount) > 0 && !tooMuch
+  const requests = quote?.open_requests ?? []
+  const request = requests.length === 1 ? requests[0] : requests.find((item) => item.id === chosen)
+  const ready = valid && (requests.length <= 1 || request !== undefined)
+  const zone = quote?.time_zone ?? card.time_zone
+  const money = (value: string) => formatMoney(value, quote?.currency ?? card.payment.currency)
+
+  return (
+    <Dialog open={open} onOpenChange={close}>
+      <DialogContent className="glass-float">
+        <DialogHeader>
+          <DialogTitle>Вернуть деньги</DialogTitle>
+          <DialogDescription>
+            Верните деньги клиенту сами — в кабинете провайдера или переводом. Магазин отметит возврат выполненным
+            вручную.
+          </DialogDescription>
+        </DialogHeader>
+        {error && <p className="text-sm text-danger-text">{errorMessage(error, 'Вернуть нельзя')}</p>}
+        {quote && (
+          <div className="flex flex-col gap-4">
+            <Field
+              id="refund-amount"
+              label="Сумма возврата"
+              hint={
+                card.payment.state === 'applied'
+                  ? `Неиспользованная стоимость — ${money(quote.suggested)}. Заплачено ${money(quote.paid)}.`
+                  : `Заплачено ${money(quote.paid)} — больше вернуть нельзя.`
+              }
+            >
+              <Input
+                id="refund-amount"
+                inputMode="decimal"
+                className="tabular"
+                value={text}
+                aria-invalid={!valid}
+                onChange={(event) => setTyped(event.target.value)}
+              />
+            </Field>
+            {tooMuch && <p className="text-sm text-danger-text">Нельзя вернуть больше, чем заплачено.</p>}
+            <div className="rounded-xl bg-muted/60 p-3 text-sm">
+              {quote.subscription && quote.ends_now && (
+                <p>
+                  Подписка «{quote.subscription.name}» <span className="font-medium">закончится сейчас</span>. Напоминаний
+                  и «Подписка истекла» не будет — клиент получит только сообщение о возврате.
+                </p>
+              )}
+              {quote.subscription && !quote.ends_now && quote.new_end && (
+                <p>
+                  Подписка «{quote.subscription.name}» будет действовать до{' '}
+                  <span className="tabular font-medium">{formatDateTime(quote.new_end, zone)}</span>
+                  {quote.current_end && ` вместо ${formatDateTime(quote.current_end, zone)}`}.
+                </p>
+              )}
+              {quote.subscription && !quote.new_end && <p>Срок подписки «{quote.subscription.name}» не изменится.</p>}
+              {!quote.subscription && <p>Подписки у платежа нет — срок ничего не меняет.</p>}
+              {quote.new_end && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Неиспользованная часть платежа убирается из срока при любой сумме возврата.
+                </p>
+              )}
+            </div>
+            {requests.length === 1 && request && (
+              <p className="text-sm text-muted-foreground">Закроет запрос клиента: «{request.comment}».</p>
+            )}
+            {requests.length > 1 && (
+              <fieldset className="flex flex-col gap-2">
+                <legend className="mb-1 text-sm font-medium">Какой запрос закрывает возврат</legend>
+                {requests.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    aria-pressed={chosen === item.id}
+                    onClick={() => setChosen(item.id)}
+                    className={cn(
+                      'rounded-xl border px-3 py-2 text-left text-sm transition-colors',
+                      chosen === item.id ? 'border-transparent bg-brand-soft text-brand-text' : 'hover:bg-muted',
+                    )}
+                  >
+                    <span className="block break-words">«{item.comment}»</span>
+                    <span className="block text-xs text-muted-foreground">{formatDateTime(item.created_at, zone)}</span>
+                  </button>
+                ))}
+              </fieldset>
+            )}
+            {refund.error && <p className="text-sm text-danger-text">{errorMessage(refund.error, 'Не получилось')}</p>}
+          </div>
+        )}
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button variant="ghost">Отмена</Button>
+          </DialogClose>
+          <Button
+            variant="destructive"
+            disabled={!ready || refund.isPending}
+            onClick={() =>
+              amount !== null && refund.mutate({ ...path, body: { amount, request_id: request?.id ?? null } })
+            }
+          >
+            {valid && amount !== null ? `Вернуть ${money(amount)}` : 'Вернуть'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** Действия по ситуации (4.22, 4.23); «Вернуть» — только владелец (10.8). */
 function Actions({ card }: { card: Card }) {
   const queryClient = useQueryClient()
-  const [dialog, setDialog] = useState<'resolve' | 'bind' | 'new' | null>(null)
+  const [dialog, setDialog] = useState<'resolve' | 'bind' | 'new' | 'refund' | null>(null)
   const refresh = () => {
     setDialog(null)
     void queryClient.invalidateQueries()
@@ -196,6 +342,11 @@ function Actions({ card }: { card: Card }) {
               Отметить решённым вручную
             </Button>
           )}
+          {card.actions.includes('refund') && (
+            <Button variant="destructive" onClick={() => setDialog('refund')}>
+              Вернуть
+            </Button>
+          )}
         </div>
         {error && <p className="text-sm text-danger-text">{errorMessage(error, 'Не получилось')}</p>}
       </div>
@@ -229,6 +380,7 @@ function Actions({ card }: { card: Card }) {
         onConfirm={(comment) => resolve.mutate({ ...path, body: { comment } })}
       />
       <BindDialog card={card} open={dialog === 'bind'} onOpenChange={(open) => setDialog(open ? 'bind' : null)} />
+      <RefundDialog card={card} open={dialog === 'refund'} onOpenChange={(open) => setDialog(open ? 'refund' : null)} />
     </Module>
   )
 }
@@ -272,7 +424,17 @@ export function PaymentCardPage() {
             }
           >
             <dl className="divide-y text-sm">
-              <Row label="Клиент">{payment.is_unknown && !payment.client ? 'не привязан' : clientLabel(payment.client)}</Row>
+              <Row label="Клиент">
+                {payment.client ? (
+                  <Link to={`/clients/${payment.client.id}`} className="text-brand-text hover:underline">
+                    {clientLabel(payment.client)}
+                  </Link>
+                ) : payment.is_unknown ? (
+                  'не привязан'
+                ) : (
+                  clientLabel(payment.client)
+                )}
+              </Row>
               <Row label="Операция">{payment.purpose ? PURPOSES[payment.purpose] : '—'}</Row>
               {card.subscription && (
                 <Row label="Подписка">
@@ -298,6 +460,15 @@ export function PaymentCardPage() {
               {card.expires_at && <Row label="Счёт действует до">{formatDateTime(card.expires_at, zone)}</Row>}
               {payment.paid_at && <Row label="Оплачен">{formatDateTime(payment.paid_at, zone)}</Row>}
               {card.applied_at && <Row label="Применён">{formatDateTime(card.applied_at, zone)}</Row>}
+              {card.refund && (
+                <Row label="Возвращено">
+                  <span className="tabular">{formatMoney(card.refund.amount, payment.currency)}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {formatDateTime(card.refund.performed_at, zone)} · {card.refund.performed_by}
+                    {card.refund.manually && ' · вручную'}
+                  </span>
+                </Row>
+              )}
               {card.provider && (
                 <Row label="Провайдер">
                   {card.provider} <span className="font-mono text-xs text-muted-foreground">{card.provider_payment_id}</span>

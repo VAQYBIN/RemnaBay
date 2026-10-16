@@ -1,11 +1,11 @@
 """Платежи, «Требуют внимания» и карточка платежа (А4, А5; 4.20–4.23, 4.27, 4.30–4.32).
 
-Разбирать зависший платёж и проваленные операции может любой участник команды
-(01-domain, таблица ролей). Каждое действие — в журнале с участником (4.25).
-Возврат денег — блок 10 (этап 9).
+Разбирать зависший платёж и проваленные операции может любой участник команды;
+вернуть деньги — только владелец (01-domain, таблица ролей; 10.8–10.12, 10.16).
+Каждое действие — в журнале с участником (4.25).
 """
 
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
@@ -15,9 +15,10 @@ from sqlalchemy import Select, select
 
 from remnabay.attention import attention
 from remnabay.domain.clients import Client, TelegramAccount
-from remnabay.domain.payments import Payment, PaymentPurpose, PaymentState
+from remnabay.domain.payments import Payment, PaymentPurpose, PaymentState, Refund
 from remnabay.domain.subscriptions import Subscription
 from remnabay.domain.tariffs import Tariff, TariffState
+from remnabay.domain.team import TeamMember, TeamRole
 from remnabay.journal import Actor, ActorType, JsonValue, Outcome, entries_for
 from remnabay.payments import (
     PaymentActionError,
@@ -39,8 +40,15 @@ from remnabay.queue import (
     retry_failed,
     waiting_panel_tasks,
 )
+from remnabay.refunds import (
+    RefundError,
+    RefundRequestError,
+    refund_payment,
+    refund_quote,
+    refundable,
+)
 from remnabay.shop_settings import shop_time_zone
-from remnabay.web.admin._deps import DbSession, Member
+from remnabay.web.admin._deps import DbSession, Member, Owner
 from remnabay.worker.main import TASKS
 
 router = APIRouter(tags=["payments"])
@@ -54,15 +62,13 @@ class ActionRejectedOut(BaseModel):
     message: str
 
 
-def _rejected(error: Exception) -> HTTPException:
+def rejected(error: Exception) -> HTTPException:
     return HTTPException(
         status.HTTP_409_CONFLICT, ActionRejectedOut(message=str(error)).model_dump()
     )
 
 
-_REJECTED: dict[int | str, dict[str, Any]] = {
-    status.HTTP_409_CONFLICT: {"model": ActionRejectedOut}
-}
+REJECTED: dict[int | str, dict[str, Any]] = {status.HTTP_409_CONFLICT: {"model": ActionRejectedOut}}
 
 
 # --- Модели ответов ---
@@ -158,6 +164,17 @@ class SnapshotOut(BaseModel):
     device_limit: int
 
 
+type _Action = Literal["retry", "apply_as_new", "resolve", "bind", "refund"]
+
+
+class RefundOut(BaseModel):
+    amount: Decimal
+    performed_at: datetime
+    performed_by: str
+    # Владелец вернул деньги сам (10.11)
+    manually: bool
+
+
 class PaymentCardOut(BaseModel):
     payment: PaymentRow
     subscription: SubscriptionRef | None
@@ -171,17 +188,24 @@ class PaymentCardOut(BaseModel):
     last_error: str | None
     attempts: list[AttemptOut]
     history: list[HistoryOut]
-    # Действия, доступные в состоянии платежа (4.22, 4.23)
-    actions: list[Literal["retry", "apply_as_new", "resolve", "bind"]]
+    # Возврат по платежу — один (10.12)
+    refund: RefundOut | None
+    # Действия, доступные в состоянии платежа и роли участника (4.22, 4.23, 10.8)
+    actions: list[_Action]
     time_zone: str
 
 
 # --- Сборка ---
 
 
-async def _client_ref(session: DbSession, client_id: int | None) -> ClientRef | None:
+async def client_ref(session: DbSession, client_id: int | None) -> ClientRef | None:
     if client_id is None:
         return None
+    return await known_client_ref(session, client_id)
+
+
+async def known_client_ref(session: DbSession, client_id: int) -> ClientRef:
+    """Клиент по первому Telegram-аккаунту: имя, username, Telegram ID."""
     account = await session.scalar(
         select(TelegramAccount)
         .where(TelegramAccount.client_id == client_id)
@@ -196,7 +220,9 @@ async def _client_ref(session: DbSession, client_id: int | None) -> ClientRef | 
     )
 
 
-async def _row(session: DbSession, payment: Payment, waiting: set[int] | None = None) -> PaymentRow:
+async def payment_row(
+    session: DbSession, payment: Payment, waiting: set[int] | None = None
+) -> PaymentRow:
     snapshot = payment.tariff_snapshot or {}
     tariff_name = snapshot.get("name")
     return PaymentRow(
@@ -208,7 +234,7 @@ async def _row(session: DbSession, payment: Payment, waiting: set[int] | None = 
         amount=payment.amount,
         currency=payment.currency,
         tariff_name=tariff_name if isinstance(tariff_name, str) else None,
-        client=await _client_ref(session, payment.client_id),
+        client=await client_ref(session, payment.client_id),
         created_at=payment.created_at,
         paid_at=payment.paid_at,
         waiting_panel=payment.id in (waiting or set()),
@@ -231,7 +257,7 @@ async def attention_list(session: DbSession, member: Member) -> AttentionOut:
     needs = await attention(session, TASKS)
     waiting = await waiting_panel_tasks(session)
     return AttentionOut(
-        payments=[await _row(session, payment) for payment in needs.payments],
+        payments=[await payment_row(session, payment) for payment in needs.payments],
         operations=[
             OperationRow(
                 task_id=failed.task_id,
@@ -305,7 +331,7 @@ async def payments_list(
         if (payment_id := _payment_id(task.args)) is not None
     }
     return PaymentsOut(
-        payments=[await _row(session, payment, waiting) for payment in payments],
+        payments=[await payment_row(session, payment, waiting) for payment in payments],
         time_zone=zone.key,
     )
 
@@ -313,15 +339,33 @@ async def payments_list(
 # --- Карточка платежа ---
 
 
-def _actions(payment: Payment) -> list[Literal["retry", "apply_as_new", "resolve", "bind"]]:
-    if payment.state != PaymentState.PAID_NOT_APPLIED:
-        return []
-    if payment.client_id is None:
-        return ["bind", "resolve"]
-    return ["retry", "apply_as_new", "resolve"]
+def _actions(payment: Payment, member: TeamMember) -> list[_Action]:
+    actions: list[_Action] = []
+    if payment.state == PaymentState.PAID_NOT_APPLIED:
+        if payment.client_id is None:
+            actions.extend(("bind", "resolve"))
+        else:
+            actions.extend(("retry", "apply_as_new", "resolve"))
+    # «Вернуть» — только владелец, один раз на платёж (10.8, 10.12, 10.16)
+    if member.role == TeamRole.OWNER and refundable(payment):
+        actions.append("refund")
+    return actions
 
 
-async def _card(session: DbSession, payment_id: int) -> PaymentCardOut:
+async def _refund(session: DbSession, payment_id: int) -> RefundOut | None:
+    refund = await session.scalar(select(Refund).where(Refund.payment_id == payment_id))
+    if refund is None:
+        return None
+    by = await session.get(TeamMember, refund.performed_by_id)
+    return RefundOut(
+        amount=refund.amount,
+        performed_at=refund.performed_at,
+        performed_by=(by.name or f"ID {by.telegram_id}") if by is not None else "—",
+        manually=refund.performed_manually,
+    )
+
+
+async def _card(session: DbSession, payment_id: int, member: TeamMember) -> PaymentCardOut:
     try:
         card = await payment_card(session, payment_id)
     except PaymentActionError as error:
@@ -344,7 +388,7 @@ async def _card(session: DbSession, payment_id: int) -> PaymentCardOut:
     }
     subscription = card.subscription
     return PaymentCardOut(
-        payment=await _row(session, payment, waiting),
+        payment=await payment_row(session, payment, waiting),
         subscription=SubscriptionRef(
             id=subscription.id, name=subscription.name, panel_username=subscription.panel_username
         )
@@ -380,7 +424,8 @@ async def _card(session: DbSession, payment_id: int) -> PaymentCardOut:
             )
             for entry in await entries_for(session, payment_subject(payment.id))
         ],
-        actions=_actions(payment),
+        refund=await _refund(session, payment.id),
+        actions=_actions(payment, member),
         time_zone=(await shop_time_zone(session)).key,
     )
 
@@ -388,37 +433,36 @@ async def _card(session: DbSession, payment_id: int) -> PaymentCardOut:
 @router.get("/payments/{payment_id}", responses={status.HTTP_404_NOT_FOUND: {}})
 async def payment_details(payment_id: int, session: DbSession, member: Member) -> PaymentCardOut:
     """А5: клиент, что должно было примениться, история попыток и текст ошибки (4.21)."""
-    del member
-    return await _card(session, payment_id)
+    return await _card(session, payment_id, member)
 
 
 class CommentIn(BaseModel):
     comment: Annotated[str, Field(min_length=1, max_length=2000)]
 
 
-@router.post("/payments/{payment_id}/retry", responses=_REJECTED)
+@router.post("/payments/{payment_id}/retry", responses=REJECTED)
 async def retry(payment_id: int, session: DbSession, member: Member) -> PaymentCardOut:
     """«Применить повторно» (4.22)."""
     try:
         await retry_payment(session, payment_id, member_id=member.id)
     except PaymentActionError as error:
-        raise _rejected(error) from error
+        raise rejected(error) from error
     await session.commit()
-    return await _card(session, payment_id)
+    return await _card(session, payment_id, member)
 
 
-@router.post("/payments/{payment_id}/apply-as-new", responses=_REJECTED)
+@router.post("/payments/{payment_id}/apply-as-new", responses=REJECTED)
 async def apply_as_new(payment_id: int, session: DbSession, member: Member) -> PaymentCardOut:
     """«Применить созданием новой подписки» (4.22) — например, если пользователя удалили."""
     try:
         await apply_as_new_subscription(session, payment_id, member_id=member.id)
     except PaymentActionError as error:
-        raise _rejected(error) from error
+        raise rejected(error) from error
     await session.commit()
-    return await _card(session, payment_id)
+    return await _card(session, payment_id, member)
 
 
-@router.post("/payments/{payment_id}/resolve", responses=_REJECTED)
+@router.post("/payments/{payment_id}/resolve", responses=REJECTED)
 async def resolve(
     payment_id: int, body: CommentIn, session: DbSession, member: Member
 ) -> PaymentCardOut:
@@ -428,9 +472,9 @@ async def resolve(
             session, payment_id, member_id=member.id, comment=body.comment
         )
     except PaymentActionError as error:
-        raise _rejected(error) from error
+        raise rejected(error) from error
     await session.commit()
-    return await _card(session, payment_id)
+    return await _card(session, payment_id, member)
 
 
 class BindIn(BaseModel):
@@ -440,7 +484,7 @@ class BindIn(BaseModel):
     subscription_id: int | None = None
 
 
-@router.post("/payments/{payment_id}/bind", responses=_REJECTED)
+@router.post("/payments/{payment_id}/bind", responses=REJECTED)
 async def bind(payment_id: int, body: BindIn, session: DbSession, member: Member) -> PaymentCardOut:
     """«Привязать к клиенту» неизвестный платёж и выбрать, что применить (4.23):
     покупку или продление подписки клиента выбранным тарифом."""
@@ -462,9 +506,97 @@ async def bind(payment_id: int, body: BindIn, session: DbSession, member: Member
             subscription_id=body.subscription_id,
         )
     except PaymentActionError as error:
-        raise _rejected(error) from error
+        raise rejected(error) from error
     await session.commit()
-    return await _card(session, payment_id)
+    return await _card(session, payment_id, member)
+
+
+# --- Возврат (10.8–10.16) ---
+
+
+class OpenRequestOut(BaseModel):
+    id: int
+    comment: str
+    created_at: datetime
+
+
+class RefundQuoteOut(BaseModel):
+    """Экран возврата (А5, 10.10): предложенная сумма, предел, как изменится срок."""
+
+    # Больше заплаченного вернуть нельзя (10.8)
+    paid: Decimal
+    # Неиспользованная стоимость по отрезкам; у неприменённого, неизвестного и
+    # «решён вручную» — вся оплата (10.14, 10.16)
+    suggested: Decimal
+    currency: str
+    subscription: SubscriptionRef | None
+    current_end: datetime | None
+    # Пусто — срок подписки не меняется
+    new_end: datetime | None
+    # После возврата подписка заканчивается сейчас (10.10, 10.13)
+    ends_now: bool
+    # Открытые запросы клиента: единственный закроется сам, из нескольких — выбрать (10.6)
+    open_requests: list[OpenRequestOut]
+    time_zone: str
+
+
+@router.get("/payments/{payment_id}/refund", responses=REJECTED)
+async def refund_preview(payment_id: int, session: DbSession, owner: Owner) -> RefundQuoteOut:
+    """Что будет при возврате: сумма по модели отрезков и новый срок (10.8–10.10)."""
+    del owner
+    try:
+        quote = await refund_quote(session, payment_id, datetime.now(UTC))
+    except RefundError as error:
+        raise rejected(error) from error
+    subscription = quote.subscription
+    change = quote.change
+    return RefundQuoteOut(
+        paid=quote.paid,
+        suggested=quote.suggested,
+        currency=quote.payment.currency,
+        subscription=SubscriptionRef(
+            id=subscription.id, name=subscription.name, panel_username=subscription.panel_username
+        )
+        if subscription is not None
+        else None,
+        current_end=change.current_end
+        if change is not None
+        else (subscription.expires_at if subscription is not None else None),
+        new_end=change.new_end if change is not None else None,
+        ends_now=change.ends_now if change is not None else False,
+        open_requests=[
+            OpenRequestOut(id=r.id, comment=r.comment, created_at=r.created_at)
+            for r in quote.requests
+        ],
+        time_zone=(await shop_time_zone(session)).key,
+    )
+
+
+class RefundIn(BaseModel):
+    amount: Annotated[Decimal, Field(gt=0, max_digits=14, decimal_places=2)]
+    # Какой открытый запрос клиента закрывает возврат; единственный — сам (10.6)
+    request_id: int | None = None
+
+
+@router.post("/payments/{payment_id}/refund", responses=REJECTED)
+async def refund(
+    payment_id: int, body: RefundIn, session: DbSession, owner: Owner
+) -> PaymentCardOut:
+    """«Вернуть»: владелец вернул деньги сам и отмечает возврат выполненным вручную
+    (10.11). Срок подписки сокращается на неиспользованную часть платежа (10.9)."""
+    try:
+        await refund_payment(
+            session,
+            payment_id,
+            amount=body.amount,
+            member_id=owner.id,
+            now=datetime.now(UTC),
+            request_id=body.request_id,
+        )
+    except (RefundError, RefundRequestError) as error:
+        raise rejected(error) from error
+    await session.commit()
+    return await _card(session, payment_id, owner)
 
 
 class TariffOptionOut(BaseModel):
@@ -558,18 +690,18 @@ async def operation_attempts(
     )
 
 
-@router.post("/operations/{task_id}/retry", responses=_REJECTED)
+@router.post("/operations/{task_id}/retry", responses=REJECTED)
 async def retry_operation(task_id: int, session: DbSession, member: Member) -> AttentionOut:
     """«Повторить» (4.31)."""
     try:
         await retry_failed(session, task_id, actor=Actor.team_member(member.id))
     except TaskNotFailedError as error:
-        raise _rejected(error) from error
+        raise rejected(error) from error
     await session.commit()
     return await attention_list(session, member)
 
 
-@router.post("/operations/{task_id}/cancel", responses=_REJECTED)
+@router.post("/operations/{task_id}/cancel", responses=REJECTED)
 async def cancel_operation(
     task_id: int, body: CommentIn, session: DbSession, member: Member
 ) -> AttentionOut:
@@ -580,12 +712,12 @@ async def cancel_operation(
             session, TASKS, task_id, actor=Actor.team_member(member.id), comment=body.comment
         )
     except (TaskNotFailedError, TaskNotCancellableError, ValueError) as error:
-        raise _rejected(error) from error
+        raise rejected(error) from error
     await session.commit()
     return await attention_list(session, member)
 
 
-@router.post("/operations/{task_id}/resolve", responses=_REJECTED)
+@router.post("/operations/{task_id}/resolve", responses=REJECTED)
 async def resolve_operation(
     task_id: int, body: CommentIn, session: DbSession, member: Member
 ) -> AttentionOut:
@@ -595,6 +727,6 @@ async def resolve_operation(
             session, TASKS, task_id, actor=Actor.team_member(member.id), comment=body.comment
         )
     except (TaskNotFailedError, ValueError) as error:
-        raise _rejected(error) from error
+        raise rejected(error) from error
     await session.commit()
     return await attention_list(session, member)

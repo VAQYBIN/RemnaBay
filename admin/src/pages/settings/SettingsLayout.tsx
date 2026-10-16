@@ -11,6 +11,7 @@ const SECTIONS = [
   { to: 'trial', label: 'Триал' },
   { to: 'reminders', label: 'Напоминания' },
   { to: 'shop', label: 'Магазин' },
+  { to: 'promo', label: 'Промокоды' },
   { to: 'panel', label: 'Панель' },
   { to: 'login', label: 'Вход в админку' },
 ]

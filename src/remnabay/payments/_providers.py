@@ -10,6 +10,7 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from enum import StrEnum
 
 from pydantic import BaseModel, ValidationError
@@ -102,6 +103,15 @@ class Providers:
             for connection in await self.connections(session)
             if connection.available and connection.provider is not None
         ]
+
+    async def min_amount(self, session: AsyncSession) -> Decimal:
+        """Минимальная сумма счёта у провайдера, через которого клиент будет платить: итог
+        со скидкой поднимается до неё (8.4). Провайдера нет — ноль: платить можно только
+        нулевой суммой (8.8)."""
+        available = await self.available(session)
+        if not available:
+            return Decimal(0)
+        return available[0].min_amount(await get_setting(session, SHOP_CURRENCY))
 
     async def get(self, session: AsyncSession, code: str) -> PaymentProvider | None:
         """Провайдер по коду — для опроса и вебхука уже созданных счетов. Валюта не

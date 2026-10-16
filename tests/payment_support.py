@@ -46,6 +46,12 @@ class FakeProvider:
     cancelled: list[str] = field(default_factory=list[str])
     can_cancel: bool = True
     unavailable: bool = False
+    # Минимальная сумма счёта (8.4)
+    minimum: Decimal = Decimal("1.00")
+
+    def min_amount(self, currency: str) -> Decimal:
+        del currency
+        return self.minimum
 
     async def check_credentials(self) -> None:
         if self.unavailable:

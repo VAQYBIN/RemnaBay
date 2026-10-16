@@ -36,7 +36,7 @@ from remnabay.messaging import (
     guide_button,
     send_to_client,
 )
-from remnabay.panel import PanelRequestError, TrafficStrategy, User, UserStatus
+from remnabay.panel import PanelClient, PanelRequestError, TrafficStrategy, User, UserStatus
 from remnabay.queue import TaskContext, task
 from remnabay.shop import offers_paused_for
 
@@ -237,11 +237,21 @@ async def term_end(session: AsyncSession, subscription: Subscription) -> datetim
     return await _term_end(session, subscription)
 
 
-async def reconcile(session: AsyncSession, subscription: Subscription, args: ReconcileArgs) -> None:
-    """Приводит знание магазина о подписке к состоянию панели и пишет изменения в журнал."""
+async def reconcile(
+    session: AsyncSession,
+    subscription: Subscription,
+    args: ReconcileArgs,
+    *,
+    panel: PanelClient | None = None,
+) -> None:
+    """Приводит знание магазина о подписке к состоянию панели и пишет изменения в журнал.
+
+    `panel` — клиент панели вне воркера (команда синхронизирует подписку из админки,
+    10.5); в задаче очереди — клиент окружения воркера."""
     if subscription.deleted_at is not None:
         return
-    user = await runtime.current().panel.get_user(subscription.panel_user_id)
+    panel = panel or runtime.current().panel
+    user = await panel.get_user(subscription.panel_user_id)
     if user is None:
         # Пользователя удалили в панели: клиент подписку не видит, история сохраняется (4.6)
         subscription.deleted_at = datetime.now(UTC)
@@ -252,18 +262,18 @@ async def reconcile(session: AsyncSession, subscription: Subscription, args: Rec
     if changes:
         await _journal(session, subscription, "subscription.changed_in_panel", args, changes)
     if subscription.is_trial:
-        await _register_trial_devices(session, subscription, args)
+        await _register_trial_devices(session, panel, subscription, args)
         if not was_limited and subscription.panel_status == PanelUserStatus.LIMITED:
             await _tell_trial_traffic_exhausted(session, subscription)
 
 
 async def _register_trial_devices(
-    session: AsyncSession, subscription: Subscription, args: ReconcileArgs
+    session: AsyncSession, panel: PanelClient, subscription: Subscription, args: ReconcileArgs
 ) -> None:
     """5.8: событие о подключении к триальной подписке могло не дойти — сверка
     запрашивает устройства пользователя и дописывает реестр."""
     try:
-        devices = await runtime.current().panel.list_devices(subscription.panel_user_id)
+        devices = await panel.list_devices(subscription.panel_user_id)
     except PanelRequestError:
         # Панель отказала в списке (например, у токена нет права): сверка подписки
         # важнее; устройство попадёт в реестр по событию или следующей сверкой

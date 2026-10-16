@@ -14,6 +14,7 @@ from sqlalchemy.orm import aliased
 
 from remnabay.journal import Actor, JsonValue, Outcome, Subject, record
 from remnabay.queue._models import (
+    RUNNABLE,
     UNFINISHED,
     AttemptResult,
     QueueAttempt,
@@ -465,6 +466,21 @@ async def tasks_for(
     return list(await session.scalars(query.order_by(QueueTask.id)))
 
 
+async def due_tasks_exist(session: AsyncSession, name: str) -> bool:
+    """Есть ли задачи вида `name`, которым уже пора выполняться, — например, служебные
+    сообщения, которые идут раньше сообщений рассылки (11.13)."""
+    found = await session.scalar(
+        select(QueueTask.id)
+        .where(
+            QueueTask.name == name,
+            QueueTask.status.in_(RUNNABLE),
+            QueueTask.run_at <= func.clock_timestamp(),
+        )
+        .limit(1)
+    )
+    return found is not None
+
+
 async def unfinished_keys(session: AsyncSession, name: str, keys: Iterable[str]) -> set[str]:
     """Ключи, у которых задача вида `name` уже ждёт выполнения — чтобы не ставить её
     второй раз, пока первая не выполнена (например, сверку подписки)."""
@@ -476,6 +492,23 @@ async def unfinished_keys(session: AsyncSession, name: str, keys: Iterable[str])
         )
     )
     return {key for key in found if key is not None}
+
+
+async def unfinished_counts(
+    session: AsyncSession, keys: Iterable[str], names: Iterable[str]
+) -> dict[str, int]:
+    """Сколько задач видов `names` с каждым из ключей ещё не завершено — например,
+    изменения подписки, которые ждут панель (4.30). Ключи без таких задач не входят."""
+    rows = await session.execute(
+        select(QueueTask.key, func.count())
+        .where(
+            QueueTask.key.in_(list(keys)),
+            QueueTask.name.in_(list(names)),
+            QueueTask.status.in_(UNFINISHED),
+        )
+        .group_by(QueueTask.key)
+    )
+    return {key: count for key, count in rows if key is not None}
 
 
 async def waiting_panel_count(session: AsyncSession) -> int:

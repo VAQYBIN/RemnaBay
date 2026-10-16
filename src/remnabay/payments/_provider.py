@@ -95,6 +95,10 @@ class PaymentProvider(Protocol):
         """Ключи действуют; иначе `ProviderAuthError`."""
         ...
 
+    def min_amount(self, currency: str) -> Decimal:
+        """Минимальная сумма счёта: итог со скидкой ниже неё поднимается до неё (8.4)."""
+        ...
+
     async def create_invoice(self, request: InvoiceRequest) -> Invoice: ...
 
     async def fetch_payment(self, provider_payment_id: str) -> ProviderPayment:

@@ -17,6 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from remnabay import runtime
 from remnabay.attention import attention
+from remnabay.broadcasts import send_step
+from remnabay.client_actions import add_granted_days
 from remnabay.config import Settings
 from remnabay.crypto import SecretBox
 from remnabay.db import create_engine
@@ -40,7 +42,9 @@ from remnabay.payments import (
     processing_notice,
 )
 from remnabay.payments.yookassa import YooKassaKind, yookassa_http
+from remnabay.promo import add_promo_days
 from remnabay.queue import RetryPolicy, TaskRegistry, Worker, WorkerConfig
+from remnabay.refunds import change_term
 from remnabay.reminders import REMINDERS_TICK, reminders_tick, replan_reminders, send_reminders
 from remnabay.shop_settings import (
     RETRY_MAX_ATTEMPTS,
@@ -71,9 +75,13 @@ TASKS = TaskRegistry(
         trial_processing_notice,
         refresh_configs_task,
         delete_devices,
+        add_promo_days,
+        add_granted_days,
+        change_term,
         reminders_tick,
         replan_reminders,
         send_reminders,
+        send_step,
     )
 )
 # Периодические задачи: сверка всех подписок с панелью (4.8), проверка связи с ней (4.13),

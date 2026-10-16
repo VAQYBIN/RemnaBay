@@ -33,6 +33,8 @@ _EXPIRED_REASONS = frozenset({"expired_on_confirmation", "payment_expired", "can
 _OBJECT = TypeAdapter(dict[str, Any])
 # Ошибки на стороне ЮКассы — повторить позже
 _SERVER_ERRORS = 500
+# Минимальная сумма платежа в ЮКассе — 1 рубль (документация ЮКассы о способах оплаты)
+MIN_AMOUNT = Decimal("1.00")
 
 
 class YooKassaCredentials(BaseModel):
@@ -137,6 +139,10 @@ class YooKassaProvider:
         if response.is_error or not isinstance(data, dict):
             raise ProviderError(f"ЮКасса ответила {response.status_code}: {data}")
         return _OBJECT.validate_python(data)
+
+    def min_amount(self, currency: str) -> Decimal:
+        del currency
+        return MIN_AMOUNT
 
     async def check_credentials(self) -> None:
         """Ключи действуют: ЮКасса отвечает на запрос настроек магазина."""

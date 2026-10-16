@@ -2,15 +2,21 @@ import { createBrowserRouter, Navigate } from 'react-router'
 
 import { AppShell } from '@/components/frame/AppShell'
 import { AboutPage } from '@/pages/AboutPage'
+import { BroadcastPage } from '@/pages/broadcasts/BroadcastPage'
+import { BroadcastsPage } from '@/pages/broadcasts/BroadcastsPage'
+import { ClientCardPage } from '@/pages/clients/ClientCardPage'
+import { ClientsPage } from '@/pages/clients/ClientsPage'
 import { ExpiringPage } from '@/pages/ExpiringPage'
 import { HomePage } from '@/pages/HomePage'
 import { LoginPage } from '@/pages/LoginPage'
 import { PaymentCardPage } from '@/pages/payments/PaymentCardPage'
 import { PaymentsPage } from '@/pages/payments/PaymentsPage'
+import { PromoCodesPage } from '@/pages/PromoCodesPage'
 import { BrandSettingsPage } from '@/pages/settings/BrandSettingsPage'
 import { LoginSettingsPage } from '@/pages/settings/LoginSettingsPage'
 import { PanelSettingsPage } from '@/pages/settings/PanelSettingsPage'
 import { PaymentSettingsPage } from '@/pages/settings/PaymentSettingsPage'
+import { PromoSettingsPage } from '@/pages/settings/PromoSettingsPage'
 import { ReminderSettingsPage } from '@/pages/settings/ReminderSettingsPage'
 import { SettingsLayout } from '@/pages/settings/SettingsLayout'
 import { ShopSettingsPage } from '@/pages/settings/ShopSettingsPage'
@@ -27,9 +33,14 @@ export const router = createBrowserRouter(
       children: [
         { index: true, Component: HomePage },
         { path: 'expiring', Component: ExpiringPage },
+        { path: 'clients', Component: ClientsPage },
+        { path: 'clients/:clientId', Component: ClientCardPage },
         { path: 'payments', Component: PaymentsPage },
         { path: 'payments/:paymentId', Component: PaymentCardPage },
         { path: 'tariffs', Component: TariffsPage },
+        { path: 'promo-codes', Component: PromoCodesPage },
+        { path: 'broadcasts', Component: BroadcastsPage },
+        { path: 'broadcasts/:broadcastId', Component: BroadcastPage },
         {
           path: 'settings',
           Component: SettingsLayout,
@@ -40,6 +51,7 @@ export const router = createBrowserRouter(
             { path: 'trial', Component: TrialSettingsPage },
             { path: 'reminders', Component: ReminderSettingsPage },
             { path: 'shop', Component: ShopSettingsPage },
+            { path: 'promo', Component: PromoSettingsPage },
             { path: 'panel', Component: PanelSettingsPage },
             { path: 'login', Component: LoginSettingsPage },
           ],

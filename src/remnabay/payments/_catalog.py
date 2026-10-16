@@ -1,4 +1,4 @@
-"""Что клиент может купить или продлить (3.1–3.3, 3.16, 3.20, 3.21, 3.35, 3.36, 4.7).
+"""Что клиент может купить или продлить (3.1–3.3, 3.16, 3.20, 3.21, 3.35, 3.36, 3.41, 4.7).
 
 Общие правила для бота и для проверки при создании счёта: кнопку можно нажать в
 старом сообщении, а данные кнопки клиент может подделать.
@@ -6,7 +6,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_FLOOR, Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -93,6 +93,21 @@ def can_renew(subscription: Subscription) -> bool:
     return not subscription.is_trial and not disabled_in_panel(subscription)
 
 
+async def change_tariffs(
+    session: AsyncSession, subscription: Subscription, now: datetime
+) -> list[Tariff]:
+    """Тарифы для «Сменить тариф» (3.41, решение 0068): у истёкшей подписки, которую
+    можно продлить её тарифом, — тарифы в продаже, кроме текущего. Иначе пусто: у
+    действующей подписки смены тарифа нет (v1), а если тариф не продлевается, выбор
+    тарифа даёт сама «Продлить» (3.21, 3.35)."""
+    if not can_renew(subscription) or is_active(subscription, now):
+        return []
+    current = await renewal_tariff(session, subscription, now)
+    if current is None:
+        return []
+    return [tariff for tariff in await tariffs_on_sale(session) if tariff != current]
+
+
 async def check_choice(
     session: AsyncSession,
     *,
@@ -117,26 +132,51 @@ async def check_choice(
         raise CatalogError("Неизвестная операция")
     if subscription not in subscriptions or not can_renew(subscription):
         raise CatalogError("Продление этой подписки недоступно")
-    if tariff in await tariffs_on_sale(session):
+    current = await renewal_tariff(session, subscription, now)
+    if tariff == current:
         return
-    if tariff == await renewal_tariff(session, subscription, now):
-        return
-    raise CatalogError("Этим тарифом подписку не продлить")
+    if tariff not in await tariffs_on_sale(session):
+        raise CatalogError("Этим тарифом подписку не продлить")
+    # Другой тариф: если подписку нельзя продлить её тарифом (3.21, 3.35) или она
+    # истекла (3.41). Смена тарифа действующей подписки — v1 (0068)
+    if current is not None and is_active(subscription, now):
+        raise CatalogError("Тариф действующей подписки не меняется")
 
 
 @dataclass(frozen=True)
 class Quote:
-    """Экран подтверждения (3.3): тариф, срок, цена, итог; новая дата окончания —
-    если оплата добавит дни к существующей подписке."""
+    """Экран подтверждения (3.3): тариф, срок, цена, скидка по промокоду, итог; новая
+    дата окончания — если оплата добавит дни к существующей подписке."""
 
     tariff: Tariff
     days: int
     price: Decimal
+    discount: Decimal
     total: Decimal
     new_end: datetime | None
 
 
-def quote(tariff: Tariff, subscription: Subscription | None, now: datetime) -> Quote:
+def discounted_total(price: Decimal, percent: int | None, min_amount: Decimal) -> Decimal:
+    """Итог со скидкой в процентах (8.4, решение 0065): скидка округляется вниз до целой
+    единицы валюты — в пользу магазина; итог больше нуля, но меньше минимальной суммы
+    счёта у провайдера, поднимается до неё. Скидка 100% — итог ноль (8.8)."""
+    if percent is None:
+        return price
+    discount = (price * percent / 100).to_integral_value(rounding=ROUND_FLOOR)
+    total = max(price - discount, Decimal(0))
+    if 0 < total < min_amount:
+        return min_amount
+    return total
+
+
+def quote(
+    tariff: Tariff,
+    subscription: Subscription | None,
+    now: datetime,
+    *,
+    discount_percent: int | None = None,
+    min_amount: Decimal = Decimal(0),
+) -> Quote:
     days = tariff.duration_days or 0
     new_end = None
     if subscription is not None:
@@ -145,4 +185,12 @@ def quote(tariff: Tariff, subscription: Subscription | None, now: datetime) -> Q
         if base is None or base <= now:
             base = now
         new_end = base + timedelta(days=days)
-    return Quote(tariff=tariff, days=days, price=tariff.price, total=tariff.price, new_end=new_end)
+    total = discounted_total(tariff.price, discount_percent, min_amount)
+    return Quote(
+        tariff=tariff,
+        days=days,
+        price=tariff.price,
+        discount=tariff.price - total,
+        total=total,
+        new_end=new_end,
+    )

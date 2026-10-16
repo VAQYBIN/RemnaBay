@@ -25,6 +25,7 @@ from remnabay.messaging import (
     NotAcceptedError,
     OutgoingMessage,
     RecipientBlockedError,
+    RecipientNotStartedError,
     SendArgs,
     TelegramSender,
     UndeliverableError,
@@ -142,6 +143,10 @@ async def test_message_with_copy_and_link_buttons_is_sent(
     ("reply", "expected"),
     [
         (_error(403, "Forbidden: bot was blocked by the user"), RecipientBlockedError),
+        (
+            _error(403, "Forbidden: bot can't initiate conversation with a user"),
+            RecipientNotStartedError,
+        ),
         (_error(429, "Too Many Requests: retry after 5", retry_after=5), NotAcceptedError),
         (_error(401, "Unauthorized"), NotAcceptedError),
         (_error(400, "Bad Request: chat not found"), UndeliverableError),
@@ -151,6 +156,7 @@ async def test_message_with_copy_and_link_buttons_is_sent(
     ],
     ids=[
         "blocked",
+        "not-started",
         "too-many",
         "bad-token",
         "chat-not-found",
@@ -331,6 +337,24 @@ async def test_rule_4_blocked_bot_is_not_an_error(db_session: AsyncSession) -> N
     assert client.bot_blocked_at is not None
     assert await _not_delivered(db_session) == [
         {"key": "btn.renew", "reason": "blocked", "error": "Forbidden: bot was blocked by the user"}
+    ]
+
+
+async def test_11_9_never_started_is_not_blocked(db_session: AsyncSession) -> None:
+    """11.9, решение 0069: клиент ни разу не открывал бот — Telegram не даёт написать
+    первым; это не блокировка: пометки «бот заблокирован» нет, недоставка — в журнале."""
+    client = await make_client(db_session)
+    error = "Forbidden: bot can't initiate conversation with a user"
+    sender = FakeSender(errors=[RecipientNotStartedError(error)])
+
+    await _run_send(
+        db_session, sender, SendArgs(chat_id=100, client_id=client.id, text_key="btn.renew")
+    )
+
+    await db_session.refresh(client)
+    assert client.bot_blocked_at is None
+    assert await _not_delivered(db_session) == [
+        {"key": "btn.renew", "reason": "not_started", "error": error}
     ]
 
 

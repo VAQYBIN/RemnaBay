@@ -33,6 +33,17 @@ class Card(CallbackData, prefix="sub"):
     subscription_id: int
 
 
+class PromoAsk(CallbackData, prefix="promo"):
+    """«Ввести промокод» (З8): из главного меню (`tariff_id` = 0) или с экрана
+    подтверждения тарифа — покупки (`subscription_id` = 0) или продления."""
+
+    tariff_id: int
+    subscription_id: int
+
+
+PROMO_MENU = PromoAsk(tariff_id=0, subscription_id=0).pack()
+
+
 class Guide(CallbackData, prefix=GUIDE_CALLBACK_PREFIX):
     """«Как подключить» на событии со ссылкой (С1, С3, С15): инструкция (С2) приходит
     новым сообщением, чтобы ссылка не пропала (0060)."""

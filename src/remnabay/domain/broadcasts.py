@@ -3,7 +3,7 @@
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, Text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, Index, LargeBinary, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -24,6 +24,15 @@ class Broadcast(Base):
     """Сообщение владельца сегменту клиентов."""
 
     __tablename__ = "broadcasts"
+    __table_args__ = (
+        # Одновременно идёт одна рассылка (11.13)
+        Index(
+            "uq_broadcasts_one_sending",
+            "state",
+            unique=True,
+            postgresql_where="state = 'sending'",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     # Текст с форматированием, изображение и кнопки (11.1) — структуру задаёт блок 11
@@ -47,6 +56,8 @@ class DeliveryState(StrEnum):
     SENDING = "sending"
     DELIVERED = "delivered"
     BOT_BLOCKED = "bot_blocked"
+    # Клиент ни разу не открывал бот: Telegram не даёт написать первым (решение 0069)
+    NOT_STARTED = "not_started"
     FAILED = "failed"
     # Рассылку остановили до отправки этому получателю (11.7)
     SKIPPED = "skipped"
@@ -67,3 +78,17 @@ class BroadcastRecipient(Base):
     )
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error: Mapped[str | None] = mapped_column(Text)
+
+
+class BroadcastImage(Base):
+    """Изображение рассылки (11.1). Хранится в базе, как логотипы: одна резервная копия."""
+
+    __tablename__ = "broadcast_images"
+
+    broadcast_id: Mapped[int] = mapped_column(
+        ForeignKey("broadcasts.id", ondelete="CASCADE"), primary_key=True
+    )
+    content_type: Mapped[str] = mapped_column(String(32))
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    # Файл, уже загруженный в Telegram: следующие получатели не загружают его заново
+    telegram_file_id: Mapped[str | None] = mapped_column(String(256))

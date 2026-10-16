@@ -168,6 +168,11 @@ class FakePanel:
         user = self.users.get(body["id"])
         if user is None:
             return httpx2.Response(404, json={"message": "User not found", "errorCode": "A063"})
+        if "expireAt" in body and datetime.fromisoformat(body["expireAt"]) < datetime.now(UTC):
+            # Как настоящая панель: дату окончания в прошлом она не принимает
+            message = "Expiration date cannot be in the past"
+            errors = [{"code": "custom", "path": ["expireAt"], "message": message}]
+            return httpx2.Response(400, json={"message": "Validation failed", "errors": errors})
         for name in _UPDATABLE:
             if name in body:
                 user[name] = body[name]
@@ -279,10 +284,14 @@ class FakeSender:
         default_factory=list[tuple[int, OutgoingMessage]]
     )
 
-    async def send(self, chat_id: int, message: OutgoingMessage) -> None:
+    async def send(self, chat_id: int, message: OutgoingMessage) -> str | None:
         if self.errors:
             raise self.errors.pop(0)
         self.sent.append((chat_id, message))
+        if message.photo is None:
+            return None
+        # Загруженное изображение получает file_id, как в Telegram
+        return message.photo.file_id or f"file-{len(self.sent)}"
 
 
 @contextmanager
