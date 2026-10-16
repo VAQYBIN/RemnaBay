@@ -281,17 +281,43 @@ async def test_8_2_client_without_payments(db_session: AsyncSession, tariff: Tar
     await add(db_session, make_payment(pending, tariff))
     assert await without_payments(db_session, pending)
 
+
+async def test_8_2_migrated_client_by_old_bot_payments(
+    db_session: AsyncSession, tariff: Tariff
+) -> None:
+    """8.2, 0070: перенесённый клиент «с платной подпиской» — по полю файла «Платил в
+    старом боте»; без поля усыновлённый считается платившим, перенесённый из файла без
+    пользователя в панели — без оплат; своя оплата делает платившим всегда."""
     adopted = await make_client(db_session, telegram_id=5)
     adopted.adopted_at = NOW
     await add(db_session, make_subscription(adopted, None, panel_user_id=5))
     assert not await without_payments(db_session, adopted)
 
-    adopted_trial = await make_client(db_session, telegram_id=6)
-    adopted_trial.adopted_at = NOW
-    trial = make_subscription(adopted_trial, None, panel_user_id=6)
-    trial.is_trial = True
-    await add(db_session, trial)
-    assert await without_payments(db_session, adopted_trial)
+    adopted_new = await make_client(db_session, telegram_id=6)
+    adopted_new.adopted_at = NOW
+    adopted_new.old_bot_paid = False
+    await add(db_session, make_subscription(adopted_new, None, panel_user_id=6))
+    assert await without_payments(db_session, adopted_new)
+
+    adopted_paid = await make_client(db_session, telegram_id=7)
+    adopted_paid.adopted_at = NOW
+    adopted_paid.old_bot_paid = True
+    assert not await without_payments(db_session, adopted_paid)
+
+    imported = await make_client(db_session, telegram_id=8)
+    imported.imported_at = NOW
+    assert await without_payments(db_session, imported)
+    imported.old_bot_paid = True
+    assert not await without_payments(db_session, imported)
+
+    paid_here = await make_client(db_session, telegram_id=9)
+    paid_here.adopted_at = NOW
+    paid_here.old_bot_paid = False
+    await add(
+        db_session,
+        make_payment(paid_here, tariff, state=PaymentState.APPLIED, applied_at=NOW),
+    )
+    assert not await without_payments(db_session, paid_here)
 
 
 # --- Ошибки (8.12, 8.9, 0066) ---

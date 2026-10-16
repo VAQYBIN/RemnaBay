@@ -89,7 +89,8 @@ async def home_stats(
             Client.bot_started_at.is_not(None)
             & (Client.bot_started_at >= start)
             & (Client.bot_started_at <= now)
-            & Client.adopted_at.is_(None),
+            & Client.adopted_at.is_(None)
+            & Client.imported_at.is_(None),
             Client,
         ),
         revenue=(Decimal(paid or 0) - Decimal(refunded or 0)).quantize(_MINOR_UNIT),
