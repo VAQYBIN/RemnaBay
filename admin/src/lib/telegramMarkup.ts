@@ -50,7 +50,7 @@ const SIMPLE_TAGS: Record<string, EntityType> = {
 const ENTITY_REFS: Record<string, string> = { lt: '<', gt: '>', amp: '&', quot: '"' }
 const LINK_SCHEMES = ['https://', 'http://', 'tg://']
 
-// Тег, комментарий или мнемоника; остальное — текст
+// Тег, комментарий или мнемоника с `;`; остальное — текст, в том числе `&` в «AT&T»
 const TOKEN = /<!--[\s\S]*?(?:-->|$)|<![^>]*>?|<\?[^>]*>?|<(\/?)([a-zA-Z][^\t\n\r\f />]*)([^>]*?)(\/?)>|&(#[xX][0-9a-fA-F]+|#\d+|[a-zA-Z][a-zA-Z0-9]*);/g
 const ATTRIBUTE = /([^\s"'>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g
 
@@ -94,7 +94,10 @@ export function parseMarkup(markup: string): ParsedMarkup {
         if (reference.startsWith('#')) {
           const hex = reference[1] === 'x' || reference[1] === 'X'
           const code = parseInt(reference.slice(hex ? 2 : 1), hex ? 16 : 10)
-          if (!Number.isFinite(code) || code > 0x10ffff) throw new MarkupError(`Неверный код символа «${whole}»`)
+          // Половинки суррогатной пары — не символ: Telegram их не примет
+          if (!Number.isFinite(code) || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) {
+            throw new MarkupError(`Неверный код символа «${whole}»`)
+          }
           addText(String.fromCodePoint(code))
         } else {
           addText(ENTITY_REFS[reference] ?? whole)
@@ -134,8 +137,8 @@ export function parseMarkup(markup: string): ParsedMarkup {
         type = tag === 'blockquote' && 'expandable' in values ? 'expandable_blockquote' : simple
       }
       const parent = stack[stack.length - 1]
-      const merged =
-        tag === 'code' && parent?.tag === 'pre' && parent.node?.children.length === 0 && (values.class ?? '').startsWith('language-')
+      // `<code>` внутри `<pre>` — не своя сущность: Telegram не вкладывает сущности в блок
+      const merged = tag === 'code' && parent?.tag === 'pre'
       if (merged) {
         stack.push({ tag, node: null, merged })
         continue

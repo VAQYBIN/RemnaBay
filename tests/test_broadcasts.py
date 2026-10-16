@@ -192,8 +192,38 @@ def test_11_1_nested_formatting() -> None:
 
 
 @pytest.mark.parametrize(
+    ("markup", "text"),
+    [
+        ("AT&T и R&D", "AT&T и R&D"),
+        ("Tom & Jerry", "Tom & Jerry"),
+        ("a &amp b &#65 c", "a &amp b &#65 c"),
+        ("&copy; &T;", "&copy; &T;"),
+    ],
+)
+def test_11_1_bare_ampersand_is_text(markup: str, text: str) -> None:
+    """11.1: `&` без мнемоники с `;` — обычный текст, как в предпросмотре админки;
+    клиент получает ровно то, что написал владелец."""
+    assert parse(markup).text == text
+
+
+def test_11_1_ampersand_in_link_address() -> None:
+    """11.1: `&` в адресе ссылки уходит в Telegram как есть."""
+    (link,) = parse('<a href="https://x.ru/?a=1&b=2&amp;c=3">x</a>').entities
+    assert link.url == "https://x.ru/?a=1&b=2&c=3"
+
+
+def test_11_1_code_inside_pre_is_one_block() -> None:
+    """11.1: `<pre><code>` — один блок: Telegram не вкладывает сущности в блок кода."""
+    for markup in ("<pre><code>x = 1</code></pre>", "<pre>a <code>b</code></pre>"):
+        assert [entity.type for entity in parse(markup).entities] == ["pre"]
+    assert parse("<pre><code>x</code></pre>").entities[0].language is None
+
+
+@pytest.mark.parametrize(
     ("markup", "problem"),
     [
+        ("&#xD800;", "Неверный код символа"),
+        ("&#57343;", "Неверный код символа"),
         ("<h1>x</h1>", "не поддерживается"),
         ("<b>x", "Не закрыт"),
         ("<b><i>x</b></i>", "не на месте"),

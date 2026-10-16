@@ -8,8 +8,10 @@
 Поддерживается то, что перечисляет 11.1: жирный, курсив, подчёркнутый,
 зачёркнутый, скрытый текст, ссылка, цитата, моноширинный (строка и блок).
 Из мнемоник — только `&lt;`, `&gt;`, `&amp;`, `&quot;` и числовые, как в Telegram.
+`&` без полной мнемоники («AT&T», «R&D») — обычный текст.
 """
 
+import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
 
@@ -38,6 +40,11 @@ _ENTITY_REFS = {"lt": "<", "gt": ">", "amp": "&", "quot": '"'}
 _LINK_SCHEMES = ("https://", "http://", "tg://")
 _SPOILER_CLASS = "tg-spoiler"
 _LANGUAGE_PREFIX = "language-"
+# `&`, за которым нет мнемоники с `;`. HTMLParser считает мнемоникой и `&T` без `;`,
+# поэтому такой `&` экранируется до разбора — так же, как его оставляет текстом админка
+_BARE_AMPERSAND = re.compile(r"&(?!#[xX][0-9a-fA-F]+;|#[0-9]+;|[a-zA-Z][a-zA-Z0-9]*;)")
+# Половинки суррогатной пары — не символ: Telegram их не примет
+_SURROGATES = range(0xD800, 0xE000)
 
 
 class FormatError(ValueError):
@@ -62,7 +69,8 @@ class _Open:
     offset: int
     url: str | None = None
     language: str | None = None
-    # `<code class="language-…">` сразу внутри `<pre>` — язык блока, а не своя сущность
+    # `<code>` внутри `<pre>` — не своя сущность: Telegram не вкладывает сущности в блок;
+    # `class="language-…"` в начале блока — его язык
     merged: bool = False
 
 
@@ -87,6 +95,8 @@ class _Parser(HTMLParser):
     def handle_charref(self, name: str) -> None:
         try:
             code = int(name[1:], 16) if name[:1] in ("x", "X") else int(name)
+            if code in _SURROGATES:
+                raise ValueError(code)
             self._text(chr(code))
         except ValueError, OverflowError:
             raise FormatError(f"Неверный код символа «&#{name};»") from None
@@ -114,15 +124,10 @@ class _Parser(HTMLParser):
         opened = _Open(tag, kind, self.position)
         language = values.get("class") or ""
         parent = self.stack[-1] if self.stack else None
-        if (
-            tag == "code"
-            and parent is not None
-            and parent.tag == "pre"
-            and parent.offset == self.position
-            and language.startswith(_LANGUAGE_PREFIX)
-        ):
-            parent.language = language.removeprefix(_LANGUAGE_PREFIX)
+        if tag == "code" and parent is not None and parent.tag == "pre":
             opened.merged = True
+            if parent.offset == self.position and language.startswith(_LANGUAGE_PREFIX):
+                parent.language = language.removeprefix(_LANGUAGE_PREFIX)
         self.stack.append(opened)
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
@@ -162,7 +167,7 @@ def parse(markup: str) -> FormattedText:
     """Разбирает разметку. Пробелы и переносы по краям отбрасываются — их отбросил бы
     и Telegram, сдвинув сущности."""
     parser = _Parser()
-    parser.feed(markup.strip())
+    parser.feed(_BARE_AMPERSAND.sub("&amp;", markup.strip()))
     parser.close()
     if parser.stack:
         raise FormatError(f"Не закрыт тег <{parser.stack[-1].tag}>")
