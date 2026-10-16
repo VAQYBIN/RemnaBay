@@ -22,6 +22,8 @@ from remnabay.panel_sync import STRATEGIES
 # по всем, а список нужен, чтобы разобраться (решение 0071)
 MAX_PROBLEMS = 5000
 _CODE_LIMIT = 128
+# Telegram ID хранится в BIGINT
+MAX_TELEGRAM_ID = 2**63 - 1
 
 
 class ProblemReason(StrEnum):
@@ -260,7 +262,7 @@ class _Builder:
         counts = Counter(client.telegram_id for client in self.file.clients)
         clients: dict[int, FileClient] = {}
         for client in self.file.clients:
-            if client.telegram_id <= 0:
+            if not 0 < client.telegram_id <= MAX_TELEGRAM_ID:
                 self.problem(ProblemReason.BAD_TELEGRAM_ID, telegram_id=client.telegram_id)
             elif counts[client.telegram_id] > 1:
                 self.problem(ProblemReason.DUPLICATE_TELEGRAM_ID, telegram_id=client.telegram_id)
@@ -278,13 +280,13 @@ class _Builder:
             return self.by_username.get(ref.username)
         return None
 
-    def claims(
-        self, clients: dict[int, FileClient]
-    ) -> tuple[dict[int, int], set[int], dict[int, str]]:
-        """Связи файла: пользователь панели → Telegram ID; заблокированные конфликтом;
-        подсказки тарифа по пользователю панели."""
+    def claims(self, clients: dict[int, FileClient]) -> tuple[dict[int, int], dict[int, str]]:
+        """Связи файла: пользователь панели → Telegram ID; подсказки тарифа.
+
+        Связь-конфликт не применяется (9.12): пользователь панели усыновляется так же,
+        как без файла, — по Telegram ID в панели (0071)."""
         claimed: dict[int, int] = {}
-        blocked: set[int] = set()
+        contested: set[int] = set()
         hints: dict[int, str] = {}
         for telegram_id, client in clients.items():
             for ref in client.panel_users:
@@ -300,7 +302,6 @@ class _Builder:
                     continue
                 report.links_found += 1
                 if user.telegram_id is not None and user.telegram_id != telegram_id:
-                    blocked.add(user.id)
                     self.problem(
                         ProblemReason.TELEGRAM_ID_MISMATCH,
                         telegram_id=telegram_id,
@@ -309,7 +310,7 @@ class _Builder:
                     continue
                 owner = claimed.get(user.id)
                 if owner is not None and owner != telegram_id:
-                    blocked.add(user.id)
+                    contested.add(user.id)
                     self.problem(
                         ProblemReason.CLAIMED_TWICE,
                         telegram_id=telegram_id,
@@ -324,20 +325,22 @@ class _Builder:
                         panel_user=user.username,
                     )
                     continue
-                if owner is None and user.telegram_id is None:
-                    report.links_without_telegram_id += 1
                 claimed[user.id] = telegram_id
                 if ref.tariff_hint:
                     hints[user.id] = ref.tariff_hint
-        return claimed, blocked, hints
+        # Пользователь без Telegram ID в панели, указанный у двух клиентов, — ничей
+        for user_id in contested:
+            claimed.pop(user_id, None)
+        self.file_report.links_without_telegram_id = sum(
+            self.by_id[user_id].telegram_id is None for user_id in claimed
+        )
+        return claimed, hints
 
     # --- Усыновление: пользователи панели по клиентам ---
 
-    def owners(self, claimed: dict[int, int], blocked: set[int]) -> dict[int, list[User]]:
+    def owners(self, claimed: dict[int, int]) -> dict[int, list[User]]:
         by_client: dict[int, list[User]] = defaultdict(list)
         for user in self.users:
-            if user.id in blocked:
-                continue
             bound = self.shop.bound.get(user.id)
             if bound is not None:
                 if bound.adopted:
@@ -486,19 +489,27 @@ class _Builder:
         return unique
 
     def links(self, files: dict[int, FileClient]) -> None:
-        """Пригласившие из файла (9.11); существующая связь не меняется (0071)."""
+        """Пригласившие из файла (9.11); существующая связь не меняется (0071).
+
+        Клиенту, уже перенесённому из файла, связь тоже ставится, если её нет: прогон,
+        прервавшийся до последнего шага, не записал связи, а повтор их допишет (9.7)."""
         planned = {item.telegram_id: item for item in self.plan.clients}
         for telegram_id, client in files.items():
             item = planned.get(telegram_id)
-            if client.invited_by is None or item is None or item.file is None:
-                continue
             known = self.shop.clients.get(telegram_id)
+            if client.invited_by is None or (item is None and known is None):
+                continue
             if known is not None and known.has_inviter:
                 continue
+            # Уже перенесённого клиента в отчёте не разбираем второй раз
+            reported = item is not None and item.file is not None
             if client.invited_by == telegram_id:
-                self.problem(ProblemReason.SELF_INVITE, telegram_id=telegram_id)
+                if reported:
+                    self.problem(ProblemReason.SELF_INVITE, telegram_id=telegram_id)
                 continue
             if client.invited_by not in planned and client.invited_by not in self.shop.clients:
+                if not reported:
+                    continue
                 self.problem(
                     ProblemReason.INVITER_NOT_FOUND,
                     telegram_id=telegram_id,
@@ -518,8 +529,8 @@ def make_plan(
     """План и отчёт прогона. Пользователи панели вне файла усыновляются так же (9.10)."""
     builder = _Builder(users, shop, mapping, file)
     files = builder.file_clients()
-    claimed, blocked, hints = builder.claims(files)
-    by_client = builder.owners(claimed, blocked)
+    claimed, hints = builder.claims(files)
+    by_client = builder.owners(claimed)
     builder.groups(by_client, hints)
     builder.clients(by_client, files)
     builder.links(files)

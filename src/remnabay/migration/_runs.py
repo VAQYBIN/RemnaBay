@@ -293,7 +293,10 @@ async def apply_step(context: TaskContext, args: StepArgs) -> None:
         now=now,
     )
     for item in items:
-        report.skipped += await apply_client(session, item, users, apply_context)
+        applied = await apply_client(session, item, users, apply_context)
+        # Итоговый отчёт — фактический: подписку, которую не усыновили, не считаем
+        report.skipped += applied.skipped
+        report.adopt -= applied.not_adopted
     run.processed = args.start + len(items)
     if run.processed < len(plan.clients):
         run.report = report.model_dump(mode="json")

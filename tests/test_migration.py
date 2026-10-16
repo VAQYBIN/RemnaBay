@@ -511,9 +511,10 @@ async def test_9_17_client_without_panel_user(
 async def test_9_12_conflicts_are_shown_and_not_applied(
     db_session: AsyncSession, panel: FakePanel, owner: TeamMember
 ) -> None:
-    """9.12: пользователь панели уже привязан к другому клиенту или его Telegram ID в
-    панели другой — конфликт: в отчёте и не применяется; код, который уже ведёт на
-    другого клиента, — тоже."""
+    """9.12, 0071: пользователь панели уже привязан к другому клиенту или его Telegram ID
+    в панели другой — конфликт: в отчёте, связь файла не применяется; пользователь
+    усыновляется по Telegram ID из панели, как без файла; код, который уже ведёт на
+    другого клиента, — тоже конфликт."""
     other = await make_client(db_session, telegram_id=4999)
     await add(db_session, make_subscription(other, None, panel_user_id=401))
     await add(db_session, ReferralCode(code="ref_uTAKEN", client_id=other.id))
@@ -535,8 +536,9 @@ async def test_9_12_conflicts_are_shown_and_not_applied(
         (4003, ProblemReason.TELEGRAM_ID_MISMATCH),
     ]
     assert report.conflicts == 3
+    # Связь файла не применена, а пользователь 402 усыновлён по Telegram ID из панели
     owners = {s.panel_user_id: s.client_id for s in await db_session.scalars(select(Subscription))}
-    assert owners == {401: other.id}
+    assert owners == {401: other.id, 402: (await _client_of(db_session, 4002)).id}
     code = await db_session.get_one(ReferralCode, "ref_uTAKEN")
     assert code.client_id == other.id
 
@@ -628,3 +630,53 @@ async def test_9_15_tariff_hints_are_shown_by_group(
     report = _report(await _dry_run(db_session, owner, file=file))
 
     assert report.groups[0].hints == {"Месяц": 1}
+
+
+@pytest.mark.usefixtures("runtime")
+async def test_9_7_missing_links_are_added_for_imported_clients(
+    db_session: AsyncSession, owner: TeamMember
+) -> None:
+    """9.7, 9.11: клиенты уже перенесены из файла, а реферальной связи нет (например,
+    применение прервалось до последнего шага) — повторный импорт её дописывает, остальное
+    у перенесённых не меняет."""
+    await _apply(
+        db_session,
+        owner,
+        await _dry_run(
+            db_session,
+            owner,
+            file=_file({"telegram_id": 9001}, {"telegram_id": 9002, "paid_in_old_bot": False}),
+        ),
+    )
+    invited = await _client_of(db_session, 9002)
+    assert await db_session.get(ReferralLink, invited.id) is None
+
+    again = await _dry_run(
+        db_session,
+        owner,
+        file=_file(
+            {"telegram_id": 9001},
+            {"telegram_id": 9002, "invited_by": 9001, "paid_in_old_bot": True},
+        ),
+    )
+    file_report = _report(again).file
+    assert file_report is not None
+    assert (file_report.skipped_imported, file_report.referral_links) == (2, 1)
+    await _apply(db_session, owner, again)
+
+    link = await db_session.get_one(ReferralLink, invited.id)
+    assert link.inviter_id == (await _client_of(db_session, 9001)).id
+    assert invited.old_bot_paid is False
+
+
+@pytest.mark.usefixtures("runtime")
+async def test_9_11_too_large_telegram_id_is_unrecognized(
+    db_session: AsyncSession, owner: TeamMember
+) -> None:
+    """9.11: Telegram ID, который не помещается в базу, — «не распознано», а не сбой
+    применения."""
+    dry = await _dry_run(db_session, owner, file=_file({"telegram_id": 2**63}, {"telegram_id": 1}))
+    await _apply(db_session, owner, dry)
+
+    assert [p.reason for p in _report(dry).problems] == [ProblemReason.BAD_TELEGRAM_ID]
+    assert sorted(await db_session.scalars(select(TelegramAccount.telegram_id))) == [1]

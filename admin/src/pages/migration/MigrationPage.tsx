@@ -84,14 +84,19 @@ export function MigrationPage() {
     if (!file) return
     setError(null)
     setUploading(true)
-    const { data: run, error: failure } = await fetchClient.POST('/api/admin/migration/import', {
-      body: file as unknown as never,
-      bodySerializer: (body: unknown) => body as Blob,
-      headers: { 'Content-Type': 'application/json' },
-    })
-    setUploading(false)
-    if (run) opened(run)
-    else setError(errorMessage(failure, 'Не удалось загрузить файл'))
+    try {
+      const { data: run, error: failure } = await fetchClient.POST('/api/admin/migration/import', {
+        body: file as unknown as never,
+        bodySerializer: (body: unknown) => body as Blob,
+        headers: { 'Content-Type': 'application/json' },
+      })
+      if (run) opened(run)
+      else setError(errorMessage(failure, 'Не удалось загрузить файл'))
+    } catch {
+      setError('Не удалось загрузить файл: нет связи с магазином')
+    } finally {
+      setUploading(false)
+    }
   }
 
   const runs = data?.runs ?? []

@@ -206,10 +206,18 @@ async def _adopt(
     return adopted, skipped
 
 
+@dataclass(frozen=True)
+class Applied:
+    """Что пропущено при применении клиента (9.7): данные файла и подписки."""
+
+    skipped: int
+    not_adopted: int
+
+
 async def apply_client(
     session: AsyncSession, item: ClientPlan, users: dict[int, User], context: Context
-) -> int:
-    """Применяет план одного клиента. Возвращает, сколько пропущено (9.7)."""
+) -> Applied:
+    """Применяет план одного клиента: что-то могло измениться после расчёта плана."""
     client, created = await _client(session, item, context)
     filled = await _fill(session, client, item, context.now)
     skipped = int(item.file is not None and not filled)
@@ -217,8 +225,9 @@ async def apply_client(
     skipped += not_adopted
     if adopted and client.adopted_at is None:
         client.adopted_at = context.now
+    result = Applied(skipped=skipped, not_adopted=not_adopted)
     if not adopted and not filled:
-        return skipped
+        return result
     await session.flush()
     await record(
         session,
@@ -234,7 +243,7 @@ async def apply_client(
             "from_file": filled,
         },
     )
-    return skipped
+    return result
 
 
 async def apply_link(session: AsyncSession, link: InviteLink, context: Context) -> bool:
