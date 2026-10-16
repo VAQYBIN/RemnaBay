@@ -219,9 +219,10 @@ async def main_menu(ctx: BotContext) -> Screen:
         )
     else:
         lines = [await _summary(ctx, s, dates, now) for s in subscriptions]
-        text = ctx.render(
-            "menu.header.subscriptions", brand_name=brand, subscriptions_summary="\n".join(lines)
-        )
+        # Усыновлённый клиент впервые открыл бот: подписки уже здесь (сценарий
+        # «Первое открытие бота усыновлённым клиентом»)
+        header = "menu.header.adopted" if ctx.adopted_first_open else "menu.header.subscriptions"
+        text = ctx.render(header, brand_name=brand, subscriptions_summary="\n".join(lines))
         if not await panel_available(ctx.session):
             # Панель недоступна: последние известные данные с пометкой (4.12)
             text = f"{text}\n\n{ctx.render('menu.stale_data')}"
