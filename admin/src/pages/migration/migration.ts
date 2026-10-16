@@ -87,8 +87,11 @@ export function summaryText(run: Run): string {
   return parts.join(' · ')
 }
 
+/** Лимит устройств пользователя панели: 0 — проверка устройств для него отключена,
+ *  пусто — общий лимит из настроек панели. */
 export function devicesText(limit: number | null): string {
-  if (limit === null) return 'лимит устройств не задан'
+  if (limit === null) return 'лимит устройств — по умолчанию панели'
+  if (limit === 0) return 'без ограничения устройств'
   return `${formatCount(limit)} ${plural(limit, 'устройство', 'устройства', 'устройств')}`
 }
 
