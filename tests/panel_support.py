@@ -214,6 +214,13 @@ class FakePanel:
             squads = [{"uuid": uuid, "name": name} for uuid, name in self.squads.items()]
             body = {"total": len(squads), "internalSquads": squads}
             return httpx2.Response(200, json={"response": body})
+        if request.url.path == "/api/users" and request.method == "GET":
+            # Страница пользователей по порядку ID (4.8, блок 9)
+            start = int(request.url.params.get("start", "0"))
+            size = int(request.url.params.get("size", "25"))
+            users = sorted(self.users.values(), key=lambda user: user["id"])
+            body = {"users": users[start : start + size], "total": len(users)}
+            return httpx2.Response(200, json={"response": body})
         if request.url.path == "/api/users" and request.method == "POST":
             return self._create(request)
         if request.url.path == "/api/users" and request.method == "PATCH":

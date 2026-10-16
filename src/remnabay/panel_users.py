@@ -21,6 +21,7 @@ from remnabay.messaging import load_texts
 from remnabay.panel import CreateUser, TrafficStrategy, UpdateUser, User
 from remnabay.panel_names import lock_prefix, panel_username
 from remnabay.panel_sync import accept_access
+from remnabay.texts import Texts
 
 # Сколько занятых чужими пользователями имён пропустить, прежде чем сдаться
 _MAX_NAME_TRIES = 50
@@ -117,6 +118,17 @@ async def default_name(session: AsyncSession, client_id: int) -> str:
     return name[:_NAME_LIMIT] or texts.render("subscription.default_name", None)[:_NAME_LIMIT]
 
 
+def numbered_name(texts: Texts, language: str | None, number: int) -> str:
+    """Название подписки по её номеру у клиента: первая — по умолчанию, следующие —
+    «Подписка 2», «Подписка 3» (9.16, решение 0071)."""
+    if number == 1:
+        key, variables = "subscription.default_name", {}
+    else:
+        key, variables = "subscription.numbered_name", {"number": str(number)}
+    name = texts.render(key, language, **variables).strip()
+    return name[:_NAME_LIMIT] or texts.render(key, None, **variables)[:_NAME_LIMIT]
+
+
 async def new_subscription(
     session: AsyncSession,
     client_id: int,
@@ -124,11 +136,13 @@ async def new_subscription(
     *,
     tariff_id: int | None,
     is_trial: bool = False,
+    name: str | None = None,
 ) -> Subscription:
-    """Строка подписки магазина для только что созданного пользователя панели."""
+    """Строка подписки магазина для пользователя панели: только что созданного или
+    усыновлённого (9.5). Без названия — название первой подписки по умолчанию."""
     subscription = Subscription(
         client_id=client_id,
-        name=await default_name(session, client_id),
+        name=name or await default_name(session, client_id),
         tariff_id=tariff_id,
         is_trial=is_trial,
         panel_user_id=user.id,

@@ -58,6 +58,7 @@
 "summary.disabled" = "{subscription_name} — отключена"
 "summary.limited" = "{subscription_name} — трафик исчерпан"
 "subscription.default_name" = "Основная"
+"subscription.numbered_name" = "Подписка {number}"
 "menu.stale_data" = "Данные могут быть неактуальны — обновим, как только сервер ответит."
 
 # З2. Список подписок
