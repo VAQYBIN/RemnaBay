@@ -128,11 +128,12 @@
 Данные могут быть неактуальны — обновим, как только сервер ответит.
 ```
 
-Название подписки по умолчанию (3.14, [решение 0057](decisions/0057-stage-6-refinements.md)):
+Название подписки по умолчанию (3.14, [решение 0057](decisions/0057-stage-6-refinements.md)) и названия следующих подписок усыновлённого клиента (9.16, [решение 0071](decisions/0071-stage-10-preparation.md)):
 
 | Ключ | Текст |
 |---|---|
 | `subscription.default_name` | Основная |
+| `subscription.numbered_name` | Подписка {number} |
 
 ## З2. Список подписок
 `subscriptions.list.header`
