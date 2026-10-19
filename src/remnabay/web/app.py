@@ -86,8 +86,8 @@ async def _watch_database(engine: AsyncEngine, watchdog: Watchdog) -> None:
             last_ok = time.monotonic()
         elif time.monotonic() - last_ok > watchdog.lost_after.total_seconds():
             logger.critical(
-                "Веб потерял работоспособность и завершается: база не отвечает дольше %s (%s)",
-                watchdog.lost_after,
+                "Веб потерял работоспособность и завершается: база не отвечает дольше %.0f с (%s)",
+                watchdog.lost_after.total_seconds(),
                 _describe_error(error),
             )
             watchdog.on_lost()
