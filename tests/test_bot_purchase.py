@@ -424,11 +424,11 @@ async def test_3_24_several_subscriptions_each_shown_separately(
     assert first.id != second.id
 
 
-async def test_3_40_main_menu_renew_leads_to_renewal_or_list(
+async def test_3_40_main_menu_renew_with_one_subscription_leads_to_renewal(
     shop: Shop, tariffs: list[Tariff]
 ) -> None:
-    """3.40: «Продлить» в главном меню — при одной подписке сразу к её продлению тем же
-    тарифом, в том числе у истёкшей; при нескольких — к списку подписок."""
+    """3.40, 3.23: «Продлить» в главном меню при одной подписке — сразу к её продлению
+    тем же тарифом, в том числе у истёкшей."""
     subscription = await _subscription(shop, tariffs[0], expires_in=-timedelta(days=1))
     menu = await _menu(shop)
     renew = _button(menu, "Продлить")
@@ -436,10 +436,44 @@ async def test_3_40_main_menu_renew_leads_to_renewal_or_list(
     confirm = await _press(shop, renew)
     assert "Тариф: Месяц" in _text(confirm)
 
-    await _subscription(shop, tariffs[0], panel_user_id=2)
-    menu = await _menu(shop)
-    listing = await _press(shop, _button(menu, "Продлить"))
-    assert len([label for label in _labels(listing) if label != "Назад"]) == 2
+
+async def test_3_40_several_subscriptions_choose_which_to_renew(
+    shop: Shop, tariffs: list[Tariff]
+) -> None:
+    """3.40, решение 0072: при нескольких подписках «Продлить» открывает «Какую подписку
+    продлить?»; нажатие на подписку сразу ведёт к её продлению, без карточки."""
+    await _subscription(shop, tariffs[0], panel_user_id=1)
+    second = await _subscription(shop, tariffs[0], panel_user_id=2)
+    second.name = "Для мамы"
+    await shop.session.flush()
+
+    choice = await _press(shop, _button(await _menu(shop), "Продлить"))
+    assert _text(choice).startswith("Какую подписку продлить?")
+    labels = _labels(choice)
+    assert labels[-1] == "Назад"
+    assert len(labels) == 3
+    [mom] = [button for button in _buttons(choice) if button.text.startswith("Для мамы")]
+    assert mom.callback_data == Renew(subscription_id=second.id).pack()
+
+    confirm = await _press(shop, mom)
+    assert "Тариф: Месяц" in _text(confirm)
+
+
+async def test_3_40_renew_choice_lists_only_renewable(shop: Shop, tariffs: list[Tariff]) -> None:
+    """3.40, 3.36, 4.7, решение 0072: в выборе — только подписки, которые можно продлить;
+    экран показывается, даже если такая одна. «Назад» — в главное меню."""
+    renewable = await _subscription(shop, tariffs[0], panel_user_id=1)
+    await _subscription(shop, tariffs[0], panel_user_id=2, status=PanelUserStatus.DISABLED)
+    await _subscription(shop, None, panel_user_id=3, is_trial=True)
+
+    choice = await _press(shop, _button(await _menu(shop), "Продлить"))
+    assert _text(choice).startswith("Какую подписку продлить?")
+    [only, back] = _buttons(choice)
+    assert only.callback_data == Renew(subscription_id=renewable.id).pack()
+    assert back.text == "Назад"
+
+    menu = await _press(shop, back)
+    assert "Продлить" in _labels(menu)
 
 
 async def test_3_40_no_renew_in_menu_for_disabled_subscription(
