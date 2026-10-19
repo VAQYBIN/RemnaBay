@@ -23,10 +23,11 @@ from aiogram.types import (
     MessageEntity,
     RichMessageButton,
     RichTextDateTime,
+    RichTextUnion,
 )
 
 from remnabay.bot._context import BotContext
-from remnabay.messaging import DATE_FORMAT, Dates, DateValue
+from remnabay.messaging import DATE_FORMAT, Dates, DateValue, unix_time
 from remnabay.shop_settings import shop_time_zone
 
 # Кнопка целевого действия — зелёная, не больше одной на экране (03-screens)
@@ -60,17 +61,20 @@ async def date_value(ctx: BotContext, moment: datetime) -> DateValue:
     return DateValue(moment, fallback)
 
 
-def rich_date(value: DateValue) -> RichTextDateTime:
-    return RichTextDateTime(
-        text=value.fallback, unix_time=int(value.moment.timestamp()), date_time_format=DATE_FORMAT
-    )
+def rich_date(value: DateValue) -> RichTextUnion:
+    """Дата сущностью; позже предела Telegram — запасным текстом (`unix_time`)."""
+    moment = unix_time(value.moment)
+    if moment is None:
+        return value.fallback
+    return RichTextDateTime(text=value.fallback, unix_time=moment, date_time_format=DATE_FORMAT)
 
 
-def rich_relative(moment: datetime, fallback: str) -> RichTextDateTime:
+def rich_relative(moment: datetime, fallback: str) -> RichTextUnion:
     """«Через 21 день» в часовом поясе клиента; запасной текст — число дней (0060)."""
-    return RichTextDateTime(
-        text=fallback, unix_time=int(moment.timestamp()), date_time_format=RELATIVE_FORMAT
-    )
+    time = unix_time(moment)
+    if time is None:
+        return fallback
+    return RichTextDateTime(text=fallback, unix_time=time, date_time_format=RELATIVE_FORMAT)
 
 
 def rich_action(text: str, data: str, *, style: str | None = None) -> RichMessageButton:

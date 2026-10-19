@@ -5,13 +5,14 @@ from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from aiogram.methods import SendRichMessage
+from aiogram.methods import EditMessageText, SendRichMessage
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from remnabay.bot._common import Card
 from remnabay.domain.clients import Client, TelegramAccount
 from remnabay.domain.referrals import ReferralCode, ReferralLink
-from remnabay.domain.subscriptions import PanelUserStatus
+from remnabay.domain.subscriptions import PanelUserStatus, Subscription
 from remnabay.domain.team import TeamMember, TeamRole
 from remnabay.shop import SHOP_STATE, ShopState
 from tests.bot_support import telegram_user
@@ -90,3 +91,30 @@ async def test_9_13_adopted_client_by_old_link_gets_no_link(shop: Shop) -> None:
     await shop.send_text(USER, "/start ref_uZZ")
 
     assert await shop.session.get(ReferralLink, client.id) is None
+
+
+async def test_9_4_adopted_subscription_without_end_in_sight_is_shown(shop: Shop) -> None:
+    """9.4, 0044: у бессрочного пользователя панели срок — 2099 год, позже предела
+    Telegram для date_time: меню и карточка показывают дату текстом, а не падают."""
+    client = await _adopted(shop)
+    subscription = await shop.session.scalar(
+        select(Subscription).where(Subscription.client_id == client.id)
+    )
+    assert subscription is not None
+    subscription.expires_at = datetime(2099, 10, 4, 18, 35, tzinfo=UTC)
+    await shop.session.commit()
+
+    await shop.send_text(USER, "/start")
+    menu = shop.telegram.last()
+    assert not isinstance(menu, SendRichMessage)
+    assert menu.text is not None
+    assert "2099" in menu.text
+    assert not [entity for entity in menu.entities or [] if entity.type == "date_time"]
+
+    await shop.press(USER, Card(subscription_id=subscription.id).pack())
+    card = shop.telegram.last()
+    assert isinstance(card, EditMessageText)
+    assert card.rich_message is not None
+    content = card.rich_message.model_dump_json(exclude_none=True)
+    assert "2099" in content
+    assert "unix_time" not in content
