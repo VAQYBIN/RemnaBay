@@ -1,0 +1,10 @@
+# База магазина на другом сервере: встроенная PostgreSQL не запускается,
+# адрес базы — DATABASE_URL в .env (решение 0073).
+# Подключение: добавьте :compose.external-db.yaml в конец COMPOSE_FILE в .env.
+services:
+  db:
+    # Профиль, который никто не включает: встроенная база не запускается
+    profiles: ["disabled"]
+
+  migrate:
+    depends_on: !reset {}

@@ -1,0 +1,21 @@
+# RemnaBay за Caddy панели Remnawave (решение 0026).
+# Добавьте этот блок в конец /opt/remnawave/caddy/Caddyfile, замените
+# shop.example.com на домен магазина. Магазин подключён к сети панели
+# файлом compose.panel-network.yaml и доступен в ней как remnabay:8000.
+# Сертификат и перенаправление с HTTP на HTTPS Caddy делает сам.
+
+https://shop.example.com {
+	# Файл миграции — до 50 МБ, логотип — до 1 МБ
+	request_body {
+		max_size 60MB
+	}
+
+	# Host, X-Forwarded-For и X-Forwarded-Proto Caddy передаёт сам
+	reverse_proxy remnabay:8000 {
+		header_up X-Real-IP {remote_host}
+		transport http {
+			dial_timeout 10s
+			response_header_timeout 120s
+		}
+	}
+}

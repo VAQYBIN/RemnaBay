@@ -1,0 +1,87 @@
+# RemnaBay для операторов: база, миграции, веб и воркер (решения 0026, 0073).
+# Установка, обновление и резервная копия — README.md в этой папке.
+#
+# Дополнительные файлы подключаются через COMPOSE_FILE в .env:
+#   compose.panel-network.yaml — магазин на одном сервере с панелью (общая Docker-сеть);
+#   compose.caddy.yaml         — чистый сервер, Caddy в контейнере;
+#   compose.nginx.yaml         — чистый сервер, Nginx на самом сервере;
+#   compose.external-db.yaml   — база на другом сервере.
+name: remnabay
+
+x-app-environment: &app-environment
+  # Адрес встроенной базы compose собирает сам из POSTGRES_PASSWORD (0073).
+  # DATABASE_URL в .env задают, только если база на другом сервере
+  DATABASE_URL: ${DATABASE_URL:-postgresql://remnabay:${POSTGRES_PASSWORD:?не задан — пароль встроенной базы, команда для него в README.md}@db:5432/remnabay}
+
+x-app: &app
+  # Номер версии образа, без опоры на latest (0026). REMNABAY_VERSION в .env задают,
+  # только чтобы поставить предварительную версию (например, 0.1.0-rc.1)
+  image: ghcr.io/vaqybin/remnabay:${REMNABAY_VERSION:-0.1.0}
+  env_file: .env
+  environment: *app-environment
+  restart: unless-stopped
+
+services:
+  db:
+    image: postgres:18.6
+    environment:
+      POSTGRES_USER: remnabay
+      # PostgreSQL берёт пароль только при первом запуске: сменить его потом —
+      # по рецепту из README.md, а не правкой .env
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      POSTGRES_DB: remnabay
+    volumes:
+      # С PostgreSQL 18 данные монтируются на уровень выше PGDATA
+      - db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "remnabay", "-d", "remnabay"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # Миграции — отдельный короткий шаг перед стартом веба и воркера (0026).
+  # Одноразовый, поэтому без перезапуска (0073)
+  migrate:
+    <<: *app
+    command: ["migrate"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    <<: *app
+    command: ["web"]
+    environment:
+      <<: *app-environment
+      # Порт веба наружу не открыт: к нему ходит только обратный прокси, и его
+      # заголовкам X-Forwarded-* можно доверять
+      FORWARDED_ALLOW_IPS: "*"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "remnabay", "healthcheck", "web"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  worker:
+    <<: *app
+    command: ["worker"]
+    # По SIGTERM воркер доделывает начатые задачи: даём больше таймаута задачи (30 с)
+    stop_grace_period: 45s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "remnabay", "healthcheck", "worker"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  db-data:

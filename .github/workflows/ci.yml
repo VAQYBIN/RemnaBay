@@ -1,5 +1,6 @@
 # Проверки готовности задачи (CLAUDE.md, «Готовность»): линтер, типы, тесты,
-# сборка админки и сборка образа. Образ здесь не публикуется — это этап 11.
+# сборка админки, сборка образа и файлы развёртывания. Образ здесь не публикуется —
+# это делает release.yml по тегу версии (0073).
 name: CI
 
 on:
@@ -106,3 +107,13 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy:
+    name: Развёртывание — прокси и compose для операторов
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # nginx -t и caddy validate для четырёх вариантов прокси (0026), compose во всех
+      # сочетаниях и отказ без пароля встроенной базы (1.1, 0073)
+      - name: Проверить deploy/
+        run: scripts/check-deploy.sh
