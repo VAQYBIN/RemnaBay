@@ -25,6 +25,7 @@ from remnabay.db import create_engine
 from remnabay.devices import delete_devices
 from remnabay.guide import REFRESH_CONFIGS, refresh_configs_task
 from remnabay.messaging import TelegramSender, notify_team, send_message
+from remnabay.migration import TASKS as MIGRATION_TASKS
 from remnabay.panel import PanelClient, PanelUnavailableError
 from remnabay.panel_sync import (
     HEALTH_CHECK,
@@ -82,6 +83,7 @@ TASKS = TaskRegistry(
         replan_reminders,
         send_reminders,
         send_step,
+        *MIGRATION_TASKS,
     )
 )
 # Периодические задачи: сверка всех подписок с панелью (4.8), проверка связи с ней (4.13),

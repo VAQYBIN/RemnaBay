@@ -47,7 +47,30 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     roles.add_parser("openapi", help="вывести схему API админки (для клиента админки)")
     roles.add_parser("default-brand-css", help="вывести токены бренда RemnaBay для админки")
 
+    adapter = roles.add_parser(
+        "adapter", help="файл миграции из базы старого бота (только чтение базы)"
+    )
+    adapter.add_argument("source_bot", choices=["remnawave-tg-shop"], help="какой бот")
+    adapter.add_argument("--source", required=True, help="адрес базы старого бота: postgresql://…")
+    adapter.add_argument("--output", required=True, help="куда записать файл JSON")
+
     return parser.parse_args(argv)
+
+
+def _adapter(source: str, output: str) -> int:
+    import psycopg
+
+    from remnabay.migration.adapters import remnawave_tg_shop
+
+    try:
+        totals = remnawave_tg_shop.run(source, output)
+    except (psycopg.Error, ValueError) as exc:
+        print(f"Не удалось прочитать базу старого бота: {exc}", file=sys.stderr)
+        return 1
+    print(f"Файл миграции: {output}")
+    for name, value in totals.items():
+        print(f"  {name}: {value}")
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -75,6 +98,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         print(default_brand_css(), end="")
         return 0
+
+    if args.command == "adapter":
+        # Адаптер запускает оператор при переезде: настройки магазина ему не нужны (9.9)
+        return _adapter(args.source, args.output)
 
     try:
         settings = load_settings()

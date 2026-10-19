@@ -21,8 +21,13 @@ class Client(Base):
     first_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Когда клиент впервые открыл бот магазина; у усыновлённого — пусто, пока не откроет
     bot_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    # Пометка «усыновлён» (10.2); усыновлённые не входят в «новых клиентов» (1.17)
+    # Пометка «усыновлён» (10.2); перенесённые не входят в «новых клиентов» (1.17)
     adopted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Пометка «перенесён из файла» миграции (9.7, 9.17, решение 0071): повторный импорт
+    # такого клиента пропускает
+    imported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Что файл миграции сказал об оплатах в старом боте: да, нет или ничего (решение 0070)
+    old_bot_paid: Mapped[bool | None] = mapped_column(Boolean)
     # Язык клиента для текстов бота (0018): из Telegram или из файла миграции
     language_code: Mapped[str | None] = mapped_column(String(16))
     # Пометка «бот заблокирован» (11.9): снимается, когда клиент снова открывает бот

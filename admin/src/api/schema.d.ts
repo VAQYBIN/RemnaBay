@@ -1390,6 +1390,123 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/migration/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Runs
+         * @description История прогонов, новые первыми (А9).
+         */
+        get: operations["runs_api_admin_migration_runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/migration/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Run */
+        get: operations["run_api_admin_migration_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/migration/adoption": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Adoption
+         * @description Пробный прогон усыновления (9.1, 9.15).
+         */
+        post: operations["adoption_api_admin_migration_adoption_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/migration/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import File
+         * @description Файл в промежуточном формате — телом запроса; сразу пробный прогон (9.10).
+         */
+        post: operations["import_file_api_admin_migration_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/migration/runs/{run_id}/rerun": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rerun Dry
+         * @description Пробный прогон заново — с новым сопоставлением тарифов (9.15).
+         */
+        post: operations["rerun_dry_api_admin_migration_runs__run_id__rerun_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/migration/runs/{run_id}/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply
+         * @description Применение пробного прогона (9.3).
+         */
+        post: operations["apply_api_admin_migration_runs__run_id__apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/about": {
         parameters: {
             query?: never;
@@ -1888,6 +2005,29 @@ export interface components {
             /** Comment */
             comment: string;
         };
+        /**
+         * GroupReport
+         * @description Группа пользователей панели с одинаковыми сквадами и лимитом устройств.
+         */
+        GroupReport: {
+            /** Squads */
+            squads: components["schemas"]["Squad"][];
+            /** Device Limit */
+            device_limit: number | null;
+            /** Users */
+            users: number;
+            /** Tariff Id */
+            tariff_id: number | null;
+            /**
+             * Differs
+             * @default 0
+             */
+            differs: number;
+            /** Hints */
+            hints?: {
+                [key: string]: number;
+            };
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1910,6 +2050,77 @@ export interface components {
             details: {
                 [key: string]: components["schemas"]["JsonValue"];
             };
+        };
+        /**
+         * ImportReport
+         * @description Что добавляет импорт файла (9.11).
+         */
+        ImportReport: {
+            /**
+             * File Clients
+             * @default 0
+             */
+            file_clients: number;
+            /**
+             * Links Found
+             * @default 0
+             */
+            links_found: number;
+            /**
+             * Links Not Found
+             * @default 0
+             */
+            links_not_found: number;
+            /**
+             * Links Without Telegram Id
+             * @default 0
+             */
+            links_without_telegram_id: number;
+            /**
+             * Referral Links
+             * @default 0
+             */
+            referral_links: number;
+            /**
+             * Referral Codes
+             * @default 0
+             */
+            referral_codes: number;
+            /**
+             * Without Panel User
+             * @default 0
+             */
+            without_panel_user: number;
+            /**
+             * Filled
+             * @default 0
+             */
+            filled: number;
+            /**
+             * Skipped Imported
+             * @default 0
+             */
+            skipped_imported: number;
+            /**
+             * Trial Used
+             * @default 0
+             */
+            trial_used: number;
+            /**
+             * Paid Yes
+             * @default 0
+             */
+            paid_yes: number;
+            /**
+             * Paid No
+             * @default 0
+             */
+            paid_no: number;
+            /**
+             * Paid Unknown
+             * @default 0
+             */
+            paid_unknown: number;
         };
         /** InUseOut */
         InUseOut: {
@@ -2055,6 +2266,23 @@ export interface components {
             /** Session Ttl Days */
             session_ttl_days: number;
         };
+        /** MappingIn */
+        MappingIn: {
+            /** Mapping */
+            mapping?: components["schemas"]["MappingRule"][];
+        };
+        /**
+         * MappingRule
+         * @description Группе «сквады и лимит устройств» — тариф (9.15).
+         */
+        MappingRule: {
+            /** Squads */
+            squads: string[];
+            /** Device Limit */
+            device_limit: number | null;
+            /** Tariff Id */
+            tariff_id: number;
+        };
         /** MemberOut */
         MemberOut: {
             /** Id */
@@ -2065,6 +2293,98 @@ export interface components {
             name: string | null;
             role: components["schemas"]["TeamRole"];
         };
+        /**
+         * MigrationKind
+         * @enum {string}
+         */
+        MigrationKind: "adoption" | "import";
+        /**
+         * MigrationReport
+         * @description Отчёт пробного прогона и итоговый отчёт (9.2, 9.11).
+         */
+        MigrationReport: {
+            /**
+             * Panel Users
+             * @default 0
+             */
+            panel_users: number;
+            /**
+             * Adopt
+             * @default 0
+             */
+            adopt: number;
+            /**
+             * Clients
+             * @default 0
+             */
+            clients: number;
+            /**
+             * Clients New
+             * @default 0
+             */
+            clients_new: number;
+            /**
+             * Clients Existing
+             * @default 0
+             */
+            clients_existing: number;
+            /**
+             * Clients Several
+             * @default 0
+             */
+            clients_several: number;
+            /**
+             * Without Telegram Id
+             * @default 0
+             */
+            without_telegram_id: number;
+            /**
+             * Already Adopted
+             * @default 0
+             */
+            already_adopted: number;
+            /**
+             * Already In Shop
+             * @default 0
+             */
+            already_in_shop: number;
+            /**
+             * No Tariff
+             * @default 0
+             */
+            no_tariff: number;
+            /**
+             * Differs
+             * @default 0
+             */
+            differs: number;
+            /** Groups */
+            groups?: components["schemas"]["GroupReport"][];
+            file?: components["schemas"]["ImportReport"] | null;
+            /**
+             * Conflicts
+             * @default 0
+             */
+            conflicts: number;
+            /**
+             * Unrecognized
+             * @default 0
+             */
+            unrecognized: number;
+            /** Problems */
+            problems?: components["schemas"]["Problem"][];
+            /**
+             * Skipped
+             * @default 0
+             */
+            skipped: number;
+        };
+        /**
+         * MigrationRunState
+         * @description Ход прогона: снимок панели, отчёт, применение — цепочкой задач (4.28).
+         * @enum {string}
+         */
+        MigrationRunState: "reading_panel" | "planning" | "applying" | "done" | "failed";
         /** NotReadyOut */
         NotReadyOut: {
             /** Missing */
@@ -2303,6 +2623,21 @@ export interface components {
             /** Message */
             message: string;
         };
+        /** Problem */
+        Problem: {
+            /** Telegram Id */
+            telegram_id?: number | null;
+            /** Panel User */
+            panel_user?: string | null;
+            reason: components["schemas"]["ProblemReason"];
+            /** Detail */
+            detail?: string | null;
+        };
+        /**
+         * ProblemReason
+         * @enum {string}
+         */
+        ProblemReason: "bound_elsewhere" | "telegram_id_mismatch" | "claimed_twice" | "code_taken" | "duplicate_telegram_id" | "bad_telegram_id" | "panel_user_not_found" | "inviter_not_found" | "self_invite" | "bad_code";
         /** PromoCodesOut */
         PromoCodesOut: {
             /** Promo Codes */
@@ -2530,6 +2865,52 @@ export interface components {
             /** Payments */
             payments: number;
         };
+        /** RunOut */
+        RunOut: {
+            /** Id */
+            id: number;
+            kind: components["schemas"]["MigrationKind"];
+            /** Dry Run */
+            dry_run: boolean;
+            state: components["schemas"]["MigrationRunState"];
+            /** Dry Run Id */
+            dry_run_id: number | null;
+            /** Applied By Run Id */
+            applied_by_run_id: number | null;
+            /** Mapping */
+            mapping: components["schemas"]["MappingRule"][];
+            /** Source */
+            source: {
+                [key: string]: components["schemas"]["JsonValue"];
+            } | null;
+            report: components["schemas"]["MigrationReport"] | null;
+            /** Processed */
+            processed: number;
+            /** Total */
+            total: number | null;
+            /** Error */
+            error: string | null;
+            /** Started By Telegram Id */
+            started_by_telegram_id: number | null;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Finished At */
+            finished_at: string | null;
+            /** Can Apply */
+            can_apply: boolean;
+            /** Apply Until */
+            apply_until: string | null;
+        };
+        /** RunsOut */
+        RunsOut: {
+            /** Runs */
+            runs: components["schemas"]["RunOut"][];
+            /** Time Zone */
+            time_zone: string;
+        };
         /**
          * Segment
          * @description Описание сегмента, которое хранит рассылка, — а не список условий в коде (0065).
@@ -2594,6 +2975,16 @@ export interface components {
             price: string;
             /** Device Limit */
             device_limit: number;
+        };
+        /** Squad */
+        Squad: {
+            /**
+             * Uuid
+             * Format: uuid
+             */
+            uuid: string;
+            /** Name */
+            name: string;
         };
         /** SquadOut */
         SquadOut: {
@@ -5792,6 +6183,235 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BroadcastOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    runs_api_admin_migration_runs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunsOut"];
+                };
+            };
+        };
+    };
+    run_api_admin_migration_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    adoption_api_admin_migration_adoption_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MappingIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    import_file_api_admin_migration_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Content Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    rerun_dry_api_admin_migration_runs__run_id__rerun_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MappingIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    apply_api_admin_migration_runs__run_id__apply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunOut"];
                 };
             };
             /** @description Not Found */

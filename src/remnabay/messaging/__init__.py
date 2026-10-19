@@ -14,7 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from remnabay.domain.clients import TelegramAccount
 from remnabay.domain.team import TeamMember, TeamRole
-from remnabay.messaging._dates import DATE_FORMAT, DateEntity, Dates, DateValue, utf16_length
+from remnabay.messaging._dates import (
+    DATE_FORMAT,
+    DateEntity,
+    Dates,
+    DateValue,
+    unix_time,
+    utf16_length,
+)
 from remnabay.messaging._sender import (
     AmbiguousDeliveryError,
     Button,
@@ -170,5 +177,6 @@ __all__ = [
     "send_message",
     "send_to_client",
     "tell_action_failed",
+    "unix_time",
     "utf16_length",
 ]

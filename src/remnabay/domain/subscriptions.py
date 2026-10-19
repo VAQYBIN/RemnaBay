@@ -53,6 +53,8 @@ class Subscription(Base):
     # покупка применяется к ней же (3.16) и снимает признак
     is_trial: Mapped[bool] = mapped_column(Boolean, server_default=false())
     created_at: Mapped[CreatedAt]
+    # Подписка появилась усыновлением пользователя панели (9.5), а не покупкой
+    adopted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Пользователя удалили в панели: клиент подписку не видит, история сохраняется (4.6)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Срок, который поставил возврат, закончив подписку (панель закрывает её через

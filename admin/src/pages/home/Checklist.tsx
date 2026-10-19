@@ -163,7 +163,16 @@ function Body({ item, isOwner }: { item: Item; isOwner: boolean }) {
       )
     }
     case 'migration':
-      return <p>Необязательно: перенос клиентов из прежнего бота.</p>
+      return (
+        <p>
+          Необязательно: перенос клиентов из прежнего бота.{' '}
+          {isOwner && (
+            <Link to="/migration" className="text-brand-text underline-offset-4 hover:underline">
+              Усыновление и импорт
+            </Link>
+          )}
+        </p>
+      )
   }
 }
 

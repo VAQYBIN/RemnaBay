@@ -10,6 +10,7 @@ from remnabay.web.admin import (
     _brand,
     _broadcasts,
     _clients,
+    _migration,
     _payment_settings,
     _payments,
     _promo,
@@ -46,6 +47,7 @@ def build_router() -> APIRouter:
     router.include_router(_clients.router)
     router.include_router(_promo.router)
     router.include_router(_broadcasts.router)
+    router.include_router(_migration.router)
     router.include_router(_about.router)
     return router
 

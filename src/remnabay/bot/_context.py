@@ -45,6 +45,8 @@ class BotContext:
     shop_url: str
     # Клиент появился этим обновлением — впервые открыл бот (3.15)
     new_client: bool = False
+    # Усыновлённый клиент впервые открыл бот: приветствие «С возвращением» (9.4)
+    adopted_first_open: bool = False
 
     def render(self, key: str, /, **variables: str) -> str:
         """Текст по ключу на языке клиента (0018)."""
@@ -68,7 +70,11 @@ async def context_middleware(handler: Handler, event: TelegramObject, data: dict
 
     sessions: SessionFactory = data[SESSIONS_KEY]
     async with sessions() as session:
-        new_client = await session.get(TelegramAccount, user.id) is None
+        account = await session.get(TelegramAccount, user.id)
+        known = await session.get(Client, account.client_id) if account is not None else None
+        adopted_first_open = (
+            known is not None and known.adopted_at is not None and known.bot_started_at is None
+        )
         client = await register_telegram_user(
             session,
             TelegramUser(
@@ -88,7 +94,8 @@ async def context_middleware(handler: Handler, event: TelegramObject, data: dict
             texts=await load_texts(session),
             panel=data[PANEL_KEY],
             shop_url=data[SHOP_URL_KEY],
-            new_client=new_client,
+            new_client=account is None,
+            adopted_first_open=adopted_first_open,
         )
         if await _shop_hidden_from(ctx, event, user.id):
             await _answer_shop_not_opened(event, ctx)

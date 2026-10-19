@@ -21,6 +21,8 @@ from remnabay.messaging import (
     Button,
     ButtonArgs,
     DateEntity,
+    Dates,
+    DateValue,
     DeliveryError,
     NotAcceptedError,
     OutgoingMessage,
@@ -321,6 +323,21 @@ async def test_0044_date_entity_is_sent_to_telegram(bot_api: tuple[FakeBotApi, s
         "unix_time": 1_790_000_000,
         "date_time_format": "Dt",
     }
+
+
+def test_0044_date_beyond_telegram_limit_stays_plain_text() -> None:
+    """0044: дату позже 2038 года (бессрочные пользователи панели — 2099) Telegram
+    сущностью date_time не принимает — она остаётся запасным текстом, остальные даты
+    текста — сущностями."""
+    dates = Dates()
+    far = dates.mark(DateValue(datetime(2099, 10, 4, tzinfo=UTC), "4 октября 2099"))
+    near = dates.mark(DateValue(datetime(2026, 11, 1, tzinfo=UTC), "1 ноября 2026"))
+
+    text, entities = dates.render(f"до {far} и до {near}")
+
+    assert text == "до 4 октября 2099 и до 1 ноября 2026"
+    [entity] = entities
+    assert text[entity.offset : entity.offset + entity.length] == "1 ноября 2026"
 
 
 async def test_rule_4_blocked_bot_is_not_an_error(db_session: AsyncSession) -> None:

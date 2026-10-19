@@ -74,22 +74,20 @@ class PromoRejectedError(Exception):
 
 
 async def without_payments(session: AsyncSession, client: Client) -> bool:
-    """Клиент без оплат (8.2, решение 0065): применённых платежей нет (платёж с нулевой
-    суммой по скидке 100% считается) и клиент не перенесён с платной подпиской.
+    """Клиент без оплат (8.2, решения 0065, 0070): применённых платежей нет (платёж с
+    нулевой суммой по скидке 100% считается) и клиент не перенесён с платной подпиской.
 
-    Перенесённая подписка считается платной, если она не триальная: платежей старого
-    бота магазин не видел (05-migration)."""
+    Платежей старого бота магазин не видел — об оплатах в нём говорит файл миграции:
+    «платил» или «не платил». Если файл ничего не сказал, усыновлённый клиент считается
+    платившим, остальные — нет. Своя оплата в магазине делает клиента платившим всегда."""
     paid = await session.scalar(
         select(exists().where(Payment.client_id == client.id, Payment.applied_at.is_not(None)))
     )
     if paid:
         return False
-    if client.adopted_at is None:
-        return True
-    migrated_paid = await session.scalar(
-        select(exists().where(Subscription.client_id == client.id, ~Subscription.is_trial))
-    )
-    return not migrated_paid
+    if client.old_bot_paid is not None:
+        return not client.old_bot_paid
+    return client.adopted_at is None
 
 
 async def days_targets(session: AsyncSession, client_id: int) -> list[Subscription]:

@@ -86,13 +86,15 @@ async def test_1_17_adopted_subscription_counts_as_paid(db_session: AsyncSession
     assert stats.active_paid == 1
 
 
-async def test_1_17_new_clients_exclude_adopted(db_session: AsyncSession) -> None:
-    """1.17: новые клиенты — впервые открыли бот за период, без усыновлённых."""
+async def test_1_17_new_clients_exclude_migrated(db_session: AsyncSession) -> None:
+    """1.17, 0071: новые клиенты — впервые открыли бот за период, без перенесённых:
+    усыновлённых и перенесённых из файла."""
     clients = [
         Client(bot_started_at=TODAY_START + timedelta(minutes=10)),
         Client(bot_started_at=TODAY_START - timedelta(minutes=10)),
         Client(bot_started_at=TODAY_START - timedelta(days=5)),
         Client(bot_started_at=TODAY_START + timedelta(minutes=5), adopted_at=NOW),
+        Client(bot_started_at=TODAY_START + timedelta(minutes=6), imported_at=NOW),
         Client(),
     ]
     await add(db_session, *clients)
