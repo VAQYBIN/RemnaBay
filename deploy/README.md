@@ -72,7 +72,7 @@ sed -i "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$(docker compose run --rm --no-deps 
 
 > Пароль базы PostgreSQL берёт только при первом запуске. Если потом поменять `POSTGRES_PASSWORD` в `.env`, пароль базы не изменится, и магазин не сможет к ней подключиться. Как сменить пароль — в разделе [«Смена пароля базы»](#смена-пароля-базы).
 
-Если какой-то обязательный параметр не задан, магазин не запустится и назовёт его: без `POSTGRES_PASSWORD` об этом скажет сама команда `docker compose`, остальные параметры назовёт магазин в логе (`docker compose logs web`).
+Если какой-то обязательный параметр не задан, магазин не запустится и назовёт его: без `POSTGRES_PASSWORD` об этом скажет сама команда `docker compose`, остальные параметры назовёт магазин в логе шага миграций (`docker compose logs migrate`) — веб и воркер без них не запускаются.
 
 ## Шаг 4. Прокси
 
@@ -80,18 +80,28 @@ sed -i "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$(docker compose run --rm --no-deps 
 
 ### Сервер с панелью, Nginx панели
 
-Здесь предполагается Nginx из документации Remnawave: контейнер `remnawave-nginx`, файлы в `/opt/remnawave/nginx`, сертификаты от acme.sh.
+Здесь предполагается Nginx из документации Remnawave: контейнер `remnawave-nginx`, файлы в `/opt/remnawave/nginx`, сертификаты от acme.sh. За этим Nginx работает панель, поэтому каждое изменение сначала проверяется, а потом применяется.
 
-1. Выпустите сертификат для домена магазина так же, как для панели:
+1. Сделайте копии файлов, которые будете менять:
+
+   ```bash
+   cd /opt/remnawave/nginx
+   cp nginx.conf nginx.conf.bak && cp docker-compose.yml docker-compose.yml.bak
+   ```
+
+2. Выпустите сертификат для домена магазина так же, как для панели. Порт 8443 сервера должен быть открыт и свободен — acme.sh проверяет домен через него:
 
    ```bash
    acme.sh --issue --standalone -d 'shop.example.com' \
      --key-file /opt/remnawave/nginx/remnabay_privkey.key \
      --fullchain-file /opt/remnawave/nginx/remnabay_fullchain.pem \
      --alpn --tlsport 8443 --reloadcmd "docker exec remnawave-nginx nginx -s reload"
+   test -s remnabay_fullchain.pem && test -s remnabay_privkey.key && echo "Сертификат на месте"
    ```
 
-2. В `/opt/remnawave/nginx/docker-compose.yml` добавьте файлы сертификата в `volumes` контейнера `remnawave-nginx`, а в `ports` — порт 80 для перенаправления с HTTP на HTTPS:
+   Не идите дальше, пока не увидите «Сертификат на месте»: без файлов сертификата Nginx не запустится, и панель станет недоступна.
+
+3. В `docker-compose.yml` добавьте файлы сертификата в `volumes` контейнера `remnawave-nginx`, а в `ports` — порт 80 для перенаправления с HTTP на HTTPS:
 
    ```yaml
        volumes:
@@ -103,12 +113,19 @@ sed -i "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$(docker compose run --rm --no-deps 
            - '0.0.0.0:80:80'
    ```
 
-3. Допишите блоки магазина в конец `nginx.conf` панели и перезапустите Nginx:
+4. Допишите блоки магазина в конец `nginx.conf` и проверьте конфиг в отдельном временном контейнере — работающий Nginx при этом не трогается:
 
    ```bash
-   sed 's/shop.example.com/ВАШ_ДОМЕН/g' /opt/remnabay/proxy/panel-nginx.conf >> /opt/remnawave/nginx/nginx.conf
-   cd /opt/remnawave/nginx && docker compose up -d --force-recreate
-   docker exec remnawave-nginx nginx -t
+   sed 's/shop.example.com/ВАШ_ДОМЕН/g' /opt/remnabay/proxy/panel-nginx.conf >> nginx.conf
+   docker compose run --rm --no-deps remnawave-nginx nginx -t
+   ```
+
+   Должно быть `syntax is ok` и `test is successful`. Если нет — верните копии (`cp nginx.conf.bak nginx.conf && cp docker-compose.yml.bak docker-compose.yml`) и ищите ошибку.
+
+5. Примените изменения:
+
+   ```bash
+   docker compose up -d --force-recreate
    ```
 
    Nginx ищет адрес магазина в момент запроса: пока магазин не запущен, панель работает как обычно, а магазин отвечает 502.
@@ -118,9 +135,14 @@ sed -i "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$(docker compose run --rm --no-deps 
 Здесь предполагается Caddy из документации Remnawave: контейнер `caddy`, файлы в `/opt/remnawave/caddy`. Сертификат и перенаправление с HTTP на HTTPS Caddy делает сам.
 
 ```bash
-sed 's/shop.example.com/ВАШ_ДОМЕН/g' /opt/remnabay/proxy/panel-caddy.Caddyfile >> /opt/remnawave/caddy/Caddyfile
-cd /opt/remnawave/caddy && docker compose restart
+cd /opt/remnawave/caddy
+cp Caddyfile Caddyfile.bak
+sed 's/shop.example.com/ВАШ_ДОМЕН/g' /opt/remnabay/proxy/panel-caddy.Caddyfile >> Caddyfile
+docker exec caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+docker compose restart
 ```
+
+Перезапускайте, только если проверка ответила `Valid configuration`; иначе верните копию: `cp Caddyfile.bak Caddyfile`.
 
 ### Отдельный сервер, Caddy в контейнере
 
@@ -145,7 +167,7 @@ certbot renew --dry-run   # продление будет работать
 ```bash
 cd /opt/remnabay
 docker compose up -d
-docker compose ps
+docker compose ps -a
 ```
 
 Через минуту `migrate` — `Exited (0)`, `db`, `web` и `worker` — `Up … (healthy)`. Проверка снаружи:
@@ -251,7 +273,7 @@ docker compose up -d
 
 ## Если что-то не так
 
-- **Состояние:** `docker compose ps`. Веб, воркер и база перезапускаются сами после падения и после перезагрузки сервера, но не после того, как вы остановили их сами (`docker compose stop`).
-- **Логи:** `docker compose logs -f web worker`.
+- **Состояние:** `docker compose ps -a`. Веб, воркер и база перезапускаются сами после падения и после перезагрузки сервера, но не после того, как вы остановили их сами (`docker compose stop`).
+- **Логи:** `docker compose logs -f web worker`. Если веб и воркер не запустились, смотрите шаг миграций: `docker compose logs migrate` — там названы незаданные параметры `.env`.
 - **Веб или воркер то и дело перезапускаются.** Процесс, который потерял работоспособность (например, 3 минуты не может связаться с базой), сам завершается, и Docker поднимает его заново. Причина — в логе перед завершением, строка с `CRITICAL`.
 - **`unhealthy` в `docker compose ps`** — процесс завис и не может завершиться сам. Перезапустите его: `docker compose restart web` (или `worker`) — и посмотрите лог.

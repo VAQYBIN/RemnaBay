@@ -182,6 +182,8 @@ async def _invoices_of_every_kind(session: AsyncSession, now: datetime) -> datet
             client, None, state=PaymentState.EXPIRED, expires_at=now - timedelta(hours=25)
         ),
         make_payment(client, None, state=PaymentState.APPLIED, expires_at=latest),
+        # Провайдер сам сообщил об отказе — у него счёт закрыт
+        make_payment(client, None, state=PaymentState.DECLINED, expires_at=latest),
         make_payment(client, None, provider="other", expires_at=latest),
         # Нулевая сумма — счёта у провайдера нет
         make_payment(client, None, provider=None, provider_payment_id=None, expires_at=latest),

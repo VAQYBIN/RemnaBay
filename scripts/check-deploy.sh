@@ -77,6 +77,17 @@ if grep -qx db <<< "$services"; then
     exit 1
 fi
 
+step "1.1: внешняя база без DATABASE_URL — compose не запускается и называет параметр"
+rm -rf "$work/deploy" && cp -r "$deploy" "$work/deploy"
+printf '%s\n' "POSTGRES_PASSWORD=check" "COMPOSE_FILE=compose.yaml:compose.external-db.yaml" \
+    > "$work/deploy/.env"
+if output="$(cd "$work/deploy" && docker compose config --quiet 2>&1)"; then
+    echo "compose с внешней базой принял .env без DATABASE_URL" >&2
+    exit 1
+fi
+grep -q "DATABASE_URL" <<< "$output" || { echo "$output" >&2; exit 1; }
+echo "$output"
+
 step "1.1: без пароля встроенной базы compose не запускается и называет параметр"
 rm -rf "$work/deploy" && cp -r "$deploy" "$work/deploy"
 : > "$work/deploy/.env"

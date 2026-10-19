@@ -400,8 +400,10 @@ async def payable_invoices(
             select(func.count(), func.max(Payment.expires_at)).where(
                 Payment.provider == provider,
                 Payment.provider_payment_id.is_not(None),
-                Payment.state.in_(_OPEN_INVOICE),
-                # Те же счета, что опрашивает poll_invoice
+                # Отказ ставится только по сообщению провайдера — такой счёт у него
+                # закрыт. Истёкший и отменённый у провайдера могут быть ещё открыты
+                Payment.state.in_(set(_OPEN_INVOICE) - {PaymentState.DECLINED}),
+                # Окно опроса — то же, что у poll_invoice
                 Payment.expires_at >= now - after,
             )
         )
