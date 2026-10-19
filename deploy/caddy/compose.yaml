@@ -1,17 +1,15 @@
 # RemnaBay для операторов: база, миграции, веб и воркер (решения 0026, 0073).
-# Установка, обновление и резервная копия — README.md в этой папке.
-#
-# Дополнительные файлы подключаются через COMPOSE_FILE в .env:
-#   compose.panel-network.yaml — магазин на одном сервере с панелью (общая Docker-сеть);
-#   compose.caddy.yaml         — чистый сервер, Caddy в контейнере;
-#   compose.nginx.yaml         — чистый сервер, Nginx на самом сервере;
-#   compose.external-db.yaml   — база на другом сервере.
+# Вариант: отдельный сервер, Caddy в контейнере — сертификат он получает сам.
+# Домен магазина — SHOP_DOMAIN в .env, без https:// и слеша (например, shop.example.com).
+# Скачайте этот файл в папку магазина как compose.yaml, рядом — .env и Caddyfile
+# из этой же папки.
+# Установка, обновление и резервная копия — deploy/README.md в репозитории RemnaBay.
 name: remnabay
 
 x-app-environment: &app-environment
   # Адрес встроенной базы compose собирает сам из POSTGRES_PASSWORD (0073).
   # DATABASE_URL в .env задают, только если база на другом сервере
-  DATABASE_URL: ${DATABASE_URL:-postgresql://remnabay:${POSTGRES_PASSWORD:?не задан — пароль встроенной базы, команда для него в README.md}@db:5432/remnabay}
+  DATABASE_URL: ${DATABASE_URL:-postgresql://remnabay:${POSTGRES_PASSWORD:?не задан — пароль встроенной базы (или DATABASE_URL, если база на другом сервере), команда для пароля в README.md}@db:5432/remnabay}
 
 x-app: &app
   # Номер версии образа, без опоры на latest (0026). REMNABAY_VERSION в .env задают,
@@ -83,5 +81,24 @@ services:
       retries: 3
       start_period: 15s
 
+  caddy:
+    image: caddy:2.11.7
+    environment:
+      SHOP_DOMAIN: ${SHOP_DOMAIN:?не задан — домен магазина для Caddy, например shop.example.com}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Сертификаты и ключи Caddy: без тома он получал бы их заново при каждом запуске
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - web
+    restart: unless-stopped
+
 volumes:
   db-data:
+  caddy-data:
+  caddy-config:

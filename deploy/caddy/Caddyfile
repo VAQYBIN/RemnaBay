@@ -1,5 +1,5 @@
 # RemnaBay на чистом сервере за Caddy в контейнере (решение 0026).
-# Подключается файлом compose.caddy.yaml; домен — SHOP_DOMAIN в .env.
+# Монтируется в контейнер Caddy из compose.yaml этой папки; домен — SHOP_DOMAIN в .env.
 # Сертификат и перенаправление с HTTP на HTTPS Caddy делает сам.
 
 {$SHOP_DOMAIN} {

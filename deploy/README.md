@@ -13,14 +13,13 @@ RemnaBay — Telegram-бот и веб-админка магазина VPN дл�
 
 ## Выберите вариант установки
 
-| Где магазин | Прокси | Файлы |
-|---|---|---|
-| На сервере с панелью | Nginx панели | `compose.panel-network.yaml`, `proxy/panel-nginx.conf` |
-| На сервере с панелью | Caddy панели | `compose.panel-network.yaml`, `proxy/panel-caddy.Caddyfile` |
-| На отдельном сервере | Caddy в контейнере | `compose.caddy.yaml`, `proxy/Caddyfile` |
-| На отдельном сервере | Nginx и certbot на сервере | `compose.nginx.yaml`, `proxy/nginx.conf` |
+| Где магазин | Прокси | Папка в `deploy/` | Что в ней |
+|---|---|---|---|
+| На сервере с панелью | Nginx или Caddy панели | `panel` | `compose.yaml`, `panel-nginx.conf`, `panel-caddy.Caddyfile` |
+| На отдельном сервере | Caddy в контейнере | `caddy` | `compose.yaml`, `Caddyfile` |
+| На отдельном сервере | Nginx и certbot на сервере | `nginx` | `compose.yaml`, `remnabay.conf` |
 
-На сервере с панелью магазин подключается к её Docker-сети `remnawave-network`: прокси панели ходит к магазину по внутреннему адресу, а панель шлёт вебхук мимо интернета. Если у вас уже работает свой прокси, возьмите ближайший вариант за образец.
+У каждого варианта свой готовый `compose.yaml`: скачайте его, заполните `.env` — и запускайте. На сервере с панелью магазин подключается к её Docker-сети `remnawave-network`: прокси панели ходит к магазину по внутреннему адресу, а панель шлёт вебхук мимо интернета. Если у вас уже работает свой прокси, возьмите ближайший вариант за образец.
 
 ## Шаг 1. Бот в @BotFather
 
@@ -35,17 +34,29 @@ RemnaBay — Telegram-бот и веб-админка магазина VPN дл�
 
 ## Шаг 2. Файлы магазина
 
-Скачайте файлы нужной версии в `/opt/remnabay`. Номер версии — в [CHANGELOG.md](../CHANGELOG.md).
+Скачайте в `/opt/remnabay` файлы нужной версии — `.env.example` и папку своего варианта. Номер версии — в [CHANGELOG.md](../CHANGELOG.md).
 
 ```bash
 VERSION=0.1.0
-mkdir -p /opt/remnabay/proxy && cd /opt/remnabay
+mkdir -p /opt/remnabay && cd /opt/remnabay
 base="https://raw.githubusercontent.com/VAQYBIN/RemnaBay/v$VERSION/deploy"
-for file in compose.yaml compose.panel-network.yaml compose.caddy.yaml compose.nginx.yaml \
-    compose.external-db.yaml .env.example \
-    proxy/panel-nginx.conf proxy/panel-caddy.Caddyfile proxy/Caddyfile proxy/nginx.conf; do
-  curl -fsSL -o "$file" "$base/$file"
-done
+curl -fsSL -O "$base/.env.example"
+```
+
+Затем — одну команду своего варианта:
+
+```bash
+# на сервере с панелью
+curl -fsSL -O "$base/panel/compose.yaml" -O "$base/panel/panel-nginx.conf" -O "$base/panel/panel-caddy.Caddyfile"
+# на отдельном сервере с Caddy
+curl -fsSL -O "$base/caddy/compose.yaml" -O "$base/caddy/Caddyfile"
+# на отдельном сервере с Nginx
+curl -fsSL -O "$base/nginx/compose.yaml" -O "$base/nginx/remnabay.conf"
+```
+
+И создайте `.env` из образца:
+
+```bash
 cp .env.example .env
 ```
 
@@ -53,7 +64,6 @@ cp .env.example .env
 
 Откройте `.env` (`nano .env`) и заполните его — у каждого параметра там есть пояснение:
 
-- **`COMPOSE_FILE`** — уберите `#` у строки своего варианта установки;
 - **`BOT_TOKEN`, `TELEGRAM_LOGIN_CLIENT_SECRET`, `OWNER_TELEGRAM_ID`** — из шага 1;
 - **`PANEL_URL`** — на сервере с панелью `http://remnawave:3000`, на отдельном сервере — публичный адрес панели;
 - **`PANEL_TOKEN`** — в панели: **API Tokens** → создать токен;
@@ -116,7 +126,7 @@ sed -i "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$(docker compose run --rm --no-deps 
 4. Допишите блоки магазина в конец `nginx.conf` и проверьте конфиг в отдельном временном контейнере — работающий Nginx при этом не трогается:
 
    ```bash
-   sed 's/shop.example.com/ВАШ_ДОМЕН/g' /opt/remnabay/proxy/panel-nginx.conf >> nginx.conf
+   sed 's/shop.example.com/ВАШ_ДОМЕН/g' /opt/remnabay/panel-nginx.conf >> nginx.conf
    docker compose run --rm --no-deps remnawave-nginx nginx -t
    ```
 
@@ -137,7 +147,7 @@ sed -i "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$(docker compose run --rm --no-deps 
 ```bash
 cd /opt/remnawave/caddy
 cp Caddyfile Caddyfile.bak
-sed 's/shop.example.com/ВАШ_ДОМЕН/g' /opt/remnabay/proxy/panel-caddy.Caddyfile >> Caddyfile
+sed 's/shop.example.com/ВАШ_ДОМЕН/g' /opt/remnabay/panel-caddy.Caddyfile >> Caddyfile
 docker exec caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 docker compose restart
 ```
@@ -146,7 +156,7 @@ docker compose restart
 
 ### Отдельный сервер, Caddy в контейнере
 
-Ничего настраивать не нужно: Caddy запустится вместе с магазином (`compose.caddy.yaml`) и сам получит сертификат для `SHOP_DOMAIN`. Порты 80 и 443 сервера должны быть свободны и открыты.
+Ничего настраивать не нужно: Caddy описан в `compose.yaml` этого варианта, запустится вместе с магазином и сам получит сертификат для `SHOP_DOMAIN`. Порты 80 и 443 сервера должны быть свободны и открыты.
 
 ### Отдельный сервер, Nginx и certbot
 
@@ -155,12 +165,12 @@ apt install -y nginx certbot
 # Сертификат: проверку certbot отдаёт Nginx из /var/www/html
 certbot certonly --webroot -w /var/www/html -d shop.example.com \
   --deploy-hook "systemctl reload nginx"
-sed 's/shop.example.com/ВАШ_ДОМЕН/g' /opt/remnabay/proxy/nginx.conf > /etc/nginx/conf.d/remnabay.conf
+sed 's/shop.example.com/ВАШ_ДОМЕН/g' /opt/remnabay/remnabay.conf > /etc/nginx/conf.d/remnabay.conf
 nginx -t && systemctl reload nginx
 certbot renew --dry-run   # продление будет работать
 ```
 
-Порты 80 и 443 сервера должны быть открыты. Магазин открывает веб только на `127.0.0.1:8000` (`compose.nginx.yaml`) — снаружи к нему не попасть, только через Nginx.
+Порты 80 и 443 сервера должны быть открыты. Магазин открывает веб только на `127.0.0.1:8000` — снаружи к нему не попасть, только через Nginx.
 
 ## Шаг 5. Запуск
 
@@ -234,7 +244,7 @@ docker compose up -d
 
 1. Прочитайте в [CHANGELOG.md](../CHANGELOG.md), что изменилось.
 2. Сделайте [резервную копию](#резервная-копия).
-3. Скачайте файлы новой версии командой из [шага 2](#шаг-2-файлы-магазина) с новым `VERSION`, **без последней строки `cp .env.example .env`** — ваш `.env` остаётся. Сравните `.env` с новым `.env.example`: если появились новые параметры, допишите их.
+3. Скачайте файлы новой версии командами из [шага 2](#шаг-2-файлы-магазина) с новым `VERSION` — `.env.example` и файлы своего варианта, **без `cp .env.example .env`**: ваш `.env` остаётся. Сравните `.env` с новым `.env.example`: если появились новые параметры, допишите их. Файлы прокси (`panel-nginx.conf` и другие) уже вписаны в настройки прокси — если в CHANGELOG сказано, что они изменились, перенесите изменения так же, как при установке.
 4. Скачайте образ и перезапустите магазин:
 
    ```bash
@@ -263,13 +273,12 @@ docker compose up -d
 
 ## База на другом сервере
 
-Для магазина нужна отдельная база PostgreSQL 18 — не база панели. В `.env`:
+Для магазина нужна отдельная база PostgreSQL 18 — не база панели.
 
-- допишите `:compose.external-db.yaml` в конец строки `COMPOSE_FILE`;
-- задайте `DATABASE_URL=postgresql://пользователь:пароль@хост:5432/база`;
-- `POSTGRES_PASSWORD` не нужен.
+1. В `.env` задайте `DATABASE_URL=postgresql://пользователь:пароль@хост:5432/база`. `POSTGRES_PASSWORD` тогда не нужен.
+2. В `compose.yaml` удалите встроенную базу: блок сервиса `db`, у сервиса `migrate` — блок `depends_on` с `db`, а в конце файла — строку `db-data:` в `volumes`.
 
-Встроенная база тогда не запускается. Резервные копии внешней базы делайте средствами её сервера.
+Правку `compose.yaml` повторяйте после каждого обновления: новая версия файла снова содержит встроенную базу. Резервные копии внешней базы делайте средствами её сервера.
 
 ## Если что-то не так
 

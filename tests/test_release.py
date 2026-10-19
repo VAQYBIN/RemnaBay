@@ -4,6 +4,8 @@ import re
 import tomllib
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -12,9 +14,10 @@ def _project_version() -> str:
         return tomllib.load(file)["project"]["version"]
 
 
-def test_0073_compose_image_version_matches_project() -> None:
-    """0073: compose для операторов ставит образ той же версии, что у проекта."""
-    compose = (ROOT / "deploy" / "compose.yaml").read_text(encoding="utf-8")
+@pytest.mark.parametrize("variant", ["panel", "caddy", "nginx"])
+def test_0073_compose_image_version_matches_project(variant: str) -> None:
+    """0073: compose каждого варианта установки ставит образ той же версии, что у проекта."""
+    compose = (ROOT / "deploy" / variant / "compose.yaml").read_text(encoding="utf-8")
 
     images = re.findall(r"ghcr\.io/vaqybin/remnabay:\$\{REMNABAY_VERSION:-([^}]+)\}", compose)
 
