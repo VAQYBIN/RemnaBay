@@ -638,6 +638,9 @@ export interface paths {
          * Disconnect Provider
          * @description Отключить провайдера: новые счета через него не создаются. Уже созданные счета
          *     опрашиваются, пока ключи есть, — без ключей оплату найдёт команда.
+         *
+         *     Если клиенты ещё могут оплатить счета провайдера, без `confirm_payable` — отказ
+         *     с их числом: владелец должен увидеть предупреждение (3.42).
          */
         delete: operations["disconnect_provider_api_admin_settings_payment_providers__code__delete"];
         options?: never;
@@ -2508,6 +2511,29 @@ export interface components {
          * @enum {string}
          */
         PanelUserStatus: "active" | "disabled" | "limited" | "expired";
+        /**
+         * PayableInvoicesOut
+         * @description У клиентов есть счета провайдера, которые ещё могут оплатить (3.42).
+         */
+        PayableInvoicesOut: {
+            /**
+             * Reason
+             * @default payable_invoices
+             * @constant
+             */
+            reason: "payable_invoices";
+            /** Message */
+            message: string;
+            /** Count */
+            count: number;
+            /**
+             * Window Ends At
+             * Format: date-time
+             */
+            window_ends_at: string;
+            /** Time Zone */
+            time_zone: string;
+        };
         /** PaymentCardOut */
         PaymentCardOut: {
             payment: components["schemas"]["PaymentRow"];
@@ -4522,7 +4548,9 @@ export interface operations {
     };
     disconnect_provider_api_admin_settings_payment_providers__code__delete: {
         parameters: {
-            query?: never;
+            query?: {
+                confirm_payable?: boolean;
+            };
             header?: never;
             path: {
                 code: string;
@@ -4546,6 +4574,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PayableInvoicesOut"];
+                };
             };
             /** @description Validation Error */
             422: {
