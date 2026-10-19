@@ -9,7 +9,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from remnabay.config import load_settings
-from remnabay.web.app import HEALTH_PATH, Watchdog, create_app
+from remnabay.healthcheck import HEALTH_PATH
+from remnabay.web.app import Watchdog, create_app
 
 
 @pytest.mark.usefixtures("valid_env")

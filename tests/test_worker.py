@@ -8,15 +8,10 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
 from remnabay.config import load_settings
+from remnabay.healthcheck import is_heartbeat_fresh, write_heartbeat
 from remnabay.panel import PanelUnavailableError
 from remnabay.queue import TaskStatus, WorkerConfig, WorkerStalledError, attempts_of
-from remnabay.worker.main import (
-    UNAVAILABLE,
-    is_heartbeat_fresh,
-    run,
-    run_worker,
-    write_heartbeat,
-)
+from remnabay.worker.main import UNAVAILABLE, run, run_worker
 from tests.queue_support import (
     RecordArgs,
     enqueue,

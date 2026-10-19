@@ -12,8 +12,6 @@ import asyncio
 import contextlib
 import logging
 import signal
-import tempfile
-import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -28,6 +26,7 @@ from remnabay.crypto import SecretBox
 from remnabay.db import create_engine
 from remnabay.devices import delete_devices
 from remnabay.guide import REFRESH_CONFIGS, refresh_configs_task
+from remnabay.healthcheck import DEFAULT_HEARTBEAT_PATH, remove_heartbeat, write_heartbeat
 from remnabay.messaging import TelegramSender, notify_team, send_message
 from remnabay.migration import TASKS as MIGRATION_TASKS
 from remnabay.panel import PanelClient, PanelUnavailableError
@@ -59,10 +58,7 @@ from remnabay.shop_settings import (
 )
 from remnabay.trial import create_trial, trial_processing_notice
 
-DEFAULT_HEARTBEAT_PATH = Path(tempfile.gettempdir()) / "remnabay-worker.heartbeat"
 HEARTBEAT_INTERVAL_SECONDS = 10.0
-# Несколько пропущенных пульсов подряд — воркер считается зависшим
-HEARTBEAT_MAX_AGE_SECONDS = 60.0
 
 # Виды задач магазина — общие для воркера и действий команды над проваленными.
 # Добавляются блоками, которые их вводят; очистка очереди встроена в сам воркер
@@ -124,26 +120,6 @@ async def retry_policy(session: AsyncSession) -> RetryPolicy:
         max_attempts=await get_setting(session, RETRY_MAX_ATTEMPTS),
         max_age=await get_setting(session, RETRY_WINDOW),
     )
-
-
-# Операции с маленьким локальным файлом не блокируют цикл заметно
-def write_heartbeat(path: Path) -> None:
-    path.touch()
-
-
-def remove_heartbeat(path: Path) -> None:
-    path.unlink(missing_ok=True)
-
-
-def is_heartbeat_fresh(
-    path: Path, max_age: float = HEARTBEAT_MAX_AGE_SECONDS, now: float | None = None
-) -> bool:
-    try:
-        modified_at = path.stat().st_mtime
-    except FileNotFoundError:
-        return False
-    current = time.time() if now is None else now
-    return current - modified_at <= max_age
 
 
 async def _beat(stop: asyncio.Event, heartbeat_path: Path, interval: float) -> None:

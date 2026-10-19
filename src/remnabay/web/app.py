@@ -26,6 +26,7 @@ from remnabay.bot import (
 from remnabay.config import Settings, load_settings
 from remnabay.crypto import SecretBox
 from remnabay.db import create_engine, create_session_factory
+from remnabay.healthcheck import HEALTH_PATH
 from remnabay.panel import PanelClient
 from remnabay.payments import Providers
 from remnabay.payments.yookassa import YooKassaKind, yookassa_http
@@ -41,7 +42,6 @@ from remnabay.web import (
 )
 from remnabay.web.admin import LOGIN_PAGE_PATH
 
-HEALTH_PATH = "/health"
 # Меньше интервала проверки здоровья в Docker, чтобы ответ успевал прийти
 HEALTH_DB_TIMEOUT_SECONDS = 3.0
 
