@@ -98,14 +98,18 @@ jobs:
         run: git diff --exit-code -- admin/src/api/schema.d.ts admin/src/styles/default-brand.css
 
   docker:
-    name: Сборка образа
+    name: Сборка образа для amd64 и arm64
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # Обе архитектуры, что публикует release.yml (0026): ошибка сборки под arm64
+      # видна до тега версии
+      - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
       - uses: docker/build-push-action@v7
         with:
           context: .
+          platforms: linux/amd64,linux/arm64
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
