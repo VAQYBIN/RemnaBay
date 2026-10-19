@@ -1,13 +1,22 @@
 """Роль «воркер»: очередь задач и проверка здоровья по файлу-пульсу (0026)."""
 
 import asyncio
+from datetime import timedelta
 from pathlib import Path
 
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+import pytest
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
+from remnabay.config import load_settings
 from remnabay.panel import PanelUnavailableError
-from remnabay.queue import TaskStatus, attempts_of
-from remnabay.worker.main import UNAVAILABLE, is_heartbeat_fresh, run_worker, write_heartbeat
+from remnabay.queue import TaskStatus, WorkerConfig, WorkerStalledError, attempts_of
+from remnabay.worker.main import (
+    UNAVAILABLE,
+    is_heartbeat_fresh,
+    run,
+    run_worker,
+    write_heartbeat,
+)
 from tests.queue_support import (
     RecordArgs,
     enqueue,
@@ -73,3 +82,67 @@ async def _attempt_started(engine: AsyncEngine, task_id: int) -> bool:
 def test_4_30_panel_unavailability_makes_task_wait() -> None:
     """4.30: воркер считает недоступность панели ожиданием, а не провалом."""
     assert PanelUnavailableError in UNAVAILABLE
+
+
+# Быстрые пределы для проверок самоконтроля: таймаут задачи меньше предела простоя
+STALL_CONFIG = WorkerConfig(
+    concurrency=2,
+    poll_interval=timedelta(milliseconds=20),
+    task_timeout=timedelta(milliseconds=100),
+    idle_in_transaction_timeout=timedelta(seconds=1),
+    stall_limit=timedelta(milliseconds=300),
+)
+# Порт 1 на localhost закрыт: соединение с «базой» сразу отклоняется
+UNREACHABLE_DATABASE = "postgresql+psycopg://u:p@127.0.0.1:1/none"
+
+
+async def test_0073_worker_stops_when_database_unreachable(tmp_path: Path) -> None:
+    """0073: цикл задач не может сделать шаг (база недоступна) — воркер останавливается
+    с ошибкой, чтобы Docker поднял его заново."""
+    engine = create_async_engine(UNREACHABLE_DATABASE)
+    try:
+        queue = make_worker(engine, config=STALL_CONFIG)
+        with pytest.raises(ExceptionGroup) as raised:
+            await asyncio.wait_for(
+                run_worker(asyncio.Event(), tmp_path / "heartbeat", interval=0.01, queue=queue),
+                timeout=5,
+            )
+    finally:
+        await engine.dispose()
+
+    assert raised.group_contains(WorkerStalledError)
+    assert not (tmp_path / "heartbeat").exists()
+
+
+async def test_0073_healthy_worker_keeps_running(tmp_path: Path, queue_engine: AsyncEngine) -> None:
+    """0073: при живой базе воркер работает дольше предела простоя и не останавливается."""
+    stop = asyncio.Event()
+    runner = asyncio.create_task(
+        run_worker(
+            stop,
+            tmp_path / "heartbeat",
+            interval=0.01,
+            queue=make_worker(queue_engine, config=STALL_CONFIG),
+        )
+    )
+
+    await asyncio.sleep(STALL_CONFIG.stall_limit.total_seconds() * 3)
+    assert not runner.done()
+
+    stop.set()
+    await asyncio.wait_for(runner, timeout=5)
+
+
+@pytest.mark.usefixtures("valid_env")
+def test_0073_worker_role_reports_loss_of_health(monkeypatch: pytest.MonkeyPatch) -> None:
+    """0073: роль «воркер» с недоступной базой завершается с признаком потери работоспособности."""
+    monkeypatch.setenv("DATABASE_URL", UNREACHABLE_DATABASE)
+
+    assert run(load_settings(env_file=None), STALL_CONFIG) is False
+
+
+def test_0073_stall_limit_longer_than_task_timeout() -> None:
+    """0073: предел простоя цикла не может быть меньше таймаута задачи — иначе здоровая
+    долгая задача выглядела бы зависшим циклом."""
+    with pytest.raises(ValueError, match="Предел простоя"):
+        WorkerConfig(task_timeout=timedelta(seconds=30), stall_limit=timedelta(seconds=30))

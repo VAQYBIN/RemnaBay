@@ -2,6 +2,10 @@
 
 Воркер не отвечает по HTTP, поэтому о том, что он жив, говорит файл-пульс:
 цикл обновляет его время изменения, проверка здоровья смотрит, свежее ли оно.
+
+Если цикл задач долго не может сделать шаг (например, база недоступна), воркер
+сам завершается с ошибкой, и Docker поднимает его заново (0073). Пульс остаётся
+на случай, когда процесс завис так, что завершиться сам не может.
 """
 
 import asyncio
@@ -44,7 +48,7 @@ from remnabay.payments import (
 )
 from remnabay.payments.yookassa import YooKassaKind, yookassa_http
 from remnabay.promo import add_promo_days
-from remnabay.queue import RetryPolicy, TaskRegistry, Worker, WorkerConfig
+from remnabay.queue import RetryPolicy, TaskRegistry, Worker, WorkerConfig, WorkerStalledError
 from remnabay.refunds import change_term
 from remnabay.reminders import REMINDERS_TICK, reminders_tick, replan_reminders, send_reminders
 from remnabay.shop_settings import (
@@ -170,26 +174,30 @@ async def run_worker(
         logger.info("Воркер остановлен")
 
 
-def run(settings: Settings) -> None:
-    """Запускает воркер до SIGTERM или SIGINT."""
+def run(settings: Settings, config: WorkerConfig | None = None) -> bool:
+    """Запускает воркер до SIGTERM или SIGINT.
 
-    async def main() -> None:
+    `False` — воркер остановился, потеряв работоспособность (0073).
+    """
+
+    async def main() -> bool:
         stop = asyncio.Event()
         loop = asyncio.get_running_loop()
         for signal_number in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(signal_number, stop.set)
-        config = WorkerConfig()
-        engine = create_engine(settings, pool_size=config.pool_size)
+        worker_config = config or WorkerConfig()
+        engine = create_engine(settings, pool_size=worker_config.pool_size)
         sender = TelegramSender(settings.bot_token.get_secret_value())
         panel = PanelClient(str(settings.panel_url), settings.panel_token.get_secret_value())
         yookassa = yookassa_http()
+        stalled: BaseException | None = None
         try:
             queue = Worker(
                 engine,
                 TASKS,
                 periodic=PERIODIC,
                 policy=retry_policy,
-                config=config,
+                config=worker_config,
                 unavailable=UNAVAILABLE,
                 on_failed=notify_operation_failed,
             )
@@ -203,11 +211,18 @@ def run(settings: Settings) -> None:
                     dev_mode=settings.dev_mode,
                 )
             ):
-                await run_worker(stop, queue=queue)
+                try:
+                    await run_worker(stop, queue=queue)
+                except* WorkerStalledError as group:
+                    stalled = group.exceptions[0]
         finally:
             await panel.aclose()
             await yookassa.aclose()
             await sender.close()
             await engine.dispose()
+        if stalled is not None:
+            logger.critical("Воркер потерял работоспособность и завершается: %s", stalled)
+            return False
+        return True
 
-    asyncio.run(main())
+    return asyncio.run(main())
