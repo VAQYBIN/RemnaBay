@@ -33,6 +33,7 @@ from remnabay.bot._common import (
     BACK_TO_MENU,
     BUY,
     PROMO_MENU,
+    RENEW_CHOICE,
     SUBSCRIPTIONS,
     TRY_FREE,
     Card,
@@ -234,11 +235,11 @@ async def main_menu(ctx: BotContext) -> Screen:
     elif subscriptions:
         keyboard.action(ctx.render("btn.my_subscriptions"), SUBSCRIPTIONS)
     if any(can_renew(s) for s in subscriptions):
-        # «Продлить» — к продлению единственной подписки или к списку подписок (3.40)
+        # «Продлить» — к продлению единственной подписки или к выбору подписки (3.40, 0072)
         target = (
             Renew(subscription_id=subscriptions[0].id).pack()
             if len(subscriptions) == 1
-            else SUBSCRIPTIONS
+            else RENEW_CHOICE
         )
         keyboard.action(ctx.render("btn.renew"), target, style=SUCCESS)
     trial = await trial_available(ctx.session, ctx.client)
@@ -306,6 +307,23 @@ async def subscriptions_screen(ctx: BotContext) -> Screen:
 
 async def subscriptions_list(query: CallbackQuery, ctx: BotContext) -> None:
     await show(query, ctx, await subscriptions_screen(ctx))
+
+
+async def renew_choice_screen(ctx: BotContext) -> Screen:
+    """З2а: «Какую подписку продлить?» — только подписки, которые можно продлить; нажатие
+    сразу ведёт к продлению выбранной (3.40, 11.10, решение 0072)."""
+    now = _now()
+    keyboard = Keyboard()
+    for subscription in await live_subscriptions(ctx.session, ctx.client.id):
+        if can_renew(subscription):
+            label = await _summary(ctx, subscription, None, now)
+            keyboard.action(label, Renew(subscription_id=subscription.id).pack())
+    keyboard.action(ctx.render("btn.back"), BACK_TO_MENU)
+    return Screen.plain(ctx.render("renew.choose.header"), keyboard)
+
+
+async def renew_choice(query: CallbackQuery, ctx: BotContext) -> None:
+    await show(query, ctx, await renew_choice_screen(ctx))
 
 
 def _row(label: str, value: RichTextUnion) -> list[RichBlockTableCell]:
@@ -557,8 +575,8 @@ async def _broadcast_target(ctx: BotContext, telegram_id: int, providers: Provid
         # Подписки отключены в панели: продлить нельзя, в меню — «обратитесь в поддержку»
         return await main_menu(ctx)
     if len(subscriptions) > 1:
-        # Несколько подписок — выбор подписки, продление — с её экрана (3.24, 3.40)
-        return await subscriptions_screen(ctx)
+        # Несколько подписок — «Какую подписку продлить?» (3.40, 11.10, 0072)
+        return await renew_choice_screen(ctx)
     return await renewal_screen(ctx, subscriptions[0], providers)
 
 
@@ -855,6 +873,7 @@ def build_router() -> Router:
     router.callback_query.register(menu_again, F.data == MAIN_MENU_CALLBACK)
     router.callback_query.register(back_to_menu, F.data == BACK_TO_MENU)
     router.callback_query.register(subscriptions_list, F.data == SUBSCRIPTIONS)
+    router.callback_query.register(renew_choice, F.data == RENEW_CHOICE)
     router.callback_query.register(open_card, Card.filter())
     router.callback_query.register(buy, F.data == BUY)
     router.callback_query.register(try_free, F.data == TRY_FREE)

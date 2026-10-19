@@ -822,12 +822,14 @@ async def test_11_10_trial_only_leads_to_tariffs(shop: Shop) -> None:
 
 
 async def test_11_10_several_subscriptions_choose_one(shop: Shop) -> None:
-    """11.10: подписок несколько — выбор подписки."""
+    """11.10, решение 0072: подписок несколько — «Какую подписку продлить?»."""
     tariff = await _tariff(shop)
     await _subscribe(shop, tariff, panel_user_id=1)
     await _subscribe(shop, tariff, panel_user_id=2)
     screen = await _press(shop, RENEW_CALLBACK)
     assert isinstance(screen, SendMessage)
+    assert screen.text is not None
+    assert screen.text.startswith("Какую подписку продлить?")
     assert len(screen_buttons(screen)) == 3  # две подписки и «Назад»
 
 

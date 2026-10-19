@@ -20,6 +20,8 @@ from remnabay.shop_settings import get_setting
 # «Купить подписку», «Мои подписки», «Назад» к меню (правка того же сообщения)
 BUY = BUY_CALLBACK
 SUBSCRIPTIONS = "subs"
+# «Продлить» в главном меню при нескольких подписках — выбор подписки (3.40, 0072)
+RENEW_CHOICE = "renew:choose"
 # «Попробовать бесплатно» (5.2, 5.4)
 TRY_FREE = "trial"
 BACK_TO_MENU = "menu:back"

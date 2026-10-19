@@ -64,6 +64,9 @@
 # З2. Список подписок
 "subscriptions.list.header" = "Ваши подписки:"
 
+# З2а. Какую подписку продлить? (решение 0072)
+"renew.choose.header" = "Какую подписку продлить?"
+
 # З3. Карточка подписки — rich
 "card.title" = "Подписка «{subscription_name}»"
 "card.field.tariff" = "Тариф"
