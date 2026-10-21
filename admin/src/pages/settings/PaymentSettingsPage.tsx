@@ -7,9 +7,76 @@ import { Field } from '@/components/Field'
 import { Module } from '@/components/frame/Module'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { formatDateTime, plural } from '@/lib/format'
 
 type Provider = Schemas['ProviderOut']
+type PayableInvoices = Schemas['PayableInvoicesOut']
+
+/** Сервер отказал: клиенты ещё могут оплатить счета провайдера, нужно подтверждение (3.42). */
+function payableInvoices(error: unknown): PayableInvoices | null {
+  if (typeof error !== 'object' || error === null || !('detail' in error)) return null
+  const detail = (error as { detail: unknown }).detail
+  if (typeof detail === 'object' && detail !== null && 'reason' in detail && detail.reason === 'payable_invoices') {
+    return detail as PayableInvoices
+  }
+  return null
+}
+
+/** Предупреждение перед отключением провайдера, пока клиенты могут оплатить его счета (3.42). */
+function DisconnectWarning({
+  title,
+  payable,
+  pending,
+  onConfirm,
+  onClose,
+}: {
+  title: string
+  payable: PayableInvoices | null
+  pending: boolean
+  onConfirm: () => void
+  onClose: () => void
+}) {
+  const count = payable?.count ?? 0
+  return (
+    <Dialog open={payable !== null} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="glass-float">
+        <DialogHeader>
+          <DialogTitle>Отключить провайдера «{title}»?</DialogTitle>
+          <DialogDescription>
+            У клиентов {count} {plural(count, 'счёт', 'счёта', 'счетов')}, {plural(count, 'который', 'которые', 'которые')}{' '}
+            ещё {plural(count, 'может', 'могут', 'могут')} быть {plural(count, 'оплачен', 'оплачены', 'оплачены')}. Если
+            отключить провайдера сейчас, поздняя оплата не применится сама, пока ключи не введут снова.
+            {payable && (
+              <>
+                {' '}
+                Лучше подождать до <span className="tabular">{formatDateTime(payable.window_ends_at, payable.time_zone)}</span>
+                .
+              </>
+            )}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button variant="ghost">Отмена</Button>
+          </DialogClose>
+          <Button variant="destructive" onClick={onConfirm} disabled={pending}>
+            Отключить сейчас
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
 
 const STATE: Record<Provider['state'], { label: string; tone: 'success' | 'warning' | 'muted' }> = {
   ready: { label: 'Подключена', tone: 'success' },
@@ -41,9 +108,19 @@ function YooKassaModule({ provider, currency }: { provider: Provider; currency: 
       refresh()
     },
   })
+  const [payable, setPayable] = useState<PayableInvoices | null>(null)
   const disconnect = $api.useMutation('delete', '/api/admin/settings/payment/providers/{code}', {
-    onSuccess: refresh,
+    onSuccess: () => {
+      setPayable(null)
+      refresh()
+    },
+    onError: (error) => {
+      const found = payableInvoices(error)
+      if (found) setPayable(found)
+    },
   })
+  const requestDisconnect = (confirmPayable: boolean) =>
+    disconnect.mutate({ params: { path: { code: provider.code }, query: { confirm_payable: confirmPayable } } })
   const state = STATE[provider.state]
   const connected = provider.state !== 'not_connected'
   const valid = /^\d+$/.test(shopId.trim()) && secret.trim() !== ''
@@ -108,19 +185,25 @@ function YooKassaModule({ provider, currency }: { provider: Provider; currency: 
             {connected ? 'Заменить ключи' : 'Подключить'}
           </Button>
           {connected && (
-            <Button
-              variant="ghost"
-              onClick={() => disconnect.mutate({ params: { path: { code: provider.code } } })}
-              disabled={disconnect.isPending}
-            >
+            <Button variant="ghost" onClick={() => requestDisconnect(false)} disabled={disconnect.isPending}>
               Отключить
             </Button>
           )}
           {connect.error && (
             <p className="text-sm text-danger-text">{errorMessage(connect.error, 'Ключи не подошли')}</p>
           )}
+          {disconnect.error && !payableInvoices(disconnect.error) && (
+            <p className="text-sm text-danger-text">{errorMessage(disconnect.error, 'Не удалось отключить')}</p>
+          )}
         </div>
       </div>
+      <DisconnectWarning
+        title={provider.title}
+        payable={payable}
+        pending={disconnect.isPending}
+        onConfirm={() => requestDisconnect(true)}
+        onClose={() => setPayable(null)}
+      />
     </Module>
   )
 }

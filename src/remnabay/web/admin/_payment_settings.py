@@ -1,11 +1,11 @@
-"""«Настройки → Оплата»: провайдеры и время жизни счёта (3.31, 3.33, 1.14, 0049).
+"""«Настройки → Оплата»: провайдеры и время жизни счёта (3.31, 3.33, 3.42, 1.14, 0049).
 
 Ключи провайдера проверяются у провайдера до сохранения и хранятся зашифрованными
 (0046); админка ключи не показывает. Провайдер, который не принимает валюту учёта,
 можно подключить, но клиенту он недоступен — админка это показывает (3.33).
 """
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -19,9 +19,10 @@ from remnabay.payments import (
     ProviderKeysError,
     Providers,
     ProviderUnavailableError,
+    payable_invoices,
 )
 from remnabay.shop import SHOP_CURRENCY
-from remnabay.shop_settings import get_setting, set_setting
+from remnabay.shop_settings import get_setting, set_setting, shop_time_zone
 from remnabay.web.admin._deps import AppSettings, DbSession, Owner
 from remnabay.web.payment_webhook import payment_webhook_path
 
@@ -56,6 +57,17 @@ class ProviderKeysIn(BaseModel):
 class ProviderRejectedOut(BaseModel):
     reason: Literal["invalid_keys", "rejected"]
     message: str
+
+
+class PayableInvoicesOut(BaseModel):
+    """У клиентов есть счета провайдера, которые ещё могут оплатить (3.42)."""
+
+    reason: Literal["payable_invoices"] = "payable_invoices"
+    message: str
+    count: int
+    # Когда закончится окно опроса последнего из счетов; показывается в часовом поясе магазина
+    window_ends_at: datetime
+    time_zone: str
 
 
 async def _payment_settings(
@@ -157,20 +169,42 @@ async def connect_provider(
     return await _payment_settings(session, settings, providers)
 
 
-@router.delete("/settings/payment/providers/{code}", responses={status.HTTP_404_NOT_FOUND: {}})
+@router.delete(
+    "/settings/payment/providers/{code}",
+    responses={
+        status.HTTP_404_NOT_FOUND: {},
+        status.HTTP_409_CONFLICT: {"model": PayableInvoicesOut},
+    },
+)
 async def disconnect_provider(
     code: str,
     request: Request,
     session: DbSession,
     settings: AppSettings,
     owner: Owner,
+    confirm_payable: bool = False,
 ) -> PaymentSettingsOut:
     """Отключить провайдера: новые счета через него не создаются. Уже созданные счета
-    опрашиваются, пока ключи есть, — без ключей оплату найдёт команда."""
+    опрашиваются, пока ключи есть, — без ключей оплату найдёт команда.
+
+    Если клиенты ещё могут оплатить счета провайдера, без `confirm_payable` — отказ
+    с их числом: владелец должен увидеть предупреждение (3.42).
+    """
     providers = _app_providers(request)
     kind = providers.kind(code)
     if kind is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Такого провайдера нет")
-    await providers.disconnect(session, kind, member_id=owner.id)
+    payable = await payable_invoices(session, kind.code, now=datetime.now(UTC))
+    if payable.window_ends_at is not None and not confirm_payable:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            PayableInvoicesOut(
+                message="У клиентов есть счета, которые ещё могут быть оплачены",
+                count=payable.count,
+                window_ends_at=payable.window_ends_at,
+                time_zone=(await shop_time_zone(session)).key,
+            ).model_dump(mode="json"),
+        )
+    await providers.disconnect(session, kind, member_id=owner.id, payable_invoices=payable.count)
     await session.commit()
     return await _payment_settings(session, settings, providers)

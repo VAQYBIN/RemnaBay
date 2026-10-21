@@ -14,7 +14,7 @@ from typing import Annotated
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, TypeAdapter
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -377,6 +377,38 @@ async def provider_reported(
         payment.state = PaymentState.EXPIRED
         await journal_payment(session, payment, actor, "payment.expired")
     return payment
+
+
+@dataclass(frozen=True)
+class PayableInvoices:
+    """Счета провайдера, которые клиенты ещё могут оплатить: магазин опрашивает их до
+    истечения и ещё 24 часа после (3.29). `window_ends_at` — когда окно закончится
+    у последнего из них."""
+
+    count: int
+    window_ends_at: datetime | None
+
+
+async def payable_invoices(
+    session: AsyncSession, provider: str, *, now: datetime
+) -> PayableInvoices:
+    """Если отключить провайдера раньше конца окна, поздняя оплата не применится сама,
+    пока ключи не введут снова (3.42)."""
+    after = await get_setting(session, POLL_AFTER_EXPIRY)
+    count, latest = (
+        await session.execute(
+            select(func.count(), func.max(Payment.expires_at)).where(
+                Payment.provider == provider,
+                Payment.provider_payment_id.is_not(None),
+                # Отказ ставится только по сообщению провайдера — такой счёт у него
+                # закрыт. Истёкший и отменённый у провайдера могут быть ещё открыты
+                Payment.state.in_(set(_OPEN_INVOICE) - {PaymentState.DECLINED}),
+                # Окно опроса — то же, что у poll_invoice
+                Payment.expires_at >= now - after,
+            )
+        )
+    ).one()
+    return PayableInvoices(count=count, window_ends_at=latest + after if latest else None)
 
 
 @task("payments.poll", InvoiceArgs, needs_attention=False)

@@ -1,6 +1,6 @@
 [project]
 name = "remnabay"
-version = "0.0.0"
+version = "0.1.0"
 description = "Магазин VPN для Remnawave: Telegram-бот и веб-админка"
 readme = "README.md"
 license = "MIT"

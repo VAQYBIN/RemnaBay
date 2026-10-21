@@ -1,19 +1,24 @@
-"""«Настройки → Оплата»: подключение ЮКассы, время жизни счёта (3.8, 3.31, 3.33, 1.14, 0049)."""
+"""«Настройки → Оплата»: подключение ЮКассы, время жизни счёта, отключение провайдера
+(3.8, 3.31, 3.33, 3.42, 1.14, 0049)."""
 
 from collections.abc import AsyncGenerator
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from remnabay.crypto import SecretBox, generate_key
+from remnabay.domain.payments import PaymentState
 from remnabay.domain.team import TeamMember, TeamRole
+from remnabay.journal import JournalEntry
 from remnabay.payments import INVOICE_LIFETIME, Providers
 from remnabay.payments.yookassa import YOOKASSA, YooKassaKind
 from remnabay.shop import SHOP_CURRENCY
 from remnabay.shop_settings import get_setting
-from tests.domain_support import add, make_team_member, put_setting
+from tests.conftest import journaled_in_test
+from tests.domain_support import add, make_client, make_payment, make_team_member, put_setting
 from tests.payment_support import (
     YOOKASSA_SECRET,
     YOOKASSA_SHOP_ID,
@@ -159,3 +164,69 @@ async def test_payment_settings_are_for_owner_only(shop: Shop) -> None:
     await shop.sign_in(assistant)
     assert (await shop.http.get(SETTINGS)).status_code == 403
     assert (await shop.http.put(KEYS, json=VALID)).status_code == 403
+
+
+async def _invoices_of_every_kind(session: AsyncSession, now: datetime) -> datetime:
+    """Счета, из которых ещё могут оплатить три; возвращает, когда закончится окно."""
+    client = await make_client(session)
+    latest = now + timedelta(minutes=20)
+    payable = [
+        make_payment(client, None, expires_at=latest),
+        # Истёк, но окно опроса ещё идёт: время жизни плюс 24 часа (3.29)
+        make_payment(client, None, state=PaymentState.EXPIRED, expires_at=now - timedelta(hours=2)),
+        # Заменён новым счётом, но у провайдера его ещё можно оплатить (3.10)
+        make_payment(client, None, state=PaymentState.CANCELLED, expires_at=now),
+    ]
+    not_payable = [
+        make_payment(
+            client, None, state=PaymentState.EXPIRED, expires_at=now - timedelta(hours=25)
+        ),
+        make_payment(client, None, state=PaymentState.APPLIED, expires_at=latest),
+        # Провайдер сам сообщил об отказе — у него счёт закрыт
+        make_payment(client, None, state=PaymentState.DECLINED, expires_at=latest),
+        make_payment(client, None, provider="other", expires_at=latest),
+        # Нулевая сумма — счёта у провайдера нет
+        make_payment(client, None, provider=None, provider_payment_id=None, expires_at=latest),
+    ]
+    for payment in (*payable, *not_payable):
+        await add(session, payment)
+    return latest + timedelta(hours=24)
+
+
+@pytest.mark.usefixtures("owner")
+async def test_3_42_disconnect_warns_about_payable_invoices(shop: Shop) -> None:
+    """3.42: у клиентов есть счета провайдера, которые ещё могут быть оплачены, —
+    перед отключением админка называет их число и конец окна; провайдер не отключён."""
+    await shop.http.put(KEYS, json=VALID)
+    window_ends_at = await _invoices_of_every_kind(shop.session, datetime.now(UTC))
+
+    response = await shop.http.delete(KEYS)
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["reason"] == "payable_invoices"
+    assert detail["count"] == 3
+    assert datetime.fromisoformat(detail["window_ends_at"]) == window_ends_at
+    assert detail["time_zone"] == "Europe/Moscow"
+    assert _yookassa((await shop.http.get(SETTINGS)).json())["state"] == "ready"
+
+
+async def test_3_42_owner_disconnects_after_warning(shop: Shop, owner: TeamMember) -> None:
+    """3.42: владелец видел предупреждение и всё равно отключает — провайдер отключён,
+    в журнале — сколько счетов ещё могли оплатить (4.25)."""
+    await shop.http.put(KEYS, json=VALID)
+    await _invoices_of_every_kind(shop.session, datetime.now(UTC))
+
+    response = await shop.http.delete(KEYS, params={"confirm_payable": True})
+
+    assert response.status_code == 200
+    assert _yookassa(response.json())["state"] == "not_connected"
+    entry = (
+        await shop.session.scalars(
+            select(JournalEntry).where(
+                JournalEntry.action == "payments.provider_disconnected", journaled_in_test()
+            )
+        )
+    ).one()
+    assert entry.actor_ref == str(owner.id)
+    assert entry.details == {"payable_invoices": 3}

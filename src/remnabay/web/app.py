@@ -2,14 +2,18 @@
 
 import asyncio
 import logging
-from collections.abc import AsyncGenerator
+import time
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from datetime import timedelta
 from typing import Literal
 
 from fastapi import FastAPI, Response, status
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from remnabay.access import TelegramOidc, ensure_owner
 from remnabay.bot import (
@@ -22,6 +26,7 @@ from remnabay.bot import (
 from remnabay.config import Settings, load_settings
 from remnabay.crypto import SecretBox
 from remnabay.db import create_engine, create_session_factory
+from remnabay.healthcheck import HEALTH_PATH
 from remnabay.panel import PanelClient
 from remnabay.payments import Providers
 from remnabay.payments.yookassa import YooKassaKind, yookassa_http
@@ -37,7 +42,6 @@ from remnabay.web import (
 )
 from remnabay.web.admin import LOGIN_PAGE_PATH
 
-HEALTH_PATH = "/health"
 # Меньше интервала проверки здоровья в Docker, чтобы ответ успевал прийти
 HEALTH_DB_TIMEOUT_SECONDS = 3.0
 
@@ -53,12 +57,55 @@ class HealthStatus(BaseModel):
     status: Literal["ok", "unavailable"]
 
 
-def create_app(settings: Settings, *, startup: bool = False) -> FastAPI:
+@dataclass(frozen=True)
+class Watchdog:
+    """Самоконтроль веба (0073): база дольше `lost_after` не отвечает — веб потерял
+    работоспособность и вызывает `on_lost`, чтобы процесс завершился с ошибкой и
+    Docker поднял его заново (`restart: unless-stopped`)."""
+
+    on_lost: Callable[[], None]
+    interval: timedelta = timedelta(seconds=15)
+    lost_after: timedelta = timedelta(minutes=3)
+
+
+async def _database_available(engine: AsyncEngine) -> SQLAlchemyError | OSError | None:
+    """`None` — база ответила, иначе — ошибка, с которой она не ответила."""
+    try:
+        async with asyncio.timeout(HEALTH_DB_TIMEOUT_SECONDS), engine.connect() as connection:
+            await connection.execute(text("SELECT 1"))
+    except (SQLAlchemyError, OSError, TimeoutError) as exc:
+        return exc
+    return None
+
+
+async def _watch_database(engine: AsyncEngine, watchdog: Watchdog) -> None:
+    last_ok = time.monotonic()
+    while True:
+        error = await _database_available(engine)
+        if error is None:
+            last_ok = time.monotonic()
+        elif time.monotonic() - last_ok > watchdog.lost_after.total_seconds():
+            logger.critical(
+                "Веб потерял работоспособность и завершается: база не отвечает дольше %.0f с (%s)",
+                watchdog.lost_after.total_seconds(),
+                _describe_error(error),
+            )
+            watchdog.on_lost()
+            return
+        await asyncio.sleep(watchdog.interval.total_seconds())
+
+
+def create_app(
+    settings: Settings, *, startup: bool = False, watchdog: Watchdog | None = None
+) -> FastAPI:
     """Приложение веба.
 
     `startup` — действия при запуске магазина: владелец из `.env` (1.2), вебхук бота
     или опрос при разработке. В тестах они выключены: не меняют общую тестовую базу
     и не обращаются к Telegram.
+
+    `watchdog` — самоконтроль процесса (0073); без него веб только отвечает 503
+    на проверку здоровья.
     """
     engine = create_engine(settings)
     sessions = create_session_factory(engine)
@@ -93,7 +140,10 @@ def create_app(settings: Settings, *, startup: bool = False) -> FastAPI:
             else:
                 url = settings.public_link(TELEGRAM_WEBHOOK_PATH)
                 await register_webhook(bot, dispatcher, url, secret)
+        watching = asyncio.create_task(_watch_database(engine, watchdog)) if watchdog else None
         yield
+        if watching is not None:
+            watching.cancel()
         if polling is not None:
             await polling.stop()
         await bot.session.close()
@@ -133,13 +183,11 @@ def create_app(settings: Settings, *, startup: bool = False) -> FastAPI:
     )
     async def health(response: Response) -> HealthStatus:  # pyright: ignore[reportUnusedFunction]
         """Процесс жив и база отвечает — 200, иначе 503."""
-        try:
-            async with asyncio.timeout(HEALTH_DB_TIMEOUT_SECONDS), engine.connect() as connection:
-                await connection.execute(text("SELECT 1"))
-        except (SQLAlchemyError, OSError, TimeoutError) as exc:
+        error = await _database_available(engine)
+        if error is not None:
             # Одна строка без трассировки: проверка идёт каждые 15 секунд,
             # и при недоступной базе трассировки заполнили бы весь лог
-            logger.warning("Проверка здоровья: база недоступна (%s)", _describe_error(exc))
+            logger.warning("Проверка здоровья: база недоступна (%s)", _describe_error(error))
             response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
             return HealthStatus(status="unavailable")
         return HealthStatus(status="ok")
