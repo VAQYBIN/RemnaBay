@@ -8,15 +8,10 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
+import { whole } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 type Form = { enabled: boolean; days: string; traffic: string; devices: string; squads: string[] }
-
-function whole(text: string, min: number, max: number): number | null {
-  if (!/^\d+$/.test(text.trim())) return null
-  const value = Number(text.trim())
-  return value >= min && value <= max ? value : null
-}
 
 /** «Триал» (5.1): включён ли и параметры — срок, лимит трафика (0 — без ограничения),
  *  лимит устройств, сквады. Трафик триала не сбрасывается: лимит — на весь пробный период. */
