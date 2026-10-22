@@ -5,7 +5,8 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
-from aiogram.methods import EditMessageText, SendMessage
+from aiogram.exceptions import TelegramNetworkError
+from aiogram.methods import EditMessageText, GetMe, SendMessage
 from aiogram.types import InlineKeyboardMarkup
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -260,3 +261,15 @@ async def test_0051_foreign_origin_is_refused(shop: Shop) -> None:
 
     assert response.status_code == 403
     assert not [r for r in shop.telegram.requests if isinstance(r, SendMessage)]
+
+
+async def test_1_28_login_via_bot_without_telegram_says_so(shop: Shop) -> None:
+    """1.28, решение 0074: «Войти через бот», а связи с Telegram нет — понятный отказ
+    вместо ошибки сервера, и запрос входа не создаётся."""
+    shop.telegram.failures[GetMe] = TelegramNetworkError(GetMe(), "Request timeout error")
+
+    response = await shop.http.post("/api/admin/auth/login-requests")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": {"reason": "telegram_unreachable"}}
+    assert await shop.session.scalar(select(LoginRequest.id)) is None

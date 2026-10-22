@@ -266,3 +266,16 @@ async def test_0053_tampered_signature_is_rejected(shop: Shop, owner: TeamMember
 
 def test_0053_issuer_is_telegram() -> None:
     assert ISSUER == "https://oauth.telegram.org"
+
+
+async def test_1_28_no_connection_to_telegram_is_not_a_refusal(
+    shop: Shop, owner: TeamMember
+) -> None:
+    """1.28, решение 0074: сервер магазина не достучался до Telegram — вход сообщает «нет
+    связи», а не «Telegram не подтвердил вход»."""
+    shop.oidc.unreachable = True
+
+    response = await _login(shop)
+
+    assert _location(response) == "/admin/login?error=network"
+    assert SESSION_COOKIE not in response.cookies

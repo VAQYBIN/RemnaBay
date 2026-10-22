@@ -10,9 +10,10 @@
   сообщение) — повтор не поможет.
 """
 
+import asyncio
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Protocol
+from typing import Any, Protocol, override
 
 from aiogram import Bot
 from aiogram.client.session.aiohttp import AiohttpSession
@@ -28,6 +29,7 @@ from aiogram.exceptions import (
     TelegramServerError,
     TelegramUnauthorizedError,
 )
+from aiogram.methods import TelegramMethod
 from aiogram.types import (
     BufferedInputFile,
     CopyTextButton,
@@ -36,6 +38,7 @@ from aiogram.types import (
     MessageEntity,
 )
 from aiohttp import ClientConnectorError
+from aiohttp_socks import ProxyConnectionError, ProxyError, ProxyTimeoutError
 
 from remnabay.messaging._dates import DATE_FORMAT, DateEntity
 
@@ -177,6 +180,46 @@ def _entities(message: OutgoingMessage) -> list[MessageEntity] | None:
     return entities or None
 
 
+# Ошибки прокси (aiohttp-socks): прокси недоступен, не ответил вовремя, отказал
+# соединить, ответил не по протоколу или оборвал соединение посреди рукопожатия SOCKS
+# (тогда aiohttp-socks пропускает IncompleteReadError — без прокси aiohttp его не бросает)
+_PROXY_ERRORS = (
+    ProxyConnectionError,
+    ProxyError,
+    ProxyTimeoutError,
+    asyncio.IncompleteReadError,
+)
+
+
+class TelegramSession(AiohttpSession):
+    """Сессия Bot API с необязательным прокси (1.28, 0074).
+
+    Ошибки самого прокси (недоступен, отказал соединить, ответил не по протоколу)
+    aiogram не оборачивает — здесь они становятся сетевой ошибкой Telegram, как обрыв
+    связи без прокси: запрос до Telegram не дошёл.
+    """
+
+    def __init__(
+        self,
+        *,
+        timeout: timedelta,
+        proxy: str | None = None,
+        api: TelegramAPIServer = PRODUCTION,
+    ) -> None:
+        super().__init__(api=api, timeout=timeout.total_seconds(), proxy=proxy)
+
+    @override
+    async def make_request(
+        self, bot: Bot, method: TelegramMethod[Any], timeout: int | None = None
+    ) -> Any:
+        try:
+            return await super().make_request(bot, method, timeout)
+        except _PROXY_ERRORS as error:
+            raise TelegramNetworkError(
+                method=method, message=f"прокси для Telegram: {type(error).__name__}: {error}"
+            ) from error
+
+
 def classify(error: AiogramError) -> DeliveryError:
     """Чем закончилась отправка: по ошибке aiogram — вид недоставки."""
     match error:
@@ -189,8 +232,11 @@ def classify(error: AiogramError) -> DeliveryError:
         case TelegramEntityTooLarge():
             # В aiogram это подкласс сетевой ошибки, но это ответ 413 — отказ по существу
             return UndeliverableError(str(error))
-        case TelegramNetworkError() if isinstance(error.__cause__, ClientConnectorError):
-            # Соединение не установлено — запрос до Telegram не дошёл
+        case TelegramNetworkError() if isinstance(
+            error.__cause__, (ClientConnectorError, *_PROXY_ERRORS)
+        ):
+            # Соединение не установлено (в том числе прокси не соединил) — запрос до
+            # Telegram не дошёл
             return NotAcceptedError(str(error))
         case TelegramNetworkError() | TelegramServerError():
             return AmbiguousDeliveryError(str(error))
@@ -210,10 +256,11 @@ class TelegramSender:
         token: str,
         *,
         api_base: str | None = None,
+        proxy: str | None = None,
         timeout: timedelta = DEFAULT_TIMEOUT,
     ) -> None:
         api = TelegramAPIServer.from_base(api_base) if api_base else PRODUCTION
-        session = AiohttpSession(api=api, timeout=timeout.total_seconds())
+        session = TelegramSession(api=api, timeout=timeout, proxy=proxy)
         self._bot = Bot(token, session=session)
 
     @classmethod

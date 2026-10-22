@@ -12,12 +12,15 @@ import { useMe } from '@/lib/session'
 
 const POLL_INTERVAL_MS = 2000
 
-type Problem = 'rejected' | 'expired' | 'failed' | 'start_failed'
+type Problem = 'rejected' | 'expired' | 'failed' | 'network' | 'start_failed'
 
 const PROBLEMS: Record<Problem, string> = {
   rejected: 'Этот аккаунт Telegram не входит в команду магазина.',
   expired: 'Подтверждение устарело. Начните вход заново.',
   failed: 'Telegram не подтвердил вход. Попробуйте ещё раз или войдите через бот.',
+  // Сервер магазина не достучался до Telegram (1.28, 0074)
+  network:
+    'Нет связи с Telegram с сервера магазина. Если у сервера нет прямого доступа к Telegram, задайте прокси — TELEGRAM_PROXY в .env.',
   start_failed: 'Не удалось начать вход. Попробуйте ещё раз.',
 }
 
@@ -25,7 +28,15 @@ const PROBLEMS: Record<Problem, string> = {
 const OIDC_START = '/api/admin/auth/telegram/start'
 
 function problemFromQuery(value: string | null): Problem | null {
-  return value === 'rejected' || value === 'expired' || value === 'failed' ? value : null
+  return value === 'rejected' || value === 'expired' || value === 'failed' || value === 'network'
+    ? value
+    : null
+}
+
+function isTelegramUnreachable(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('detail' in error)) return false
+  const detail = (error as { detail: unknown }).detail
+  return typeof detail === 'object' && detail !== null && 'reason' in detail && detail.reason === 'telegram_unreachable'
 }
 
 /** Ожидание подтверждения в боте: код, ссылка на бот, опрос (1.4, 1.5). */
@@ -95,7 +106,7 @@ export function LoginPage() {
           setRequest(result)
           window.open(result.bot_link, '_blank', 'noreferrer')
         },
-        onError: () => setProblem('start_failed'),
+        onError: (error) => setProblem(isTelegramUnreachable(error) ? 'network' : 'start_failed'),
       },
     )
   }

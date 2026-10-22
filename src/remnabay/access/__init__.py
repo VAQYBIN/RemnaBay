@@ -15,7 +15,7 @@ from remnabay.access._login import (
     poll_bot_login,
     start_bot_login,
 )
-from remnabay.access._oidc import OidcAttempt, OidcError, TelegramOidc
+from remnabay.access._oidc import OidcAttempt, OidcError, OidcNetworkError, TelegramOidc
 from remnabay.access._owner import TEAM_MEMBER_SUBJECT, ensure_owner
 from remnabay.access._sessions import create_session, end_session, member_for_session
 from remnabay.access._settings import LOGIN_TTL, SESSION_TTL
@@ -36,6 +36,7 @@ __all__ = [
     "NewLogin",
     "OidcAttempt",
     "OidcError",
+    "OidcNetworkError",
     "PollResult",
     "PollStatus",
     "TelegramOidc",

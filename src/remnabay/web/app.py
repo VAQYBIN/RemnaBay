@@ -110,9 +110,12 @@ def create_app(
     engine = create_engine(settings)
     sessions = create_session_factory(engine)
     box = SecretBox(settings.encryption_key.get_secret_value())
-    bot = create_bot(settings.bot_token.get_secret_value())
+    proxy = settings.telegram_proxy_url
+    bot = create_bot(settings.bot_token.get_secret_value(), proxy=proxy)
     # Вход в админку через Telegram OpenID Connect (0053)
-    oidc = TelegramOidc(settings.bot_id, settings.telegram_login_client_secret.get_secret_value())
+    oidc = TelegramOidc(
+        settings.bot_id, settings.telegram_login_client_secret.get_secret_value(), proxy=proxy
+    )
     # Чек-лист проверяет панель из веба (1.8, 1.10)
     panel = PanelClient(str(settings.panel_url), settings.panel_token.get_secret_value())
     # Платёжные провайдеры с ключами оператора из админки (3.27)

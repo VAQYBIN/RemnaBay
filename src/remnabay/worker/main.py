@@ -163,7 +163,9 @@ def run(settings: Settings, config: WorkerConfig | None = None) -> bool:
             loop.add_signal_handler(signal_number, stop.set)
         worker_config = config or WorkerConfig()
         engine = create_engine(settings, pool_size=worker_config.pool_size)
-        sender = TelegramSender(settings.bot_token.get_secret_value())
+        sender = TelegramSender(
+            settings.bot_token.get_secret_value(), proxy=settings.telegram_proxy_url
+        )
         panel = PanelClient(str(settings.panel_url), settings.panel_token.get_secret_value())
         yookassa = yookassa_http()
         stalled: BaseException | None = None
