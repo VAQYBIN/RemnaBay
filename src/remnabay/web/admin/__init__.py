@@ -19,6 +19,7 @@ from remnabay.web.admin import (
     _shop,
     _stats,
     _tariffs,
+    _texts,
     _trial,
 )
 from remnabay.web.admin._auth import (
@@ -38,6 +39,7 @@ def build_router() -> APIRouter:
     router.include_router(_auth.router)
     router.include_router(_brand.public_router)
     router.include_router(_brand.router)
+    router.include_router(_texts.router)
     router.include_router(_shop.router)
     router.include_router(_stats.router)
     router.include_router(_tariffs.router)

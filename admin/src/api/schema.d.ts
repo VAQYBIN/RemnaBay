@@ -179,6 +179,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/settings/texts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Bot Texts
+         * @description Все тексты, сгруппированные по экранам, в порядке 03-bot-texts.md (1.29).
+         *     Язык не указан — язык бота по умолчанию.
+         */
+        get: operations["bot_texts_api_admin_settings_texts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/settings/texts/{language}/{key}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Bot Text
+         * @description Предпросмотр до сохранения (1.29): ошибка — не отказ, а пояснение рядом с полем.
+         */
+        post: operations["preview_bot_text_api_admin_settings_texts__language___key__preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/settings/texts/{language}/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Bot Text
+         * @description Сохранение: только текст, который прошёл ту же проверку, что предпросмотр (1.29).
+         *     Изменение — в журнал (4.25).
+         */
+        put: operations["save_bot_text_api_admin_settings_texts__language___key__put"];
+        post?: never;
+        /**
+         * Reset Bot Text
+         * @description Сброс к тексту по умолчанию (1.29); в журнал (4.25).
+         */
+        delete: operations["reset_bot_text_api_admin_settings_texts__language___key__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/checklist": {
         parameters: {
             query?: never;
@@ -1722,6 +1788,36 @@ export interface components {
             tariff_id: number;
             /** Subscription Id */
             subscription_id?: number | null;
+        };
+        /** BotTextIn */
+        BotTextIn: {
+            /** Text */
+            text: string;
+        };
+        /** BotTextOut */
+        BotTextOut: {
+            /** Key */
+            key: string;
+            /** Default */
+            default: string;
+            /** Text */
+            text: string;
+            /** Changed */
+            changed: boolean;
+            /** Variables */
+            variables: string[];
+            kind: components["schemas"]["TextKind"];
+            /** Plural Counts */
+            plural_counts?: number[] | null;
+        };
+        /** BotTextsOut */
+        BotTextsOut: {
+            /** Language */
+            language: string;
+            /** Languages */
+            languages: string[];
+            /** Groups */
+            groups: components["schemas"]["TextGroupOut"][];
         };
         /** BrandDetailsOut */
         BrandDetailsOut: {
@@ -3295,6 +3391,33 @@ export interface components {
             /** Error */
             error?: string | null;
         };
+        /** TextGroupOut */
+        TextGroupOut: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Section */
+            section: string | null;
+            /** Texts */
+            texts: components["schemas"]["BotTextOut"][];
+        };
+        /**
+         * TextKind
+         * @description Где клиент видит текст — от этого зависят предпросмотр и ограничение длины.
+         * @enum {string}
+         */
+        TextKind: "message" | "button" | "command" | "page";
+        /**
+         * TextPreviewOut
+         * @description Текст так, как его получит клиент, или что в нём не так (1.29).
+         */
+        TextPreviewOut: {
+            /** Text */
+            text: string | null;
+            /** Problem */
+            problem: string | null;
+        };
         /**
          * TokensOut
          * @description Токены оформления обеих тем: имя → значение CSS.
@@ -3716,6 +3839,141 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bot_texts_api_admin_settings_texts_get: {
+        parameters: {
+            query?: {
+                language?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotTextsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_bot_text_api_admin_settings_texts__language___key__preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                language: string;
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BotTextIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TextPreviewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_bot_text_api_admin_settings_texts__language___key__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                language: string;
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BotTextIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotTextOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_bot_text_api_admin_settings_texts__language___key__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                language: string;
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotTextOut"];
+                };
             };
             /** @description Validation Error */
             422: {
