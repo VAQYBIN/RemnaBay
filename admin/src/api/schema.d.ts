@@ -1510,6 +1510,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/journal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Journal List
+         * @description А10 (4.35): записи журнала, новые сверху, по `PAGE_SIZE` на страницу.
+         *
+         *     Фильтры: кто (`actor_type`), что (`action` — одно действие или `action_group` —
+         *     все действия группы, например `payment`), над чем (`subject_type`, `none` — записи
+         *     без объекта, и при желании `subject_id`), период (`period` — сегодня, 7 или 30 дней,
+         *     как на главной, или `since`, `until` — даты; всё в часовом поясе магазина, 1.18),
+         *     результат (`outcome`). `before` — id последней записи
+         *     предыдущей страницы.
+         */
+        get: operations["journal_list_api_admin_journal_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/about": {
         parameters: {
             query?: never;
@@ -2182,6 +2209,50 @@ export interface components {
             details: {
                 [key: string]: components["schemas"]["JsonValue"];
             };
+        };
+        /** JournalPageOut */
+        JournalPageOut: {
+            /** Entries */
+            entries: components["schemas"]["JournalRowOut"][];
+            /** Next Before */
+            next_before: number | null;
+            /** Time Zone */
+            time_zone: string;
+        };
+        /** JournalRowOut */
+        JournalRowOut: {
+            /** Id */
+            id: number;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            actor_type: components["schemas"]["ActorType"];
+            /** Actor */
+            actor: string | null;
+            actor_client: components["schemas"]["ClientRef"] | null;
+            /** Action */
+            action: string;
+            outcome: components["schemas"]["Outcome"];
+            subject: components["schemas"]["JournalSubjectOut"] | null;
+            /** Details */
+            details: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+        };
+        /**
+         * JournalSubjectOut
+         * @description Над чем: вид и id объекта и то, что помогает его узнать и открыть.
+         */
+        JournalSubjectOut: {
+            /** Type */
+            type: string;
+            /** Id */
+            id: string;
+            client: components["schemas"]["ClientRef"] | null;
+            /** Name */
+            name: string | null;
         };
         JsonValue: string | number | boolean | components["schemas"]["JsonValue"][] | {
             [key: string]: components["schemas"]["JsonValue"];
@@ -6460,6 +6531,53 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    journal_list_api_admin_journal_get: {
+        parameters: {
+            query?: {
+                actor_type?: components["schemas"]["ActorType"] | null;
+                action?: string | null;
+                action_group?: string | null;
+                subject_type?: string | null;
+                subject_id?: string | null;
+                outcome?: components["schemas"]["Outcome"] | null;
+                period?: components["schemas"]["Period"] | null;
+                since?: string | null;
+                until?: string | null;
+                before?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JournalPageOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
