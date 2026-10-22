@@ -5,7 +5,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from remnabay.journal import Actor, Outcome, Subject, record
-from remnabay.texts._catalog import check_override, load_default_catalogs
+from remnabay.texts._catalog import TextError, check_override, load_default_catalogs
 from remnabay.texts._models import BotTextOverride
 
 JOURNAL_SUBJECT = "bot_text"
@@ -23,9 +23,21 @@ async def save_override(
     session: AsyncSession, key: str, language: str, text: str, *, member_id: int
 ) -> None:
     """Текст оператора для ключа и языка. Переменные — только из текста по умолчанию
-    (`TextError` иначе). Изменение — в журнал (4.25)."""
-    check_override(load_default_catalogs(), key, text)
+    (`TextError` иначе). Изменение — в журнал (4.25).
+
+    Пробелы по краям не хранятся (Telegram их всё равно не показывает); текст, равный
+    тексту по умолчанию, — это сброс: ключ не числится изменённым."""
+    catalogs = load_default_catalogs()
+    if language not in catalogs:
+        raise TextError(f"Нет текстов на языке {language}")
+    check_override(catalogs, key, text)
+    text = text.strip()
+    if text == catalogs[language].entries.get(key):
+        await reset_override(session, key, language, member_id=member_id)
+        return
     old = await get_override(session, key, language)
+    if text == old:
+        return
     await session.execute(
         insert(BotTextOverride)
         .values(key=key, language=language, text=text, updated_by_id=member_id)

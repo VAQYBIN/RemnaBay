@@ -9,12 +9,14 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 
+from remnabay.texts import DATE_MARK_END, DATE_MARK_START
+
 # Формат даты для клиента: длинная дата и время («1 ноября 2026, 23:00»)
 DATE_FORMAT = "Dt"
-# Метка места даты в тексте: символы из области для частного использования, в
-# текстах оператора их не бывает
-_DATE_MARK = "{}"
-_DATE_MARK_PATTERN = re.compile("(\\d+)")
+# Метка места даты в тексте: символы из области для частного использования; тексты
+# оператора с ними не сохраняются (`check_override`, 1.29)
+_DATE_MARK = f"{DATE_MARK_START}{{}}{DATE_MARK_END}"
+_DATE_MARK_PATTERN = re.compile(f"{DATE_MARK_START}(\\d+){DATE_MARK_END}")
 
 
 # Время в Telegram — 32-битное: дату позже 19 января 2038 года сущностью date_time он
