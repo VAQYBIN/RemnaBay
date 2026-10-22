@@ -14,6 +14,7 @@ from remnabay.domain.clients import Client
 from remnabay.domain.payments import Payment, PaymentPurpose, PaymentState
 from remnabay.domain.tariffs import Tariff
 from remnabay.domain.team import TeamMember, TeamRole
+from remnabay.messaging import SendArgs
 from remnabay.payments import (
     Checkout,
     InvoiceRequest,
@@ -31,6 +32,7 @@ from remnabay.payments.yookassa import (
     YooKassaKind,
     YooKassaProvider,
 )
+from remnabay.queue._models import QueueTask
 from tests.domain_support import add, make_client, make_tariff
 from tests.payment_support import (
     YOOKASSA_SECRET,
@@ -268,6 +270,29 @@ async def test_3_31_paid_yookassa_invoice_is_confirmed_by_webhook(
 
     assert response.status_code == 200
     assert payment.state == PaymentState.PAID
+
+
+async def test_3_12_3_31_declined_yookassa_payment_by_webhook(
+    shop: Shop, providers: Providers, yookassa: FakeYooKassa, client: Client, tariff: Tariff
+) -> None:
+    """3.12, 3.31, решение 0075: ЮКасса закрыла платёж отказом банка и прислала
+    уведомление — платёж «отклонён», клиент получает сообщение и может попробовать снова."""
+    payment = await open_invoice(shop.session, providers, _checkout(client, tariff), now=NOW)
+    assert payment.provider_payment_id is not None
+    yookassa.cancel(payment.provider_payment_id, "insufficient_funds")
+
+    response = await shop.http.post(
+        f"/webhooks/payments/{YOOKASSA}",
+        content=_notification(payment.provider_payment_id, status="canceled"),
+    )
+
+    assert response.status_code == 200
+    assert payment.state == PaymentState.DECLINED
+    rows = await shop.session.scalars(
+        select(QueueTask.args).where(QueueTask.name == "messages.send").order_by(QueueTask.id)
+    )
+    messages = [SendArgs.model_validate(args) for args in rows]
+    assert [message.text_key for message in messages] == ["event.payment_failed"]
 
 
 async def test_3_30_unavailable_yookassa_creates_nothing(
