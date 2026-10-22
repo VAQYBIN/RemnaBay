@@ -7,7 +7,7 @@ Telegram», миграция), видны здесь так же, как и за
 """
 
 from collections.abc import Iterable
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -22,6 +22,7 @@ from remnabay.domain.tariffs import Tariff
 from remnabay.domain.team import TeamMember
 from remnabay.journal import ActorType, JournalEntry, JsonValue, Outcome
 from remnabay.shop_settings import shop_time_zone
+from remnabay.stats import Period, period_start
 from remnabay.web.admin._deps import DbSession, Member
 from remnabay.web.admin._payments import ClientRef
 
@@ -40,9 +41,9 @@ class JournalSubjectOut(BaseModel):
     type: str
     id: str
     # Клиент объекта — для ссылки на карточку: сам клиент, владелец подписки, плательщик
-    client: ClientRef | None = None
+    client: ClientRef | None
     # Понятное имя: название подписки или тарифа, код промокода, имя участника команды
-    name: str | None = None
+    name: str | None
 
 
 class JournalRowOut(BaseModel):
@@ -149,7 +150,9 @@ async def _rows(session: DbSession, entries: list[JournalEntry]) -> list[Journal
     def subject(entry: JournalEntry) -> JournalSubjectOut | None:
         if entry.subject_type is None or entry.subject_id is None:
             return None
-        out = JournalSubjectOut(type=entry.subject_type, id=entry.subject_id)
+        out = JournalSubjectOut(
+            type=entry.subject_type, id=entry.subject_id, client=None, name=None
+        )
         if not entry.subject_id.isdigit():
             return out
         key = int(entry.subject_id)
@@ -218,6 +221,7 @@ async def journal_list(
     subject_type: Annotated[str | None, Query(max_length=50, pattern=_SUBJECT_TYPE)] = None,
     subject_id: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
     outcome: Annotated[Outcome | None, Query()] = None,
+    period: Annotated[Period | None, Query()] = None,
     since: Annotated[date | None, Query()] = None,
     until: Annotated[date | None, Query()] = None,
     before: Annotated[int | None, Query(gt=0)] = None,
@@ -226,8 +230,9 @@ async def journal_list(
 
     Фильтры: кто (`actor_type`), что (`action` — одно действие или `action_group` —
     все действия группы, например `payment`), над чем (`subject_type`, `none` — записи
-    без объекта, и при желании `subject_id`), период (`since`, `until` — даты в часовом
-    поясе магазина, 1.18), результат (`outcome`). `before` — id последней записи
+    без объекта, и при желании `subject_id`), период (`period` — сегодня, 7 или 30 дней,
+    как на главной, или `since`, `until` — даты; всё в часовом поясе магазина, 1.18),
+    результат (`outcome`). `before` — id последней записи
     предыдущей страницы."""
     del member
     conditions: list[ColumnElement[bool]] = []
@@ -246,6 +251,9 @@ async def journal_list(
     if outcome is not None:
         conditions.append(JournalEntry.outcome == outcome)
     zone = await shop_time_zone(session)
+    if period is not None:
+        start = period_start(period, datetime.now(UTC), zone)
+        conditions.append(JournalEntry.occurred_at >= start)
     if since is not None:
         conditions.append(JournalEntry.occurred_at >= datetime.combine(since, time(), zone))
     if until is not None:

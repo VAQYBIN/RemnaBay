@@ -6,7 +6,7 @@
 """
 
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -237,6 +237,30 @@ async def test_4_35_period_in_shop_time_zone(shop: Shop, owner: TeamMember) -> N
     assert _actions(before_day) == []
     after_day = await _get(shop, action_group="rbtest", since="2026-01-12")
     assert _actions(after_day) == []
+
+
+@pytest.mark.usefixtures("owner")
+async def test_4_35_period_like_home_screen(shop: Shop) -> None:
+    """4.35, 1.18: периоды «сегодня», «7 дней», «30 дней» — как на главной, от полуночи
+    по времени магазина."""
+    now = datetime.now(UTC)
+    for action, days_ago in (("rbtest.now", 0), ("rbtest.days_3", 3), ("rbtest.days_10", 10)):
+        await add(
+            shop.session,
+            JournalEntry(
+                actor_type=ActorType.SYSTEM,
+                action=action,
+                outcome=Outcome.SUCCESS,
+                occurred_at=now - timedelta(days=days_ago),
+            ),
+        )
+
+    assert _actions(await _get(shop, action_group="rbtest", period="today")) == ["rbtest.now"]
+    assert _actions(await _get(shop, action_group="rbtest", period="7d")) == [
+        "rbtest.now",
+        "rbtest.days_3",
+    ]
+    assert len((await _get(shop, action_group="rbtest", period="30d"))["entries"]) == 3
 
 
 @pytest.mark.usefixtures("owner")
