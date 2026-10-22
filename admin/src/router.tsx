@@ -8,6 +8,7 @@ import { ClientCardPage } from '@/pages/clients/ClientCardPage'
 import { ClientsPage } from '@/pages/clients/ClientsPage'
 import { ExpiringPage } from '@/pages/ExpiringPage'
 import { HomePage } from '@/pages/HomePage'
+import { JournalPage } from '@/pages/JournalPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { MigrationPage } from '@/pages/migration/MigrationPage'
 import { MigrationRunPage } from '@/pages/migration/MigrationRunPage'
@@ -45,6 +46,7 @@ export const router = createBrowserRouter(
         { path: 'broadcasts/:broadcastId', Component: BroadcastPage },
         { path: 'migration', Component: MigrationPage },
         { path: 'migration/:runId', Component: MigrationRunPage },
+        { path: 'journal', Component: JournalPage },
         {
           path: 'settings',
           Component: SettingsLayout,

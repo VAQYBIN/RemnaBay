@@ -49,7 +49,7 @@ export function actorName(actor: Schemas['HistoryOut']['actor_type']): string {
 }
 
 /** Записи журнала о платеже — понятными словами (4.25). */
-const HISTORY: Record<string, string> = {
+export const HISTORY: Record<string, string> = {
   'payment.created': 'Счёт создан',
   'payment.replaced': 'Счёт заменён новым',
   'payment.cancelled': 'Клиент отменил счёт',
