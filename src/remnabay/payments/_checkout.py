@@ -14,9 +14,10 @@ from typing import Annotated
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, TypeAdapter
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from remnabay import runtime
 from remnabay.domain.clients import Client
@@ -126,8 +127,13 @@ async def _operation_of(
     """Номер операции нового счёта. Счёт той же операции, который ещё может быть
     оплачен или ждёт применения (в том числе истёкший, отменённый или оплаченный, но
     не применённый), передаёт ему свой номер: если оплатят оба, вторая оплата продлит
-    подписку, созданную первой, а не создаст вторую (3.11)."""
+    подписку, созданную первой, а не создаст вторую (3.11). Операция, которую уже
+    завершила применённая оплата, номер не передаёт: новый счёт — новая операция."""
     window = now - lifetime - await get_setting(session, POLL_AFTER_EXPIRY)
+    applied = aliased(Payment)
+    completed = exists().where(
+        applied.operation_id == Payment.operation_id, applied.applied_at.is_not(None)
+    )
     query = select(Payment.operation_id).where(
         Payment.client_id == checkout.client.id,
         Payment.purpose == checkout.purpose,
@@ -135,6 +141,7 @@ async def _operation_of(
         Payment.operation_id.is_not(None),
         Payment.state.in_((*_OPEN_INVOICE, PaymentState.PAID, PaymentState.PAID_NOT_APPLIED)),
         Payment.created_at >= window,
+        ~completed,
     )
     if checkout.subscription is None:
         query = query.where(Payment.subscription_id.is_(None))
