@@ -40,7 +40,9 @@ from remnabay.payments._catalog import (
 from remnabay.payments._checkout import (
     INVOICE_LIFETIME,
     POLL_AFTER_EXPIRY,
+    POLL_AFTER_EXPIRY_HOURS,
     POLL_INTERVAL,
+    POLL_INTERVAL_MINUTES,
     Checkout,
     CheckoutError,
     CheckoutPromo,
@@ -94,7 +96,9 @@ from remnabay.payments._team import (
 __all__ = [
     "INVOICE_LIFETIME",
     "POLL_AFTER_EXPIRY",
+    "POLL_AFTER_EXPIRY_HOURS",
     "POLL_INTERVAL",
+    "POLL_INTERVAL_MINUTES",
     "PROCESSING_NOTICE_DELAY",
     "Applied",
     "ApplierNotReadyError",

@@ -1,4 +1,5 @@
-"""«Настройки → Оплата»: провайдеры и время жизни счёта (3.31, 3.33, 3.42, 1.14, 0049).
+"""«Настройки → Оплата»: провайдеры, время жизни счёта, опрос неоплаченных счетов,
+повтор операций (3.8, 3.29, 3.31, 3.33, 3.42, 4.14, 1.14, 0049).
 
 Ключи провайдера проверяются у провайдера до сохранения и хранятся зашифрованными
 (0046); админка ключи не показывает. Провайдер, который не принимает валюту учёта,
@@ -13,6 +14,10 @@ from pydantic import BaseModel, Field
 
 from remnabay.payments import (
     INVOICE_LIFETIME,
+    POLL_AFTER_EXPIRY,
+    POLL_AFTER_EXPIRY_HOURS,
+    POLL_INTERVAL,
+    POLL_INTERVAL_MINUTES,
     ConnectionState,
     ProviderAuthError,
     ProviderError,
@@ -22,7 +27,16 @@ from remnabay.payments import (
     payable_invoices,
 )
 from remnabay.shop import SHOP_CURRENCY
-from remnabay.shop_settings import get_setting, set_setting, shop_time_zone
+from remnabay.shop_settings import (
+    RETRY_ATTEMPTS,
+    RETRY_MAX_ATTEMPTS,
+    RETRY_WINDOW,
+    RETRY_WINDOW_MINUTES,
+    ShopSetting,
+    get_setting,
+    set_setting,
+    shop_time_zone,
+)
 from remnabay.web.admin._deps import AppSettings, DbSession, Owner
 from remnabay.web.payment_webhook import payment_webhook_path
 
@@ -43,11 +57,34 @@ class PaymentSettingsOut(BaseModel):
     providers: list[ProviderOut]
     currency: str
     invoice_lifetime_minutes: int
+    # Опрос неоплаченных счетов: как часто и сколько ещё после истечения счёта (3.29)
+    poll_interval_minutes: int
+    poll_after_expiry_hours: int
+    # Повтор операций: прекращение через окно или после числа попыток — что раньше (4.14)
+    retry_window_minutes: int
+    retry_max_attempts: int
 
 
 class PaymentSettingsIn(BaseModel):
+    """«Счёт»: время жизни (3.8) и опрос неоплаченных счетов (3.29)."""
+
     # От 5 минут до суток
     invoice_lifetime_minutes: Annotated[int, Field(ge=5, le=1440)]
+    poll_interval_minutes: Annotated[
+        int, Field(ge=POLL_INTERVAL_MINUTES[0], le=POLL_INTERVAL_MINUTES[1])
+    ]
+    poll_after_expiry_hours: Annotated[
+        int, Field(ge=POLL_AFTER_EXPIRY_HOURS[0], le=POLL_AFTER_EXPIRY_HOURS[1])
+    ]
+
+
+class RetrySettingsIn(BaseModel):
+    """«Повтор операций» (4.14)."""
+
+    retry_window_minutes: Annotated[
+        int, Field(ge=RETRY_WINDOW_MINUTES[0], le=RETRY_WINDOW_MINUTES[1])
+    ]
+    retry_max_attempts: Annotated[int, Field(ge=RETRY_ATTEMPTS[0], le=RETRY_ATTEMPTS[1])]
 
 
 class ProviderKeysIn(BaseModel):
@@ -75,6 +112,9 @@ async def _payment_settings(
 ) -> PaymentSettingsOut:
     connections = await providers.connections(session)
     lifetime = await get_setting(session, INVOICE_LIFETIME)
+    poll_interval = await get_setting(session, POLL_INTERVAL)
+    poll_after = await get_setting(session, POLL_AFTER_EXPIRY)
+    retry_window = await get_setting(session, RETRY_WINDOW)
     await session.commit()
     return PaymentSettingsOut(
         providers=[
@@ -88,8 +128,22 @@ async def _payment_settings(
             for connection in connections
         ],
         currency=await get_setting(session, SHOP_CURRENCY),
-        invoice_lifetime_minutes=int(lifetime.total_seconds() // 60),
+        invoice_lifetime_minutes=_minutes(lifetime),
+        poll_interval_minutes=_minutes(poll_interval),
+        poll_after_expiry_hours=int(poll_after.total_seconds() // 3600),
+        retry_window_minutes=_minutes(retry_window),
+        retry_max_attempts=await get_setting(session, RETRY_MAX_ATTEMPTS),
     )
+
+
+def _minutes(value: timedelta) -> int:
+    return int(value.total_seconds() // 60)
+
+
+async def _save[T](session: DbSession, setting: ShopSetting[T], value: T, member_id: int) -> None:
+    """Сохраняет настройку, если она изменилась; изменение — в журнал (4.25)."""
+    if await get_setting(session, setting) != value:
+        await set_setting(session, setting, value, member_id=member_id)
 
 
 def _app_providers(request: Request) -> Providers:
@@ -113,10 +167,29 @@ async def update_payment_settings(
     settings: AppSettings,
     owner: Owner,
 ) -> PaymentSettingsOut:
-    """Время жизни счёта (3.8)."""
-    lifetime = timedelta(minutes=body.invoice_lifetime_minutes)
-    if await get_setting(session, INVOICE_LIFETIME) != lifetime:
-        await set_setting(session, INVOICE_LIFETIME, lifetime, member_id=owner.id)
+    """Время жизни счёта (3.8) и опрос неоплаченных счетов (3.29). Действуют сразу:
+    очередной опрос берёт значения из настроек."""
+    await _save(
+        session, INVOICE_LIFETIME, timedelta(minutes=body.invoice_lifetime_minutes), owner.id
+    )
+    await _save(session, POLL_INTERVAL, timedelta(minutes=body.poll_interval_minutes), owner.id)
+    await _save(session, POLL_AFTER_EXPIRY, timedelta(hours=body.poll_after_expiry_hours), owner.id)
+    await session.commit()
+    return await _payment_settings(session, settings, _app_providers(request))
+
+
+@router.put("/settings/payment/retry")
+async def update_retry_settings(
+    body: RetrySettingsIn,
+    request: Request,
+    session: DbSession,
+    settings: AppSettings,
+    owner: Owner,
+) -> PaymentSettingsOut:
+    """Повтор операций (4.14): воркер берёт окно и лимит попыток из настроек при каждом
+    решении о повторе — без перезапуска."""
+    await _save(session, RETRY_WINDOW, timedelta(minutes=body.retry_window_minutes), owner.id)
+    await _save(session, RETRY_MAX_ATTEMPTS, body.retry_max_attempts, owner.id)
     await session.commit()
     return await _payment_settings(session, settings, _app_providers(request))
 

@@ -50,6 +50,10 @@ INVOICE_LIFETIME = ShopSetting("payments.invoice_lifetime", _DURATION, timedelta
 # ещё 24 часа после (3.29)
 POLL_INTERVAL = ShopSetting("payments.poll_interval", _DURATION, timedelta(minutes=5))
 POLL_AFTER_EXPIRY = ShopSetting("payments.poll_after_expiry", _DURATION, timedelta(hours=24))
+# Пределы для админки. Спека их не задаёт — предложение для владельца (решение не
+# принято): опрос — от раза в минуту до раза в час; после истечения — от часа до недели
+POLL_INTERVAL_MINUTES = (1, 60)
+POLL_AFTER_EXPIRY_HOURS = (1, 168)
 
 # Состояния, в которых счёт ещё может быть оплачен с точки зрения магазина
 _OPEN_INVOICE = (
