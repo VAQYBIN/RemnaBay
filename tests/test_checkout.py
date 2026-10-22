@@ -21,6 +21,8 @@ from remnabay.domain.team import TeamMember, TeamRole
 from remnabay.journal import Subject, entries_for
 from remnabay.messaging import SendArgs
 from remnabay.payments import (
+    POLL_AFTER_EXPIRY,
+    POLL_INTERVAL,
     CatalogError,
     Checkout,
     ConnectionState,
@@ -473,6 +475,36 @@ async def test_3_29_polling_stops_24_hours_after_expiry(
 
     assert payment.state == PaymentState.PENDING
     assert (await _tasks(db_session)).count("payments.poll") == 1
+    assert "payment.polling_stopped" in await _actions(db_session, payment)
+
+
+async def test_3_29_poll_settings_apply_without_restart(
+    db_session: AsyncSession,
+    providers: Providers,
+    provider: FakeProvider,
+    client: Client,
+    tariff: Tariff,
+) -> None:
+    """3.29: опрос берёт настройки при каждом проходе: следующий опрос ставится через
+    новый интервал, а окно после истечения счёта — новое, без перезапуска."""
+    payment = await open_invoice(db_session, providers, _purchase(client, tariff), now=NOW)
+    payment.expires_at = datetime.now(UTC) - timedelta(hours=2)
+    await put_setting(db_session, POLL_INTERVAL, timedelta(minutes=12))
+    await _run(db_session, providers, poll_invoice, payment)
+
+    [*_, next_poll] = await db_session.scalars(
+        select(QueueTask).where(QueueTask.name == "payments.poll").order_by(QueueTask.id)
+    )
+    delay = next_poll.run_at - datetime.now(UTC)
+    assert timedelta(minutes=11) < delay <= timedelta(minutes=12)
+
+    # Окно сузили до часа — счёт истёк два часа назад, опрос прекращается
+    await put_setting(db_session, POLL_AFTER_EXPIRY, timedelta(hours=1))
+    assert payment.provider_payment_id is not None
+    provider.set(payment.provider_payment_id, ProviderStatus.SUCCEEDED)
+    await _run(db_session, providers, poll_invoice, payment)
+
+    assert payment.state == PaymentState.PENDING
     assert "payment.polling_stopped" in await _actions(db_session, payment)
 
 
