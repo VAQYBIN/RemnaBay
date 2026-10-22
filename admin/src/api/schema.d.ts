@@ -312,6 +312,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/settings/panel/intervals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Panel Intervals
+         * @description Интервал сверки (4.8) и время до уведомления о недоступности (4.13). Действуют
+         *     без перезапуска: воркер читает их при каждом планировании сверки и проверке связи.
+         */
+        put: operations["update_panel_intervals_api_admin_settings_panel_intervals_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/settings/panel/webhook-secret": {
         parameters: {
             query?: never;
@@ -610,9 +631,31 @@ export interface paths {
         get: operations["payment_settings_api_admin_settings_payment_get"];
         /**
          * Update Payment Settings
-         * @description Время жизни счёта (3.8).
+         * @description Время жизни счёта (3.8) и опрос неоплаченных счетов (3.29). Действуют сразу:
+         *     очередной опрос берёт значения из настроек.
          */
         put: operations["update_payment_settings_api_admin_settings_payment_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/settings/payment/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Retry Settings
+         * @description Повтор операций (4.14): воркер берёт окно и лимит попыток из настроек при каждом
+         *     решении о повторе — без перезапуска.
+         */
+        put: operations["update_retry_settings_api_admin_settings_payment_retry_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -2485,9 +2528,17 @@ export interface components {
             /** Error */
             error: ("unavailable" | "unauthorized" | "error" | "incompatible_version") | null;
         };
+        /** PanelIntervalsIn */
+        PanelIntervalsIn: {
+            /** Sync Interval Minutes */
+            sync_interval_minutes: number;
+            /** Outage Alert Minutes */
+            outage_alert_minutes: number;
+        };
         /**
          * PanelSettingsOut
-         * @description «Панель»: адрес и секрет вебхука для панели (1.9), префикс имён (решение 0057).
+         * @description «Панель»: адрес и секрет вебхука для панели (1.9), префикс имён (решение 0057),
+         *     интервал сверки (4.8) и время до уведомления о недоступности (4.13).
          */
         PanelSettingsOut: {
             /** Webhook Url */
@@ -2504,6 +2555,10 @@ export interface components {
             guide_refreshed_at: string | null;
             /** Webpage Allowed */
             webpage_allowed: boolean | null;
+            /** Sync Interval Minutes */
+            sync_interval_minutes: number;
+            /** Outage Alert Minutes */
+            outage_alert_minutes: number;
         };
         /**
          * PanelUserStatus
@@ -2539,6 +2594,7 @@ export interface components {
             payment: components["schemas"]["PaymentRow"];
             subscription: components["schemas"]["SubscriptionRef"] | null;
             snapshot: components["schemas"]["SnapshotOut"] | null;
+            promo: components["schemas"]["PaymentPromoOut"] | null;
             /** Paid Amount */
             paid_amount: string | null;
             /** Paid Currency */
@@ -2562,6 +2618,19 @@ export interface components {
             actions: components["schemas"]["_Action"][];
             /** Time Zone */
             time_zone: string;
+        };
+        /**
+         * PaymentPromoOut
+         * @description Промокод платежа (А5, 4.21): код, вид и скидка, зафиксированная в платеже.
+         */
+        PaymentPromoOut: {
+            /** Code */
+            code: string;
+            kind: components["schemas"]["PromoKind"];
+            /** Discount Percent */
+            discount_percent: number | null;
+            /** Discount Amount */
+            discount_amount: string;
         };
         /**
          * PaymentPurpose
@@ -2599,10 +2668,17 @@ export interface components {
              */
             waiting_panel: boolean;
         };
-        /** PaymentSettingsIn */
+        /**
+         * PaymentSettingsIn
+         * @description «Счёт»: время жизни (3.8) и опрос неоплаченных счетов (3.29).
+         */
         PaymentSettingsIn: {
             /** Invoice Lifetime Minutes */
             invoice_lifetime_minutes: number;
+            /** Poll Interval Minutes */
+            poll_interval_minutes: number;
+            /** Poll After Expiry Hours */
+            poll_after_expiry_hours: number;
         };
         /** PaymentSettingsOut */
         PaymentSettingsOut: {
@@ -2612,6 +2688,14 @@ export interface components {
             currency: string;
             /** Invoice Lifetime Minutes */
             invoice_lifetime_minutes: number;
+            /** Poll Interval Minutes */
+            poll_interval_minutes: number;
+            /** Poll After Expiry Hours */
+            poll_after_expiry_hours: number;
+            /** Retry Window Minutes */
+            retry_window_minutes: number;
+            /** Retry Max Attempts */
+            retry_max_attempts: number;
         };
         /**
          * PaymentState
@@ -2878,6 +2962,16 @@ export interface components {
              */
             result: "done" | "queued";
             card: components["schemas"]["ClientCardOut"];
+        };
+        /**
+         * RetrySettingsIn
+         * @description «Повтор операций» (4.14).
+         */
+        RetrySettingsIn: {
+            /** Retry Window Minutes */
+            retry_window_minutes: number;
+            /** Retry Max Attempts */
+            retry_max_attempts: number;
         };
         /**
          * RevenueOut
@@ -3872,6 +3966,39 @@ export interface operations {
             };
         };
     };
+    update_panel_intervals_api_admin_settings_panel_intervals_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PanelIntervalsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PanelSettingsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     update_webhook_secret_api_admin_settings_panel_webhook_secret_put: {
         parameters: {
             query?: never;
@@ -4472,6 +4599,39 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["PaymentSettingsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentSettingsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_retry_settings_api_admin_settings_payment_retry_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetrySettingsIn"];
             };
         };
         responses: {
