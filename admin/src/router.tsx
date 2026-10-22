@@ -22,6 +22,7 @@ import { PromoSettingsPage } from '@/pages/settings/PromoSettingsPage'
 import { ReminderSettingsPage } from '@/pages/settings/ReminderSettingsPage'
 import { SettingsLayout } from '@/pages/settings/SettingsLayout'
 import { ShopSettingsPage } from '@/pages/settings/ShopSettingsPage'
+import { TextsSettingsPage } from '@/pages/settings/TextsSettingsPage'
 import { TrialSettingsPage } from '@/pages/settings/TrialSettingsPage'
 import { TariffsPage } from '@/pages/TariffsPage'
 
@@ -51,6 +52,7 @@ export const router = createBrowserRouter(
           children: [
             { index: true, element: <Navigate to="brand" replace /> },
             { path: 'brand', Component: BrandSettingsPage },
+            { path: 'texts', Component: TextsSettingsPage },
             { path: 'payment', Component: PaymentSettingsPage },
             { path: 'trial', Component: TrialSettingsPage },
             { path: 'reminders', Component: ReminderSettingsPage },
