@@ -91,16 +91,49 @@ sed -i "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$(docker compose run --rm --no-deps 
 
 ### Сервер с панелью, Nginx панели
 
-Здесь предполагается Nginx из документации Remnawave: контейнер `remnawave-nginx`, файлы в `/opt/remnawave/nginx`, сертификаты от acme.sh. За этим Nginx работает панель, поэтому каждое изменение сначала проверяется, а потом применяется.
+Здесь предполагается Nginx из документации Remnawave: контейнер `remnawave-nginx`, файлы в `/opt/remnawave/nginx`. За этим Nginx работает панель, поэтому каждое изменение сначала проверяется, а потом применяется. Nginx ищет адрес магазина в момент запроса: пока магазин не запущен, панель работает как обычно, а магазин отвечает 502.
 
-1. Сделайте копии файлов, которые будете менять:
+Сначала сделайте копию конфига и посмотрите, какими сертификатами пользуется Nginx:
+
+```bash
+cd /opt/remnawave/nginx
+cp nginx.conf nginx.conf.bak && cp docker-compose.yml docker-compose.yml.bak
+docker exec remnawave-nginx nginx -T 2>/dev/null | grep -E 'ssl_certificate(_key)? ' | sort -u
+```
+
+Если сертификат панели выписан на все поддомены (wildcard, например `*.example.com`) и домен магазина — один из них, новый сертификат не нужен: подойдёт вариант **А**. Проверить, на какие имена выписан сертификат (путь — файл на сервере, который подключён в `docker-compose.yml` к пути из вывода выше):
+
+```bash
+openssl x509 -in /путь/к/fullchain.pem -noout -ext subjectAltName
+```
+
+Иначе — вариант **Б**: отдельный сертификат для домена магазина.
+
+#### А. Сертификат уже есть
+
+1. Допишите блоки магазина с путями сертификата из вывода `nginx -T` (пути внутри контейнера) и проверьте конфиг в работающем Nginx — проверка его не трогает:
 
    ```bash
-   cd /opt/remnawave/nginx
-   cp nginx.conf nginx.conf.bak && cp docker-compose.yml docker-compose.yml.bak
+   sed -e 's/shop.example.com/ВАШ_ДОМЕН/g' \
+       -e 's|/etc/nginx/ssl/remnabay_fullchain.pem|ПУТЬ_К_СЕРТИФИКАТУ|' \
+       -e 's|/etc/nginx/ssl/remnabay_privkey.key|ПУТЬ_К_КЛЮЧУ|' \
+       /opt/remnabay/panel-nginx.conf >> nginx.conf
+   docker exec remnawave-nginx nginx -t
    ```
 
-2. Выпустите сертификат для домена магазина так же, как для панели. Порт 8443 сервера должен быть открыт и свободен — acme.sh проверяет домен через него:
+   Дописывайте командой выше, а не сохранением файла из редактора: `nginx.conf` подключён в контейнер как отдельный файл, и после замены файла редактором контейнер продолжит видеть старый.
+
+2. Только если ответ — `syntax is ok` и `test is successful`, перечитайте конфиг без перезапуска:
+
+   ```bash
+   docker exec remnawave-nginx nginx -s reload
+   ```
+
+   Если проверка не прошла — верните копию (`cp nginx.conf.bak nginx.conf`) и ищите ошибку.
+
+#### Б. Новый сертификат для домена магазина
+
+1. Выпустите сертификат так же, как для панели. Пример для acme.sh из документации Remnawave; порт 8443 сервера должен быть открыт и свободен — acme.sh проверяет домен через него:
 
    ```bash
    acme.sh --issue --standalone -d 'shop.example.com' \
@@ -112,7 +145,7 @@ sed -i "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$(docker compose run --rm --no-deps 
 
    Не идите дальше, пока не увидите «Сертификат на месте»: без файлов сертификата Nginx не запустится, и панель станет недоступна.
 
-3. В `docker-compose.yml` добавьте файлы сертификата в `volumes` контейнера `remnawave-nginx`, а в `ports` — порт 80 для перенаправления с HTTP на HTTPS:
+2. В `docker-compose.yml` добавьте файлы сертификата в `volumes` контейнера `remnawave-nginx`. Порт 80 — по желанию: он нужен только для перенаправления с `http://` на `https://`.
 
    ```yaml
        volumes:
@@ -121,10 +154,10 @@ sed -i "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$(docker compose run --rm --no-deps 
            - ./remnabay_privkey.key:/etc/nginx/ssl/remnabay_privkey.key:ro
        ports:
            - '0.0.0.0:443:443'
-           - '0.0.0.0:80:80'
+           - '0.0.0.0:80:80'   # по желанию
    ```
 
-4. Допишите блоки магазина в конец `nginx.conf` и проверьте конфиг в отдельном временном контейнере — работающий Nginx при этом не трогается:
+3. Допишите блоки магазина и проверьте конфиг в отдельном временном контейнере — работающий Nginx при этом не трогается:
 
    ```bash
    sed 's/shop.example.com/ВАШ_ДОМЕН/g' /opt/remnabay/panel-nginx.conf >> nginx.conf
@@ -133,13 +166,11 @@ sed -i "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$(docker compose run --rm --no-deps 
 
    Должно быть `syntax is ok` и `test is successful`. Если нет — верните копии (`cp nginx.conf.bak nginx.conf && cp docker-compose.yml.bak docker-compose.yml`) и ищите ошибку.
 
-5. Примените изменения:
+4. Примените изменения. Новые файлы сертификата контейнер увидит только после пересоздания — панель на несколько секунд станет недоступна:
 
    ```bash
    docker compose up -d --force-recreate
    ```
-
-   Nginx ищет адрес магазина в момент запроса: пока магазин не запущен, панель работает как обычно, а магазин отвечает 502.
 
 ### Сервер с панелью, Caddy панели
 
