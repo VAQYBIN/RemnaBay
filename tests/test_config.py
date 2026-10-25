@@ -59,6 +59,11 @@ def test_1_1_all_missing_parameters_are_listed() -> None:
         ("PANEL_URL", "not a url", "ожидается адрес, например https://example.com"),
         ("PUBLIC_URL", "http://shop.example.com", "адрес должен начинаться с https://"),
         (
+            "PUBLIC_URL",
+            "shop.example.com",
+            "адрес должен начинаться с https://, например https://shop.example.com",
+        ),
+        (
             "DATABASE_URL",
             "postgresql+asyncpg://u:p@localhost/db",
             "поддерживается только postgresql:// или postgresql+psycopg://",
@@ -145,3 +150,42 @@ def test_0051_dev_mode_invalid_value_is_named(monkeypatch: pytest.MonkeyPatch) -
         load_settings(env_file=None)
 
     assert exc_info.value.problems == ["DEV_MODE: ожидается true или false"]
+
+
+@pytest.mark.usefixtures("valid_env")
+def test_1_28_telegram_proxy_is_optional() -> None:
+    """1.28: без прокси для Telegram магазин запускается, запросы идут напрямую."""
+    assert load_settings(env_file=None).telegram_proxy_url is None
+
+
+@pytest.mark.parametrize(
+    "proxy",
+    ["http://127.0.0.1:3128", "socks5://127.0.0.1:1080", "socks5://user:secret@proxy.local:1080"],
+)
+@pytest.mark.usefixtures("valid_env")
+def test_1_28_telegram_proxy_http_and_socks5(monkeypatch: pytest.MonkeyPatch, proxy: str) -> None:
+    """1.28, решение 0074: принимаются HTTP-прокси и SOCKS5, с логином и паролем и без."""
+    monkeypatch.setenv("TELEGRAM_PROXY", proxy)
+
+    url = load_settings(env_file=None).telegram_proxy_url
+
+    assert url is not None
+    assert url.rstrip("/") == proxy
+
+
+@pytest.mark.parametrize(
+    "proxy",
+    ["https://proxy.local:443", "socks4://127.0.0.1:1080", "socks5://127.0.0.1", "127.0.0.1:1080"],
+)
+@pytest.mark.usefixtures("valid_env")
+def test_1_1_1_28_invalid_telegram_proxy_is_named(
+    monkeypatch: pytest.MonkeyPatch, proxy: str
+) -> None:
+    """1.1, 1.28: неверный адрес прокси — магазин не запускается и называет параметр."""
+    monkeypatch.setenv("TELEGRAM_PROXY", proxy)
+
+    with pytest.raises(ConfigError) as exc_info:
+        load_settings(env_file=None)
+
+    [problem] = exc_info.value.problems
+    assert problem.startswith("TELEGRAM_PROXY: ожидается адрес прокси http://хост:порт")

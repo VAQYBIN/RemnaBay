@@ -2,7 +2,7 @@ import { Link } from 'react-router'
 
 import { $api } from '@/api/client'
 import { Module } from '@/components/frame/Module'
-import { formatDateTime } from '@/lib/format'
+import { PanelConnection } from '@/components/PanelConnection'
 import { cn } from '@/lib/utils'
 
 const STATES = {
@@ -31,26 +31,7 @@ export function OverviewModule({ timeZone }: { timeZone: string }) {
             <p className="tabular text-2xl font-semibold">{data.waiting_panel}</p>
           </Link>
         </div>
-        <dl className="grid gap-2 text-sm">
-          <div className="flex justify-between gap-3">
-            <dt className="text-muted-foreground">Панель</dt>
-            <dd className={data.panel_available ? 'text-success-text' : 'text-danger-text'}>
-              {data.panel_available ? 'на связи' : 'недоступна'}
-            </dd>
-          </div>
-          <div className="flex justify-between gap-3">
-            <dt className="text-muted-foreground">Последнее событие</dt>
-            <dd className="tabular">
-              {data.last_panel_event_at ? formatDateTime(data.last_panel_event_at, timeZone) : 'ещё не было'}
-            </dd>
-          </div>
-          <div className="flex justify-between gap-3">
-            <dt className="text-muted-foreground">Сверка запускалась</dt>
-            <dd className="tabular">
-              {data.last_sync_at ? formatDateTime(data.last_sync_at, timeZone) : 'ещё не было'}
-            </dd>
-          </div>
-        </dl>
+        <PanelConnection overview={data} timeZone={timeZone} />
       </div>
     </Module>
   )

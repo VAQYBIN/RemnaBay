@@ -6,7 +6,6 @@ from contextlib import suppress
 from datetime import timedelta
 
 from aiogram import Bot, Dispatcher
-from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.session.base import BaseSession
 from aiogram.exceptions import AiogramError
 
@@ -18,6 +17,7 @@ from remnabay.bot._context import (
     SessionFactory,
     context_middleware,
 )
+from remnabay.messaging import TelegramSession
 from remnabay.panel import PanelClient
 from remnabay.payments import Providers
 
@@ -28,8 +28,11 @@ REQUEST_TIMEOUT = timedelta(seconds=10)
 logger = logging.getLogger(__name__)
 
 
-def create_bot(token: str, *, session: BaseSession | None = None) -> Bot:
-    return Bot(token, session=session or AiohttpSession(timeout=REQUEST_TIMEOUT.total_seconds()))
+def create_bot(token: str, *, proxy: str | None = None, session: BaseSession | None = None) -> Bot:
+    """Бот веба. `proxy` — прокси для запросов к Telegram (1.28, 0074)."""
+    if session is None:
+        session = TelegramSession(timeout=REQUEST_TIMEOUT, proxy=proxy)
+    return Bot(token, session=session)
 
 
 def create_dispatcher(

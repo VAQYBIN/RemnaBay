@@ -4,12 +4,12 @@ import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 
 import { $api, errorMessage, type Schemas } from '@/api/client'
+import { Chip } from '@/components/Chip'
 import { Module, PageTitle } from '@/components/frame/Module'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { formatDateTime, formatMoney } from '@/lib/format'
 import { clientLabel, operationName, PAYMENT_STATES, PURPOSES } from '@/lib/payments'
-import { cn } from '@/lib/utils'
 
 import { CommentDialog } from './CommentDialog'
 
@@ -38,21 +38,6 @@ const PERIODS = [
   { days: 7, label: '7 дней' },
   { days: 30, label: '30 дней' },
 ] as const
-
-function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: string }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        'shrink-0 rounded-full px-3 py-1 text-sm transition-colors',
-        active ? 'bg-brand-soft font-medium text-brand-text' : 'text-muted-foreground hover:bg-muted',
-      )}
-    >
-      {children}
-    </button>
-  )
-}
 
 /** Строка платежа: клиент, что оплачено, сумма, состояние; ведёт в карточку (А5). */
 function PaymentRowItem({ row, timeZone }: { row: Row; timeZone: string }) {

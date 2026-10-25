@@ -1,0 +1,19 @@
+# RemnaBay на чистом сервере за Caddy в контейнере (решение 0026).
+# Монтируется в контейнер Caddy из compose.yaml этой папки; домен — SHOP_DOMAIN в .env.
+# Сертификат и перенаправление с HTTP на HTTPS Caddy делает сам.
+
+{$SHOP_DOMAIN} {
+	# Файл миграции — до 50 МБ, логотип — до 1 МБ
+	request_body {
+		max_size 60MB
+	}
+
+	# Host, X-Forwarded-For и X-Forwarded-Proto Caddy передаёт сам
+	reverse_proxy web:8000 {
+		header_up X-Real-IP {remote_host}
+		transport http {
+			dial_timeout 10s
+			response_header_timeout 120s
+		}
+	}
+}

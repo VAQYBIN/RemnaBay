@@ -43,7 +43,7 @@ function requiredVersion(supported: string[]): string {
     .join(' или ')
 }
 
-function panelText(item: Item): string {
+export function panelText(item: Item): string {
   const details = item.panel
   if (!details) return ''
   switch (details.error) {

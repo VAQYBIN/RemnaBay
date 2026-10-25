@@ -179,6 +179,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/settings/texts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Bot Texts
+         * @description Все тексты, сгруппированные по экранам, в порядке 03-bot-texts.md (1.29).
+         *     Язык не указан — язык бота по умолчанию.
+         */
+        get: operations["bot_texts_api_admin_settings_texts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/settings/texts/{language}/{key}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Bot Text
+         * @description Предпросмотр до сохранения (1.29): ошибка — не отказ, а пояснение рядом с полем.
+         */
+        post: operations["preview_bot_text_api_admin_settings_texts__language___key__preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/settings/texts/{language}/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Bot Text
+         * @description Сохранение: только текст, который прошёл ту же проверку, что предпросмотр (1.29).
+         *     Изменение — в журнал (4.25).
+         */
+        put: operations["save_bot_text_api_admin_settings_texts__language___key__put"];
+        post?: never;
+        /**
+         * Reset Bot Text
+         * @description Сброс к тексту по умолчанию (1.29); в журнал (4.25).
+         */
+        delete: operations["reset_bot_text_api_admin_settings_texts__language___key__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/checklist": {
         parameters: {
             query?: never;
@@ -305,6 +371,27 @@ export interface paths {
         /** Panel Settings */
         get: operations["panel_settings_api_admin_settings_panel_get"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/settings/panel/intervals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Panel Intervals
+         * @description Интервал сверки (4.8) и время до уведомления о недоступности (4.13). Действуют
+         *     без перезапуска: воркер читает их при каждом планировании сверки и проверке связи.
+         */
+        put: operations["update_panel_intervals_api_admin_settings_panel_intervals_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -610,9 +697,31 @@ export interface paths {
         get: operations["payment_settings_api_admin_settings_payment_get"];
         /**
          * Update Payment Settings
-         * @description Время жизни счёта (3.8).
+         * @description Время жизни счёта (3.8) и опрос неоплаченных счетов (3.29). Действуют сразу:
+         *     очередной опрос берёт значения из настроек.
          */
         put: operations["update_payment_settings_api_admin_settings_payment_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/settings/payment/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Retry Settings
+         * @description Повтор операций (4.14): воркер берёт окно и лимит попыток из настроек при каждом
+         *     решении о повторе — без перезапуска.
+         */
+        put: operations["update_retry_settings_api_admin_settings_payment_retry_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -638,6 +747,9 @@ export interface paths {
          * Disconnect Provider
          * @description Отключить провайдера: новые счета через него не создаются. Уже созданные счета
          *     опрашиваются, пока ключи есть, — без ключей оплату найдёт команда.
+         *
+         *     Если клиенты ещё могут оплатить счета провайдера, без `confirm_payable` — отказ
+         *     с их числом: владелец должен увидеть предупреждение (3.42).
          */
         delete: operations["disconnect_provider_api_admin_settings_payment_providers__code__delete"];
         options?: never;
@@ -1507,6 +1619,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/journal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Journal List
+         * @description А10 (4.35): записи журнала, новые сверху, по `PAGE_SIZE` на страницу.
+         *
+         *     Фильтры: кто (`actor_type`), что (`action` — одно действие или `action_group` —
+         *     все действия группы, например `payment`), над чем (`subject_type`, `none` — записи
+         *     без объекта, и при желании `subject_id`), период (`period` — сегодня, 7 или 30 дней,
+         *     как на главной, или `since`, `until` — даты; всё в часовом поясе магазина, 1.18),
+         *     результат (`outcome`). `before` — id последней записи
+         *     предыдущей страницы.
+         */
+        get: operations["journal_list_api_admin_journal_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/about": {
         parameters: {
             query?: never;
@@ -1692,6 +1831,36 @@ export interface components {
             tariff_id: number;
             /** Subscription Id */
             subscription_id?: number | null;
+        };
+        /** BotTextIn */
+        BotTextIn: {
+            /** Text */
+            text: string;
+        };
+        /** BotTextOut */
+        BotTextOut: {
+            /** Key */
+            key: string;
+            /** Default */
+            default: string;
+            /** Text */
+            text: string;
+            /** Changed */
+            changed: boolean;
+            /** Variables */
+            variables: string[];
+            kind: components["schemas"]["TextKind"];
+            /** Plural Counts */
+            plural_counts?: number[] | null;
+        };
+        /** BotTextsOut */
+        BotTextsOut: {
+            /** Language */
+            language: string;
+            /** Languages */
+            languages: string[];
+            /** Groups */
+            groups: components["schemas"]["TextGroupOut"][];
         };
         /** BrandDetailsOut */
         BrandDetailsOut: {
@@ -2180,6 +2349,50 @@ export interface components {
                 [key: string]: components["schemas"]["JsonValue"];
             };
         };
+        /** JournalPageOut */
+        JournalPageOut: {
+            /** Entries */
+            entries: components["schemas"]["JournalRowOut"][];
+            /** Next Before */
+            next_before: number | null;
+            /** Time Zone */
+            time_zone: string;
+        };
+        /** JournalRowOut */
+        JournalRowOut: {
+            /** Id */
+            id: number;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            actor_type: components["schemas"]["ActorType"];
+            /** Actor */
+            actor: string | null;
+            actor_client: components["schemas"]["ClientRef"] | null;
+            /** Action */
+            action: string;
+            outcome: components["schemas"]["Outcome"];
+            subject: components["schemas"]["JournalSubjectOut"] | null;
+            /** Details */
+            details: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+        };
+        /**
+         * JournalSubjectOut
+         * @description Над чем: вид и id объекта и то, что помогает его узнать и открыть.
+         */
+        JournalSubjectOut: {
+            /** Type */
+            type: string;
+            /** Id */
+            id: string;
+            client: components["schemas"]["ClientRef"] | null;
+            /** Name */
+            name: string | null;
+        };
         JsonValue: string | number | boolean | components["schemas"]["JsonValue"][] | {
             [key: string]: components["schemas"]["JsonValue"];
         } | null;
@@ -2482,9 +2695,17 @@ export interface components {
             /** Error */
             error: ("unavailable" | "unauthorized" | "error" | "incompatible_version") | null;
         };
+        /** PanelIntervalsIn */
+        PanelIntervalsIn: {
+            /** Sync Interval Minutes */
+            sync_interval_minutes: number;
+            /** Outage Alert Minutes */
+            outage_alert_minutes: number;
+        };
         /**
          * PanelSettingsOut
-         * @description «Панель»: адрес и секрет вебхука для панели (1.9), префикс имён (решение 0057).
+         * @description «Панель»: адрес и секрет вебхука для панели (1.9), префикс имён (решение 0057),
+         *     интервал сверки (4.8) и время до уведомления о недоступности (4.13).
          */
         PanelSettingsOut: {
             /** Webhook Url */
@@ -2501,6 +2722,10 @@ export interface components {
             guide_refreshed_at: string | null;
             /** Webpage Allowed */
             webpage_allowed: boolean | null;
+            /** Sync Interval Minutes */
+            sync_interval_minutes: number;
+            /** Outage Alert Minutes */
+            outage_alert_minutes: number;
         };
         /**
          * PanelUserStatus
@@ -2508,11 +2733,35 @@ export interface components {
          * @enum {string}
          */
         PanelUserStatus: "active" | "disabled" | "limited" | "expired";
+        /**
+         * PayableInvoicesOut
+         * @description У клиентов есть счета провайдера, которые ещё могут оплатить (3.42).
+         */
+        PayableInvoicesOut: {
+            /**
+             * Reason
+             * @default payable_invoices
+             * @constant
+             */
+            reason: "payable_invoices";
+            /** Message */
+            message: string;
+            /** Count */
+            count: number;
+            /**
+             * Window Ends At
+             * Format: date-time
+             */
+            window_ends_at: string;
+            /** Time Zone */
+            time_zone: string;
+        };
         /** PaymentCardOut */
         PaymentCardOut: {
             payment: components["schemas"]["PaymentRow"];
             subscription: components["schemas"]["SubscriptionRef"] | null;
             snapshot: components["schemas"]["SnapshotOut"] | null;
+            promo: components["schemas"]["PaymentPromoOut"] | null;
             /** Paid Amount */
             paid_amount: string | null;
             /** Paid Currency */
@@ -2536,6 +2785,19 @@ export interface components {
             actions: components["schemas"]["_Action"][];
             /** Time Zone */
             time_zone: string;
+        };
+        /**
+         * PaymentPromoOut
+         * @description Промокод платежа (А5, 4.21): код, вид и скидка, зафиксированная в платеже.
+         */
+        PaymentPromoOut: {
+            /** Code */
+            code: string;
+            kind: components["schemas"]["PromoKind"];
+            /** Discount Percent */
+            discount_percent: number | null;
+            /** Discount Amount */
+            discount_amount: string;
         };
         /**
          * PaymentPurpose
@@ -2573,10 +2835,17 @@ export interface components {
              */
             waiting_panel: boolean;
         };
-        /** PaymentSettingsIn */
+        /**
+         * PaymentSettingsIn
+         * @description «Счёт»: время жизни (3.8) и опрос неоплаченных счетов (3.29).
+         */
         PaymentSettingsIn: {
             /** Invoice Lifetime Minutes */
             invoice_lifetime_minutes: number;
+            /** Poll Interval Minutes */
+            poll_interval_minutes: number;
+            /** Poll After Expiry Hours */
+            poll_after_expiry_hours: number;
         };
         /** PaymentSettingsOut */
         PaymentSettingsOut: {
@@ -2586,6 +2855,14 @@ export interface components {
             currency: string;
             /** Invoice Lifetime Minutes */
             invoice_lifetime_minutes: number;
+            /** Poll Interval Minutes */
+            poll_interval_minutes: number;
+            /** Poll After Expiry Hours */
+            poll_after_expiry_hours: number;
+            /** Retry Window Minutes */
+            retry_window_minutes: number;
+            /** Retry Max Attempts */
+            retry_max_attempts: number;
         };
         /**
          * PaymentState
@@ -2852,6 +3129,16 @@ export interface components {
              */
             result: "done" | "queued";
             card: components["schemas"]["ClientCardOut"];
+        };
+        /**
+         * RetrySettingsIn
+         * @description «Повтор операций» (4.14).
+         */
+        RetrySettingsIn: {
+            /** Retry Window Minutes */
+            retry_window_minutes: number;
+            /** Retry Max Attempts */
+            retry_max_attempts: number;
         };
         /**
          * RevenueOut
@@ -3197,6 +3484,33 @@ export interface components {
             avatar_sha256?: string | null;
             /** Error */
             error?: string | null;
+        };
+        /** TextGroupOut */
+        TextGroupOut: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Section */
+            section: string | null;
+            /** Texts */
+            texts: components["schemas"]["BotTextOut"][];
+        };
+        /**
+         * TextKind
+         * @description Где клиент видит текст — от этого зависят предпросмотр и ограничение длины.
+         * @enum {string}
+         */
+        TextKind: "message" | "button" | "command" | "page";
+        /**
+         * TextPreviewOut
+         * @description Текст так, как его получит клиент, или что в нём не так (1.29).
+         */
+        TextPreviewOut: {
+            /** Text */
+            text: string | null;
+            /** Problem */
+            problem: string | null;
         };
         /**
          * TokensOut
@@ -3631,6 +3945,141 @@ export interface operations {
             };
         };
     };
+    bot_texts_api_admin_settings_texts_get: {
+        parameters: {
+            query?: {
+                language?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotTextsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_bot_text_api_admin_settings_texts__language___key__preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                language: string;
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BotTextIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TextPreviewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_bot_text_api_admin_settings_texts__language___key__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                language: string;
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BotTextIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotTextOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_bot_text_api_admin_settings_texts__language___key__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                language: string;
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotTextOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     checklist_api_admin_checklist_get: {
         parameters: {
             query?: never;
@@ -3842,6 +4291,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PanelSettingsOut"];
+                };
+            };
+        };
+    };
+    update_panel_intervals_api_admin_settings_panel_intervals_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PanelIntervalsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PanelSettingsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -4469,6 +4951,39 @@ export interface operations {
             };
         };
     };
+    update_retry_settings_api_admin_settings_payment_retry_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetrySettingsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentSettingsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     connect_provider_api_admin_settings_payment_providers__code__put: {
         parameters: {
             query?: never;
@@ -4522,7 +5037,9 @@ export interface operations {
     };
     disconnect_provider_api_admin_settings_payment_providers__code__delete: {
         parameters: {
-            query?: never;
+            query?: {
+                confirm_payable?: boolean;
+            };
             header?: never;
             path: {
                 code: string;
@@ -4546,6 +5063,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PayableInvoicesOut"];
+                };
             };
             /** @description Validation Error */
             422: {
@@ -6423,6 +6949,53 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    journal_list_api_admin_journal_get: {
+        parameters: {
+            query?: {
+                actor_type?: components["schemas"]["ActorType"] | null;
+                action?: string | null;
+                action_group?: string | null;
+                subject_type?: string | null;
+                subject_id?: string | null;
+                outcome?: components["schemas"]["Outcome"] | null;
+                period?: components["schemas"]["Period"] | null;
+                since?: string | null;
+                until?: string | null;
+                before?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JournalPageOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

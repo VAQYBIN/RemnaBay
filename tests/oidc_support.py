@@ -83,11 +83,15 @@ class FakeTelegramOidc:
     response: dict[str, Any] | None = None
     # Подпись испорчена: токен подделан
     tamper: bool = False
+    # Нет связи с Telegram с сервера магазина (1.28)
+    unreachable: bool = False
 
     def remember(self, code: str, nonce: str) -> None:
         self.nonces[code] = nonce
 
     def handle(self, request: httpx2.Request) -> httpx2.Response:
+        if self.unreachable:
+            raise httpx2.ConnectTimeout("timed out", request=request)
         url = str(request.url)
         if url == JWKS_URL:
             return httpx2.Response(200, json=jwks())

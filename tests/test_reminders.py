@@ -634,6 +634,61 @@ async def test_7_18_term_shortened_to_past_sends_no_expired(world: World) -> Non
     assert await world.reminders(subscription) == {72: SKIPPED, 24: SKIPPED, 0: SKIPPED, -72: S}
 
 
+async def _learn_end(
+    world: World, subscription: Subscription, end: datetime, ago: timedelta
+) -> None:
+    """Магазин узнал новую дату окончания `ago` назад (вебхук или сверка), а проход
+    планирования до неё ещё не дошёл."""
+    subscription.expires_at = end
+    subscription.panel_synced_at = _now() - ago
+    world.panel_user(subscription)["expireAt"] = _iso(end)
+    await world.session.flush()
+
+
+async def test_7_9_7_18_date_learned_before_moment_is_sent_after_late_planning(
+    world: World,
+) -> None:
+    """7.9, 7.18: в панели поставили окончание «через 24 часа и ещё немного» — момент
+    «за 24 часа» наступил до ближайшего прохода планирования. Он не «уже прошёл, когда
+    магазин его планирует»: магазин узнал дату раньше, и напоминание приходит."""
+    subscription = await world.subscription(timedelta(days=10))
+    await world.plan_long_ago()
+    end = _now() + timedelta(hours=24) - timedelta(seconds=20)
+    await _learn_end(world, subscription, end, ago=timedelta(minutes=1))
+
+    messages = await world.tick()
+
+    assert [message.text_key for message in messages] == ["reminder.before"]
+    assert (await world.reminders(subscription))[24] == SENT
+
+
+async def test_7_18_date_learned_long_ago_does_not_revive_past_moments(world: World) -> None:
+    """7.18: дату узнали давно, а планируют только сейчас (например, первый запуск) —
+    давно прошедший момент не отправляется: отсчёт от «узнал» ограничен минутами."""
+    subscription = await world.subscription(timedelta(days=10))
+    end = _now() + timedelta(hours=24) - timedelta(minutes=30)
+    await _learn_end(world, subscription, end, ago=timedelta(days=1))
+
+    assert await world.tick() == []
+    assert (await world.reminders(subscription))[24] == SKIPPED
+
+
+async def test_7_6_7_9_cancelled_reminders_are_planned_again_for_same_date(world: World) -> None:
+    """7.6, 7.9: напоминания по дате отменили (проверка с панелью перед отправкой или
+    дату меняли и вернули), а дата окончания снова та же — они планируются заново, а не
+    пропадают навсегда."""
+    subscription = await world.subscription(timedelta(days=10))
+    await world.plan_long_ago()
+    await world.session.execute(
+        update(Reminder)
+        .where(Reminder.subscription_id == subscription.id)
+        .values(state=ReminderState.CANCELLED)
+    )
+
+    assert await world.tick() == []
+    assert await world.reminders(subscription) == {72: S, 24: S, 0: S, -72: S}
+
+
 async def test_package_only_and_deleted_subscriptions_get_nothing(world: World) -> None:
     """Сценарий «Истечение подписки»: у «только пакет» нет напоминаний по сроку; удалённая
     в панели подписка их тоже не получает (4.6)."""
