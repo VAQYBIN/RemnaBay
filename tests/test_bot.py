@@ -168,6 +168,7 @@ async def test_0051_webhook_without_secret_is_rejected(shop: Shop, header: str |
 
 NO_PAUSE = WebhookRetry(first=timedelta(0), longest=timedelta(0))
 WEBHOOK_URL = "https://shop.example.com/webhooks/telegram"
+WEBHOOK_SECRET = "webhook-secret"  # noqa: S105 — значение для теста
 
 
 async def test_0076_webhook_registration_retried_until_telegram_answers(shop: Shop) -> None:
@@ -176,12 +177,12 @@ async def test_0076_webhook_registration_retried_until_telegram_answers(shop: Sh
     shop.telegram.failures[SetWebhook] = TelegramNetworkError(setting, "Request timeout error")
     status = BotWebhookStatus()
 
-    await register_webhook(shop.bot, shop.dispatcher, WEBHOOK_URL, "secret", status, NO_PAUSE)
+    await register_webhook(shop.bot, shop.dispatcher, WEBHOOK_URL, WEBHOOK_SECRET, status, NO_PAUSE)
 
     attempts = [r for r in shop.telegram.requests if isinstance(r, SetWebhook)]
     assert len(attempts) == 2
     assert attempts[-1].url == WEBHOOK_URL
-    assert attempts[-1].secret_token == "secret"
+    assert attempts[-1].secret_token == WEBHOOK_SECRET
     assert status == BotWebhookStatus(registered=True)
 
 
@@ -195,7 +196,7 @@ async def test_0076_webhook_problem_kept_until_success(shop: Shop) -> None:
     retry = WebhookRetry(first=timedelta(hours=1))
 
     task = asyncio.create_task(
-        register_webhook(shop.bot, shop.dispatcher, WEBHOOK_URL, "secret", status, retry)
+        register_webhook(shop.bot, shop.dispatcher, WEBHOOK_URL, WEBHOOK_SECRET, status, retry)
     )
     for _ in range(10):
         await asyncio.sleep(0)

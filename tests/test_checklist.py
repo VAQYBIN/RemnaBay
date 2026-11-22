@@ -189,7 +189,11 @@ async def test_1_7_bot_webhook_shows_why_not_registered(shop: Shop, owner: TeamM
 
     status.problem, status.message = WebhookProblem.REJECTED, "Bad Request: bad webhook"
     rejected = (await _items(shop))["bot_webhook"]["bot_webhook"]
-    assert rejected == {"polling": False, "problem": "rejected", "message": "Bad Request: bad webhook"}
+    assert rejected == {
+        "polling": False,
+        "problem": "rejected",
+        "message": "Bad Request: bad webhook",
+    }
 
     status.registered, status.problem, status.message = True, None, None
     assert (await _items(shop))["bot_webhook"]["status"] == "done"
