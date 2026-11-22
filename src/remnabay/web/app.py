@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 from collections.abc import AsyncGenerator, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Literal
@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from remnabay.access import TelegramOidc, ensure_owner
 from remnabay.bot import (
     TELEGRAM_WEBHOOK_PATH,
+    BotWebhookStatus,
     Polling,
     create_bot,
     create_dispatcher,
@@ -128,10 +129,13 @@ def create_app(
         panel=panel,
         shop_url=settings.public_link(""),
     )
+    # Пункт «Вебхук бота» в чек-листе
+    bot_webhook = BotWebhookStatus()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         polling: Polling | None = None
+        registering: asyncio.Task[None] | None = None
         if startup:
             async with sessions() as session:
                 await ensure_owner(session, settings.owner_telegram_id)
@@ -140,13 +144,19 @@ def create_app(
             if settings.dev_mode:
                 polling = Polling(bot, dispatcher)
                 await polling.start()
+                bot_webhook.polling = True
             else:
                 url = settings.public_link(TELEGRAM_WEBHOOK_PATH)
-                await register_webhook(bot, dispatcher, url, secret)
+                registering = asyncio.create_task(
+                    register_webhook(bot, dispatcher, url, secret, bot_webhook)
+                )
         watching = asyncio.create_task(_watch_database(engine, watchdog)) if watchdog else None
         yield
-        if watching is not None:
-            watching.cancel()
+        for task in (watching, registering):
+            if task is not None:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
         if polling is not None:
             await polling.stop()
         await bot.session.close()
@@ -169,6 +179,7 @@ def create_app(
     app.state.box = box
     app.state.bot = bot
     app.state.dispatcher = dispatcher
+    app.state.bot_webhook = bot_webhook
     app.state.panel = panel
     app.state.oidc = oidc
     app.state.providers = providers

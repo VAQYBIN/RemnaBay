@@ -14,6 +14,7 @@ from pydantic import JsonValue
 from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from remnabay.bot import BotWebhookStatus
 from remnabay.brand import AssetKind, asset_versions, brand_name
 from remnabay.domain.tariffs import Tariff, TariffState
 from remnabay.panel import (
@@ -43,6 +44,8 @@ PANEL_CHECK_TIMEOUT = timedelta(seconds=5)
 class ItemKey(StrEnum):
     PANEL = "panel"
     WEBHOOK = "webhook"
+    # Вебхук бота в Telegram: состояние, а не настройка; открытие не блокирует
+    BOT_WEBHOOK = "bot_webhook"
     DEVICE_LIMIT = "device_limit"
     BRAND = "brand"
     TARIFFS = "tariffs"
@@ -149,6 +152,21 @@ def _device_limit_item(facts: _PanelFacts) -> ChecklistItem:
     return ChecklistItem(ItemKey.DEVICE_LIMIT, ItemStatus.WARNING)
 
 
+def _bot_webhook_item(status: BotWebhookStatus) -> ChecklistItem:
+    """Выполнен, когда вебхук зарегистрирован в Telegram (или бот опрашивает его при
+    разработке); иначе — причина: нет связи с Telegram или его отказ."""
+    done = status.registered or status.polling
+    return ChecklistItem(
+        ItemKey.BOT_WEBHOOK,
+        ItemStatus.DONE if done else ItemStatus.TODO,
+        {
+            "polling": status.polling,
+            "problem": status.problem.value if status.problem else None,
+            "message": status.message,
+        },
+    )
+
+
 def _prefix_item(prefix: str, locked: bool) -> ChecklistItem:
     """Решение 0057: необязательный пункт; выполнен, когда префикс зафиксирован."""
     return ChecklistItem(
@@ -170,6 +188,7 @@ async def build_checklist(
     *,
     webhook_url: str,
     webhook_secret: str | None,
+    bot_webhook: BotWebhookStatus,
     dev_mode: bool,
     providers: Providers,
 ) -> Checklist:
@@ -189,6 +208,7 @@ async def build_checklist(
             ItemStatus.DONE if received else ItemStatus.TODO,
             {"url": webhook_url, "secret": webhook_secret},
         ),
+        _bot_webhook_item(bot_webhook),
         _device_limit_item(facts),
         # 1.11: название и квадратный знак
         ChecklistItem(

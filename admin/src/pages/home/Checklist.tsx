@@ -24,6 +24,7 @@ type Checklist = Schemas['ChecklistOut']
 const TITLES: Record<Item['key'], string> = {
   panel: 'Подключение к панели',
   webhook: 'Вебхук панели',
+  bot_webhook: 'Вебхук бота',
   device_limit: 'Лимит устройств в панели',
   brand: 'Бренд',
   tariffs: 'Тарифы',
@@ -83,6 +84,27 @@ function Body({ item, isOwner }: { item: Item; isOwner: boolean }) {
           )}
         </div>
       )
+    case 'bot_webhook': {
+      const details = item.bot_webhook
+      if (details?.polling) return <p>Режим разработки: бот опрашивает Telegram, вебхук не нужен.</p>
+      if (item.status === 'done') return <p>Вебхук зарегистрирован: сообщения клиентов приходят боту.</p>
+      if (details?.problem === 'network')
+        return (
+          <p>
+            Нет связи с Telegram с сервера магазина, бот не отвечает клиентам. Если сервер в РФ, задайте
+            прокси в TELEGRAM_PROXY в .env. Магазин повторяет попытки сам: когда связь появится, вебхук
+            зарегистрируется без перезапуска.
+          </p>
+        )
+      if (details?.problem === 'rejected')
+        return (
+          <p>
+            Telegram отклонил вебхук{details.message ? `: ${details.message}` : ''}. Магазин повторяет
+            попытки сам; подробности — в логе веба.
+          </p>
+        )
+      return <p>Вебхук регистрируется в Telegram…</p>
+    }
     case 'device_limit':
       if (item.status === 'done') return <p>Лимит устройств включён.</p>
       if (item.status === 'warning')

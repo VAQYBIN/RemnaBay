@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from remnabay.bot import BotWebhookStatus, WebhookProblem
 from remnabay.domain.panel_events import PanelEvent
 from remnabay.domain.tariffs import TariffState
 from remnabay.domain.team import TeamMember, TeamRole
@@ -21,6 +22,7 @@ from tests.web_support import Shop, running_shop
 ITEMS = [
     "panel",
     "webhook",
+    "bot_webhook",
     "device_limit",
     "brand",
     "tariffs",
@@ -76,6 +78,7 @@ async def test_1_7_checklist_shows_every_item(shop: Shop, owner: TeamMember) -> 
     assert statuses == {
         "panel": "done",
         "webhook": "todo",
+        "bot_webhook": "todo",
         "device_limit": "done",
         "brand": "todo",
         "tariffs": "todo",
@@ -165,6 +168,54 @@ async def test_1_9_assistant_does_not_see_secret(shop: Shop) -> None:
     webhook = (await _items(shop))["webhook"]
 
     assert webhook["webhook"]["secret"] is None
+
+
+def _bot_webhook(shop: Shop) -> BotWebhookStatus:
+    status: BotWebhookStatus = shop.app.state.bot_webhook
+    return status
+
+
+async def test_1_7_bot_webhook_shows_why_not_registered(shop: Shop, owner: TeamMember) -> None:
+    """1.7, 0076: «Вебхук бота» не выполнен, пока Telegram не принял вебхук, и называет причину."""
+    del owner
+    item = (await _items(shop))["bot_webhook"]
+    assert item["status"] == "todo"
+    assert item["required"] is False
+    assert item["bot_webhook"] == {"polling": False, "problem": None, "message": None}
+
+    status = _bot_webhook(shop)
+    status.problem = WebhookProblem.NETWORK
+    assert (await _items(shop))["bot_webhook"]["bot_webhook"]["problem"] == "network"
+
+    status.problem, status.message = WebhookProblem.REJECTED, "Bad Request: bad webhook"
+    rejected = (await _items(shop))["bot_webhook"]["bot_webhook"]
+    assert rejected == {"polling": False, "problem": "rejected", "message": "Bad Request: bad webhook"}
+
+    status.registered, status.problem, status.message = True, None, None
+    assert (await _items(shop))["bot_webhook"]["status"] == "done"
+
+
+async def test_1_7_bot_webhook_not_needed_when_polling(shop: Shop, owner: TeamMember) -> None:
+    """1.7, 0051: при разработке бот опрашивает Telegram — пункт выполнен."""
+    del owner
+    _bot_webhook(shop).polling = True
+
+    item = (await _items(shop))["bot_webhook"]
+
+    assert item["status"] == "done"
+    assert item["bot_webhook"]["polling"] is True
+
+
+@pytest.mark.usefixtures("payments_ready")
+async def test_1_7_bot_webhook_does_not_block_opening(shop: Shop, owner: TeamMember) -> None:
+    """1.7, 1.14: незарегистрированный вебхук бота открытие не блокирует."""
+    del owner
+    _bot_webhook(shop).problem = WebhookProblem.NETWORK
+    await _tariff_on_sale(shop)
+
+    response = await shop.http.post("/api/admin/shop/open")
+
+    assert response.status_code == 200
 
 
 @pytest.mark.parametrize("hwid", [False, None])
@@ -286,6 +337,9 @@ async def test_1_15_checklist_complete_only_without_open_items(
         json={"support_contact": "@support", "time_zone": "Europe/Moscow", "testers": []},
     )
     await add(shop.session, PanelEvent(body_hash=b"1" * 32, event="user.modified", payload={}))
+    assert (await shop.http.get("/api/admin/checklist")).json()["complete"] is False
+
+    _bot_webhook(shop).registered = True
 
     assert (await shop.http.get("/api/admin/checklist")).json()["complete"] is True
 

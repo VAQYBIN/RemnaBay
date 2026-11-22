@@ -3,7 +3,10 @@
 from remnabay.bot._context import BotContext, SessionFactory
 from remnabay.bot._setup import (
     TELEGRAM_WEBHOOK_PATH,
+    BotWebhookStatus,
     Polling,
+    WebhookProblem,
+    WebhookRetry,
     create_bot,
     create_dispatcher,
     register_webhook,
@@ -12,8 +15,11 @@ from remnabay.bot._setup import (
 __all__ = [
     "TELEGRAM_WEBHOOK_PATH",
     "BotContext",
+    "BotWebhookStatus",
     "Polling",
     "SessionFactory",
+    "WebhookProblem",
+    "WebhookRetry",
     "create_bot",
     "create_dispatcher",
     "register_webhook",

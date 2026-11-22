@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 
 from remnabay.access import LOGIN_TTL, SESSION_TTL
 from remnabay.attention import attention
+from remnabay.bot import WebhookProblem
 from remnabay.checklist import (
     Checklist,
     ChecklistItem,
@@ -62,6 +63,14 @@ class WebhookDetailsOut(BaseModel):
     secret: str | None
 
 
+class BotWebhookDetailsOut(BaseModel):
+    # Бот опрашивает Telegram при разработке: вебхук не нужен
+    polling: bool
+    problem: WebhookProblem | None
+    # Ответ Telegram при отказе
+    message: str | None
+
+
 class BrandDetailsOut(BaseModel):
     name: bool
     mark: bool
@@ -78,6 +87,7 @@ class ItemOut(BaseModel):
     required: bool
     panel: PanelDetailsOut | None = None
     webhook: WebhookDetailsOut | None = None
+    bot_webhook: BotWebhookDetailsOut | None = None
     brand: BrandDetailsOut | None = None
     trial_enabled: bool | None = None
     username_prefix: PrefixDetailsOut | None = None
@@ -99,6 +109,8 @@ def _item_out(item: ChecklistItem) -> ItemOut:
             out.panel = PanelDetailsOut.model_validate(details)
         case ItemKey.WEBHOOK:
             out.webhook = WebhookDetailsOut.model_validate(details)
+        case ItemKey.BOT_WEBHOOK:
+            out.bot_webhook = BotWebhookDetailsOut.model_validate(details)
         case ItemKey.BRAND:
             out.brand = BrandDetailsOut.model_validate(details)
         case ItemKey.TRIAL:
@@ -135,6 +147,7 @@ async def _checklist(
         panel,
         webhook_url=settings.public_link(PANEL_WEBHOOK_PATH),
         webhook_secret=secret,
+        bot_webhook=request.app.state.bot_webhook,
         dev_mode=settings.dev_mode,
         providers=request.app.state.providers,
     )

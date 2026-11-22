@@ -1862,6 +1862,14 @@ export interface components {
             /** Groups */
             groups: components["schemas"]["TextGroupOut"][];
         };
+        /** BotWebhookDetailsOut */
+        BotWebhookDetailsOut: {
+            /** Polling */
+            polling: boolean;
+            problem: components["schemas"]["WebhookProblem"] | null;
+            /** Message */
+            message: string | null;
+        };
         /** BrandDetailsOut */
         BrandDetailsOut: {
             /** Name */
@@ -2308,7 +2316,7 @@ export interface components {
          * ItemKey
          * @enum {string}
          */
-        ItemKey: "panel" | "webhook" | "device_limit" | "brand" | "tariffs" | "payment" | "support" | "trial" | "username_prefix" | "migration";
+        ItemKey: "panel" | "webhook" | "bot_webhook" | "device_limit" | "brand" | "tariffs" | "payment" | "support" | "trial" | "username_prefix" | "migration";
         /** ItemOut */
         ItemOut: {
             key: components["schemas"]["ItemKey"];
@@ -2317,6 +2325,7 @@ export interface components {
             required: boolean;
             panel?: components["schemas"]["PanelDetailsOut"] | null;
             webhook?: components["schemas"]["WebhookDetailsOut"] | null;
+            bot_webhook?: components["schemas"]["BotWebhookDetailsOut"] | null;
             brand?: components["schemas"]["BrandDetailsOut"] | null;
             /** Trial Enabled */
             trial_enabled?: boolean | null;
@@ -3630,6 +3639,11 @@ export interface components {
             /** Secret */
             secret: string | null;
         };
+        /**
+         * WebhookProblem
+         * @enum {string}
+         */
+        WebhookProblem: "network" | "rejected";
         /** WebhookSecretIn */
         WebhookSecretIn: {
             /** Webhook Secret */
