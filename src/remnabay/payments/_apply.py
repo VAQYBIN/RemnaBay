@@ -1,0 +1,289 @@
+"""Применение оплаченного платежа — операция очереди (4.11, 4.14, 4.19, 4.20).
+
+Деньги пришли — услуга будет (0008): пока идут повторы, платёж «оплачен»; панель
+недоступна — операция ждёт её и применяется после восстановления (4.11, 4.30);
+попытки исчерпаны — «оплачен — не применён», и решает команда (4.20).
+
+Что именно записать в панель и магазин при покупке и продлении, решает шаг
+применения (`PaymentApplier`) — его даёт блок 3. Рама отвечает за состояния
+платежа, повторы, сообщения и уведомления.
+"""
+
+from datetime import UTC, datetime, timedelta
+
+from babel.numbers import format_currency
+from pydantic import BaseModel
+from sqlalchemy import exists, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from remnabay import runtime
+from remnabay.domain.payments import Payment, PaymentState
+from remnabay.domain.promo import ActivationState, PromoActivation, PromoCode
+from remnabay.domain.subscriptions import Subscription, operations_key
+from remnabay.journal import Actor, ActorType, JournalEntry, JsonValue, Outcome, Subject, record
+from remnabay.messaging import (
+    MAIN_MENU_BUTTON,
+    ButtonArgs,
+    guide_button,
+    notify_team,
+    send_to_client,
+)
+from remnabay.payments._applier import Applied
+from remnabay.queue import TaskContext, task
+from remnabay.shop_settings import SHOP_LANGUAGE, get_setting
+
+PAYMENT_SUBJECT = "payment"
+PROMO_SUBJECT = "promo_code"
+# Если за это время платёж не применён, клиент получает «Оплата получена, подписка
+# создаётся» (4.19): обычно применение укладывается в несколько секунд
+PROCESSING_NOTICE_DELAY = timedelta(seconds=10)
+
+
+def payment_subject(payment_id: int) -> Subject:
+    return Subject(PAYMENT_SUBJECT, payment_id)
+
+
+class PaymentArgs(BaseModel):
+    payment_id: int
+
+
+async def journal_payment(
+    session: AsyncSession,
+    payment: Payment,
+    actor: Actor,
+    action: str,
+    *,
+    outcome: Outcome = Outcome.SUCCESS,
+    details: dict[str, JsonValue] | None = None,
+) -> None:
+    """Переход платежа — в журнал (3.34, 4.25)."""
+    await record(
+        session,
+        actor=actor,
+        action=action,
+        outcome=outcome,
+        subject=payment_subject(payment.id),
+        details={"state": payment.state.value, **(details or {})},
+    )
+
+
+async def money(session: AsyncSession, payment: Payment, *, paid: bool = False) -> str:
+    """Сумма платежа для текста: «199,00 ₽». `paid` — подтверждённая провайдером (3.39)."""
+    language = await get_setting(session, SHOP_LANGUAGE)
+    if paid and payment.paid_amount is not None and payment.paid_currency is not None:
+        return format_currency(payment.paid_amount, payment.paid_currency, locale=language)
+    return format_currency(payment.amount, payment.currency, locale=language)
+
+
+def _apply_key(payment: Payment) -> str | None:
+    """Продление — после операций подписки (4.17); покупки клиента — по очереди, чтобы
+    вторая оплата той же покупки видела подписку, созданную первой (3.11)."""
+    if payment.subscription_id is not None:
+        return operations_key(payment.subscription_id)
+    if payment.client_id is not None:
+        return f"client:{payment.client_id}:purchase"
+    return None
+
+
+async def enqueue_apply(session: AsyncSession, payment: Payment) -> None:
+    """Ставит применение оплаченного платежа и, на случай задержки, сообщение 4.19."""
+    args = PaymentArgs(payment_id=payment.id)
+    await apply_payment.enqueue(session, args, key=_apply_key(payment))
+    await processing_notice.enqueue(session, args, delay=PROCESSING_NOTICE_DELAY)
+
+
+async def _resolved_by_team(session: AsyncSession, payment: Payment) -> bool:
+    """Платёж уже разбирала команда — после применения клиент получает «Мы разобрались»."""
+    by_team = await session.scalar(
+        select(
+            exists().where(
+                JournalEntry.subject_type == PAYMENT_SUBJECT,
+                JournalEntry.subject_id == str(payment.id),
+                JournalEntry.actor_type == ActorType.TEAM_MEMBER,
+            )
+        )
+    )
+    return bool(by_team)
+
+
+async def _notify_resolved(session: AsyncSession, payment: Payment, applied: Applied) -> None:
+    """4.24: после решения команды клиент получает уведомление о результате."""
+    if payment.client_id is None:
+        return
+    if applied.created:
+        await send_to_client(
+            session,
+            payment.client_id,
+            "event.payment_resolved.created",
+            buttons=[MAIN_MENU_BUTTON],
+        )
+        return
+    subscription = await session.get(Subscription, applied.subscription_id)
+    if subscription is None or subscription.expires_at is None:
+        return
+    await send_to_client(
+        session,
+        payment.client_id,
+        "event.payment_resolved.renewed",
+        variables={"subscription_name": subscription.name},
+        dates={"end_date": subscription.expires_at},
+        buttons=[MAIN_MENU_BUTTON],
+    )
+
+
+async def _notify_applied(session: AsyncSession, payment: Payment, applied: Applied) -> None:
+    """Клиент получает ссылку на подписку (3.6) или новую дату окончания (С6). Если
+    он заблокировал бот, подписка всё равно применена, недоставка — в журнале (3.13)."""
+    if payment.client_id is None:
+        return
+    subscription = await session.get(Subscription, applied.subscription_id)
+    if subscription is None:
+        return
+    if applied.purchase:
+        link = subscription.subscription_url
+        await send_to_client(
+            session,
+            payment.client_id,
+            "event.subscription_ready",
+            variables={"subscription_link": link},
+            buttons=[
+                ButtonArgs(text_key="btn.copy_link", copy_text=link),
+                guide_button(subscription.id),
+                MAIN_MENU_BUTTON,
+            ],
+        )
+        return
+    if subscription.expires_at is None:
+        return
+    await send_to_client(
+        session,
+        payment.client_id,
+        "event.renewed",
+        variables={"subscription_name": subscription.name},
+        dates={"end_date": subscription.expires_at},
+        buttons=[MAIN_MENU_BUTTON],
+    )
+
+
+@task("payments.apply", PaymentArgs, cancellable=False)
+async def apply_payment(context: TaskContext, args: PaymentArgs) -> None:
+    """Применяет оплаченный платёж. Уже применённый или решённый — ничего не делает
+    второй раз (сквозное правило 3)."""
+    session = context.session
+    payment = await session.get(Payment, args.payment_id, with_for_update=True)
+    if payment is None or payment.state != PaymentState.PAID:
+        return
+    applied = await runtime.current().payments.apply(session, payment)
+    payment.state = PaymentState.APPLIED
+    payment.applied_at = datetime.now(UTC)
+    payment.subscription_id = applied.subscription_id
+    await journal_payment(
+        session,
+        payment,
+        Actor.SYSTEM,
+        "payment.applied",
+        details={"subscription_id": applied.subscription_id, "created": applied.created},
+    )
+    if payment.promo_code_id is not None:
+        await _activate_promo(session, payment, payment.promo_code_id)
+    if await _resolved_by_team(session, payment):
+        await _notify_resolved(session, payment, applied)
+    else:
+        await _notify_applied(session, payment, applied)
+
+
+async def _activate_promo(session: AsyncSession, payment: Payment, promo_code_id: int) -> None:
+    """Активация промокода засчитывается при применении платежа (8.6) и пишется в
+    журнал (8.14). Промокод мог истечь, исчерпаться или быть отключён, пока клиент
+    платил: скидка уже в платеже (8.7). Если клиент оплатил два счёта одной покупки с
+    одним промокодом, скидку получают оба, а превышение пишется в журнал (3.11, 0033)."""
+    if payment.client_id is None:
+        return
+    # Строка промокода блокируется: одновременные активации считают друг друга
+    promo = await session.get(PromoCode, promo_code_id, with_for_update=True)
+    if promo is None:
+        return
+    counted = PromoActivation.state.in_((ActivationState.PENDING, ActivationState.APPLIED))
+    used = await session.scalar(
+        select(func.count())
+        .select_from(PromoActivation)
+        .where(PromoActivation.promo_code_id == promo.id, counted)
+    )
+    by_client = await session.scalar(
+        select(
+            exists().where(
+                PromoActivation.promo_code_id == promo.id,
+                PromoActivation.client_id == payment.client_id,
+                counted,
+            )
+        )
+    )
+    session.add(
+        PromoActivation(
+            promo_code_id=promo.id,
+            client_id=payment.client_id,
+            payment_id=payment.id,
+            subscription_id=payment.subscription_id,
+            state=ActivationState.APPLIED,
+            applied_at=payment.applied_at,
+        )
+    )
+    await session.flush()
+    details: dict[str, JsonValue] = {
+        "client_id": payment.client_id,
+        "payment_id": payment.id,
+        "subscription_id": payment.subscription_id,
+        "discount": str(payment.discount_amount),
+    }
+    await record(
+        session,
+        actor=Actor.SYSTEM,
+        action="promo.activated",
+        outcome=Outcome.SUCCESS,
+        subject=Subject(PROMO_SUBJECT, promo.id),
+        details=details,
+    )
+    exhausted = promo.max_activations is not None and (used or 0) >= promo.max_activations
+    if exhausted or by_client:
+        await record(
+            session,
+            actor=Actor.SYSTEM,
+            action="promo.limit_exceeded",
+            outcome=Outcome.FAILURE,
+            subject=Subject(PROMO_SUBJECT, promo.id),
+            details={
+                **details,
+                "activations_exhausted": exhausted,
+                "already_used": bool(by_client),
+            },
+        )
+
+
+@apply_payment.on_failed
+async def _apply_failed(session: AsyncSession, _task_id: int, args: PaymentArgs) -> None:
+    """Попытки исчерпаны — «оплачен — не применён», уведомление команде (4.20)."""
+    payment = await session.get(Payment, args.payment_id, with_for_update=True)
+    if payment is None or payment.state != PaymentState.PAID:
+        return
+    payment.state = PaymentState.PAID_NOT_APPLIED
+    await journal_payment(
+        session, payment, Actor.SYSTEM, "payment.not_applied", outcome=Outcome.FAILURE
+    )
+    await notify_team(
+        session, "team.payment_not_applied", variables={"amount": await money(session, payment)}
+    )
+
+
+@task("payments.processing_notice", PaymentArgs, needs_attention=False)
+async def processing_notice(context: TaskContext, args: PaymentArgs) -> None:
+    """4.19: платёж оплачен, но не применён сразу — «Оплата получена, подписка создаётся»."""
+    payment = await context.session.get(Payment, args.payment_id)
+    if payment is None or payment.client_id is None:
+        return
+    if payment.state in (PaymentState.PAID, PaymentState.PAID_NOT_APPLIED):
+        await send_to_client(
+            context.session,
+            payment.client_id,
+            "event.payment_processing",
+            buttons=[MAIN_MENU_BUTTON],
+        )

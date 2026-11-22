@@ -1,0 +1,340 @@
+"""«Настройки → Оплата»: подключение ЮКассы, время жизни счёта, опрос неоплаченных
+счетов, повтор операций, отключение провайдера (3.8, 3.29, 3.31, 3.33, 3.42, 4.14, 4.25,
+1.14, 0049)."""
+
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+import pytest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from remnabay.crypto import SecretBox, generate_key
+from remnabay.domain.payments import PaymentState
+from remnabay.domain.team import TeamMember, TeamRole
+from remnabay.journal import JournalEntry
+from remnabay.payments import (
+    INVOICE_LIFETIME,
+    POLL_AFTER_EXPIRY,
+    POLL_INTERVAL,
+    Providers,
+)
+from remnabay.payments.yookassa import YOOKASSA, YooKassaKind
+from remnabay.shop import SHOP_CURRENCY
+from remnabay.shop_settings import RETRY_MAX_ATTEMPTS, RETRY_WINDOW, get_setting
+from remnabay.worker.main import retry_policy
+from tests.conftest import journaled_in_test
+from tests.domain_support import add, make_client, make_payment, make_team_member, put_setting
+from tests.payment_support import (
+    YOOKASSA_SECRET,
+    YOOKASSA_SHOP_ID,
+    FakeYooKassa,
+    connect_yookassa,
+    shop_box,
+)
+from tests.web_support import Shop, running_shop
+
+SETTINGS = "/api/admin/settings/payment"
+RETRY = f"{SETTINGS}/retry"
+INVOICE = {
+    "invoice_lifetime_minutes": 30,
+    "poll_interval_minutes": 5,
+    "poll_after_expiry_hours": 24,
+}
+KEYS = f"{SETTINGS}/providers/{YOOKASSA}"
+VALID = {"credentials": {"shop_id": YOOKASSA_SHOP_ID, "secret_key": YOOKASSA_SECRET}}
+
+
+@pytest.fixture
+def yookassa() -> FakeYooKassa:
+    return FakeYooKassa()
+
+
+@pytest.fixture
+async def shop(
+    valid_env: dict[str, str], db_session: AsyncSession, yookassa: FakeYooKassa
+) -> AsyncGenerator[Shop]:
+    del valid_env
+    async with running_shop(db_session) as shop, yookassa.http() as http:
+        shop.use_providers(Providers(shop_box(), [YooKassaKind(http)]))
+        yield shop
+
+
+@pytest.fixture
+async def owner(shop: Shop) -> TeamMember:
+    member = make_team_member(telegram_id=500, role=TeamRole.OWNER)
+    await add(shop.session, member)
+    await shop.sign_in(member)
+    return member
+
+
+def _yookassa(body: dict[str, Any]) -> dict[str, Any]:
+    providers: list[dict[str, Any]] = body["providers"]
+    [provider] = [p for p in providers if p["code"] == YOOKASSA]
+    return provider
+
+
+async def _payment_item(shop: Shop) -> str:
+    items: list[dict[str, Any]] = (await shop.http.get("/api/admin/checklist")).json()["items"]
+    [item] = [i for i in items if i["key"] == "payment"]
+    status: str = item["status"]
+    return status
+
+
+@pytest.mark.usefixtures("owner")
+async def test_3_31_yookassa_is_offered_with_webhook_address(shop: Shop) -> None:
+    """3.31, 3.28: ЮКасса доступна для подключения; адрес вебхука — для кабинета ЮКассы."""
+    body = (await shop.http.get(SETTINGS)).json()
+    provider = _yookassa(body)
+    assert provider["state"] == "not_connected"
+    assert provider["webhook_url"] == f"https://shop.example.com/webhooks/payments/{YOOKASSA}"
+    assert body["invoice_lifetime_minutes"] == 30
+
+
+@pytest.mark.usefixtures("owner")
+async def test_1_14_connected_yookassa_completes_payment_item(shop: Shop) -> None:
+    """1.14, 3.31: ключи проверены у ЮКассы и сохранены — способ оплаты подключён;
+    ключи в ответе не показываются."""
+    assert await _payment_item(shop) == "todo"
+    response = await shop.http.put(KEYS, json=VALID)
+
+    assert response.status_code == 200
+    assert _yookassa(response.json())["state"] == "ready"
+    assert YOOKASSA_SECRET not in response.text
+    assert await _payment_item(shop) == "done"
+
+
+@pytest.mark.usefixtures("owner")
+async def test_keys_rejected_by_yookassa_are_not_saved(shop: Shop) -> None:
+    """Ключи, которые ЮКасса не приняла, не сохраняются; админка объясняет почему."""
+    response = await shop.http.put(
+        KEYS, json={"credentials": {"shop_id": "1", "secret_key": "wrong"}}
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"]["reason"] == "rejected"
+    assert _yookassa((await shop.http.get(SETTINGS)).json())["state"] == "not_connected"
+
+
+@pytest.mark.usefixtures("owner")
+async def test_malformed_keys_are_rejected(shop: Shop) -> None:
+    """Идентификатор магазина ЮКассы — число."""
+    response = await shop.http.put(
+        KEYS, json={"credentials": {"shop_id": "shop", "secret_key": "x"}}
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"]["reason"] == "invalid_keys"
+
+
+@pytest.mark.usefixtures("owner")
+async def test_yookassa_unavailable_while_connecting(shop: Shop, yookassa: FakeYooKassa) -> None:
+    """ЮКасса не отвечает — ключи не проверить, подключение откладывается."""
+    yookassa.down = True
+    response = await shop.http.put(KEYS, json=VALID)
+    assert response.status_code == 503
+
+
+@pytest.mark.usefixtures("owner")
+async def test_3_33_provider_without_shop_currency_is_shown_unavailable(shop: Shop) -> None:
+    """3.33: провайдер не принимает валюту учёта — админка показывает это при подключении,
+    а способ оплаты не считается подключённым."""
+    await put_setting(shop.session, SHOP_CURRENCY, "USD")
+    response = await shop.http.put(KEYS, json=VALID)
+
+    assert _yookassa(response.json())["state"] == "currency_unsupported"
+    assert _yookassa(response.json())["currencies"] == ["RUB"]
+    assert await _payment_item(shop) == "todo"
+
+
+@pytest.mark.usefixtures("owner")
+async def test_0049_keys_need_to_be_entered_again_after_key_change(shop: Shop) -> None:
+    """0049: ключи не расшифровываются — «Ключи нужно ввести заново», пункт чек-листа
+    «Способ оплаты» снова не выполнен."""
+    await connect_yookassa(shop.session, SecretBox(generate_key()))
+    assert _yookassa((await shop.http.get(SETTINGS)).json())["state"] == "keys_lost"
+    assert await _payment_item(shop) == "todo"
+
+
+@pytest.mark.usefixtures("owner")
+async def test_disconnect_provider(shop: Shop) -> None:
+    await shop.http.put(KEYS, json=VALID)
+    response = await shop.http.delete(KEYS)
+    assert _yookassa(response.json())["state"] == "not_connected"
+
+
+@pytest.mark.usefixtures("owner")
+async def test_3_8_invoice_lifetime_is_set_in_admin(shop: Shop) -> None:
+    """3.8: время жизни счёта задаёт оператор."""
+    response = await shop.http.put(SETTINGS, json=INVOICE | {"invoice_lifetime_minutes": 45})
+    assert response.json()["invoice_lifetime_minutes"] == 45
+    assert await get_setting(shop.session, INVOICE_LIFETIME) == timedelta(minutes=45)
+
+
+async def test_payment_settings_are_for_owner_only(shop: Shop) -> None:
+    """Настройки платёжек — только владелец (01-domain)."""
+    assistant = make_team_member(telegram_id=501, role=TeamRole.ASSISTANT)
+    await add(shop.session, assistant)
+    await shop.sign_in(assistant)
+    assert (await shop.http.get(SETTINGS)).status_code == 403
+    assert (await shop.http.put(KEYS, json=VALID)).status_code == 403
+    assert (await shop.http.put(SETTINGS, json=INVOICE)).status_code == 403
+    retry = {"retry_window_minutes": 60, "retry_max_attempts": 20}
+    assert (await shop.http.put(RETRY, json=retry)).status_code == 403
+
+
+# --- Опрос неоплаченных счетов (3.29) и повтор операций (4.14) ---
+
+
+async def _changes(shop: Shop, owner: TeamMember) -> list[Any]:
+    entries = await shop.session.scalars(
+        select(JournalEntry)
+        .where(
+            journaled_in_test(),
+            JournalEntry.actor_ref == str(owner.id),
+            JournalEntry.action == "setting.changed",
+        )
+        .order_by(JournalEntry.id)
+    )
+    return [entry.details for entry in entries]
+
+
+@pytest.mark.usefixtures("owner")
+async def test_3_29_4_14_defaults_shown(shop: Shop) -> None:
+    """3.29, 4.14: опрос — каждые 5 минут и 24 часа после истечения счёта; повторы —
+    прекращение через 60 минут или после 20 попыток."""
+    body = (await shop.http.get(SETTINGS)).json()
+
+    assert body["poll_interval_minutes"] == 5
+    assert body["poll_after_expiry_hours"] == 24
+    assert body["retry_window_minutes"] == 60
+    assert body["retry_max_attempts"] == 20
+
+
+async def test_3_29_4_25_polling_saved_and_journaled(shop: Shop, owner: TeamMember) -> None:
+    """3.29, 4.25: владелец меняет опрос неоплаченных счетов; каждое изменение — в журнале,
+    неизменённые значения — нет."""
+    response = await shop.http.put(
+        SETTINGS, json=INVOICE | {"poll_interval_minutes": 10, "poll_after_expiry_hours": 48}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["poll_interval_minutes"] == 10
+    assert response.json()["poll_after_expiry_hours"] == 48
+    assert await get_setting(shop.session, POLL_INTERVAL) == timedelta(minutes=10)
+    assert await get_setting(shop.session, POLL_AFTER_EXPIRY) == timedelta(hours=48)
+    assert await _changes(shop, owner) == [
+        {"key": "payments.poll_interval", "old": "PT5M", "new": "PT10M"},
+        {"key": "payments.poll_after_expiry", "old": "P1D", "new": "P2D"},
+    ]
+
+
+async def test_4_14_4_25_retry_saved_and_journaled(shop: Shop, owner: TeamMember) -> None:
+    """4.14, 4.25: владелец меняет повтор операций; изменение — в журнале, а воркер берёт
+    новые окно и лимит попыток при следующем решении о повторе — без перезапуска."""
+    response = await shop.http.put(
+        RETRY, json={"retry_window_minutes": 120, "retry_max_attempts": 20}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["retry_window_minutes"] == 120
+    assert await get_setting(shop.session, RETRY_WINDOW) == timedelta(hours=2)
+    assert await _changes(shop, owner) == [{"key": "retry.window", "old": "PT1H", "new": "PT2H"}]
+
+    await shop.http.put(RETRY, json={"retry_window_minutes": 120, "retry_max_attempts": 5})
+    policy = await retry_policy(shop.session)
+    assert (policy.max_age, policy.max_attempts) == (timedelta(hours=2), 5)
+    assert await get_setting(shop.session, RETRY_MAX_ATTEMPTS) == 5
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        (SETTINGS, INVOICE | {"poll_interval_minutes": 0}),
+        (SETTINGS, INVOICE | {"poll_interval_minutes": 61}),
+        (SETTINGS, INVOICE | {"poll_after_expiry_hours": 0}),
+        (SETTINGS, INVOICE | {"poll_after_expiry_hours": 169}),
+        (RETRY, {"retry_window_minutes": 4, "retry_max_attempts": 20}),
+        (RETRY, {"retry_window_minutes": 1441, "retry_max_attempts": 20}),
+        (RETRY, {"retry_window_minutes": 60, "retry_max_attempts": 2}),
+        (RETRY, {"retry_window_minutes": 60, "retry_max_attempts": 101}),
+    ],
+)
+async def test_3_29_4_14_out_of_limits_rejected(
+    shop: Shop, owner: TeamMember, path: str, body: dict[str, int]
+) -> None:
+    """3.29, 4.14: значение вне пределов (опрос 1–60 минут и 1–168 часов после истечения;
+    повторы — окно 5–1440 минут, 3–100 попыток) не сохраняется и не попадает в журнал."""
+    response = await shop.http.put(path, json=body)
+
+    assert response.status_code == 422
+    assert await get_setting(shop.session, POLL_INTERVAL) == timedelta(minutes=5)
+    assert await get_setting(shop.session, POLL_AFTER_EXPIRY) == timedelta(hours=24)
+    assert await get_setting(shop.session, RETRY_WINDOW) == timedelta(hours=1)
+    assert await get_setting(shop.session, RETRY_MAX_ATTEMPTS) == 20
+    assert await _changes(shop, owner) == []
+
+
+async def _invoices_of_every_kind(session: AsyncSession, now: datetime) -> datetime:
+    """Счета, из которых ещё могут оплатить три; возвращает, когда закончится окно."""
+    client = await make_client(session)
+    latest = now + timedelta(minutes=20)
+    payable = [
+        make_payment(client, None, expires_at=latest),
+        # Истёк, но окно опроса ещё идёт: время жизни плюс 24 часа (3.29)
+        make_payment(client, None, state=PaymentState.EXPIRED, expires_at=now - timedelta(hours=2)),
+        # Заменён новым счётом, но у провайдера его ещё можно оплатить (3.10)
+        make_payment(client, None, state=PaymentState.CANCELLED, expires_at=now),
+    ]
+    not_payable = [
+        make_payment(
+            client, None, state=PaymentState.EXPIRED, expires_at=now - timedelta(hours=25)
+        ),
+        make_payment(client, None, state=PaymentState.APPLIED, expires_at=latest),
+        # Провайдер сам сообщил об отказе — у него счёт закрыт
+        make_payment(client, None, state=PaymentState.DECLINED, expires_at=latest),
+        make_payment(client, None, provider="other", expires_at=latest),
+        # Нулевая сумма — счёта у провайдера нет
+        make_payment(client, None, provider=None, provider_payment_id=None, expires_at=latest),
+    ]
+    for payment in (*payable, *not_payable):
+        await add(session, payment)
+    return latest + timedelta(hours=24)
+
+
+@pytest.mark.usefixtures("owner")
+async def test_3_42_disconnect_warns_about_payable_invoices(shop: Shop) -> None:
+    """3.42: у клиентов есть счета провайдера, которые ещё могут быть оплачены, —
+    перед отключением админка называет их число и конец окна; провайдер не отключён."""
+    await shop.http.put(KEYS, json=VALID)
+    window_ends_at = await _invoices_of_every_kind(shop.session, datetime.now(UTC))
+
+    response = await shop.http.delete(KEYS)
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["reason"] == "payable_invoices"
+    assert detail["count"] == 3
+    assert datetime.fromisoformat(detail["window_ends_at"]) == window_ends_at
+    assert detail["time_zone"] == "Europe/Moscow"
+    assert _yookassa((await shop.http.get(SETTINGS)).json())["state"] == "ready"
+
+
+async def test_3_42_owner_disconnects_after_warning(shop: Shop, owner: TeamMember) -> None:
+    """3.42: владелец видел предупреждение и всё равно отключает — провайдер отключён,
+    в журнале — сколько счетов ещё могли оплатить (4.25)."""
+    await shop.http.put(KEYS, json=VALID)
+    await _invoices_of_every_kind(shop.session, datetime.now(UTC))
+
+    response = await shop.http.delete(KEYS, params={"confirm_payable": True})
+
+    assert response.status_code == 200
+    assert _yookassa(response.json())["state"] == "not_connected"
+    entry = (
+        await shop.session.scalars(
+            select(JournalEntry).where(
+                JournalEntry.action == "payments.provider_disconnected", journaled_in_test()
+            )
+        )
+    ).one()
+    assert entry.actor_ref == str(owner.id)
+    assert entry.details == {"payable_invoices": 3}

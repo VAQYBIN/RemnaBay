@@ -1,0 +1,320 @@
+"""Сверка подписки с панелью: панель всегда права (сценарий «Реакция на изменения в панели»).
+
+Одна сверка для обоих каналов — вебхука и периодического обхода (4.8). Она не
+доверяет содержимому события, а перечитывает пользователя из панели: события
+приходят с опозданием и не по порядку, а текущее состояние — одно. Поэтому
+последствия применяются, только если они ещё актуальны (4.10).
+
+Сверка — операция очереди с ключом подписки: она выполняется строго после
+операций магазина над этой подпиской (4.17) и видит уже применённые ими отрезки.
+"""
+
+import logging
+from datetime import UTC, datetime
+from enum import StrEnum
+
+from pydantic import BaseModel
+from sqlalchemy import delete, func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from remnabay import runtime
+from remnabay.clients import client_telegram_id
+from remnabay.device_registry import record_device
+from remnabay.domain.subscriptions import (
+    PanelUserStatus,
+    SegmentKind,
+    Subscription,
+    TermSegment,
+    operations_key,
+)
+from remnabay.domain.tariffs import TrafficResetStrategy
+from remnabay.journal import Actor, JsonValue, Outcome, Subject, record
+from remnabay.messaging import (
+    MAIN_MENU_BUTTON,
+    ButtonArgs,
+    buy_button,
+    guide_button,
+    send_to_client,
+)
+from remnabay.panel import PanelClient, PanelRequestError, TrafficStrategy, User, UserStatus
+from remnabay.queue import TaskContext, task
+from remnabay.shop import offers_paused_for
+
+SUBSCRIPTION_SUBJECT = "subscription"
+
+logger = logging.getLogger(__name__)
+
+_STATUSES = {
+    UserStatus.ACTIVE: PanelUserStatus.ACTIVE,
+    UserStatus.DISABLED: PanelUserStatus.DISABLED,
+    UserStatus.LIMITED: PanelUserStatus.LIMITED,
+    UserStatus.EXPIRED: PanelUserStatus.EXPIRED,
+}
+STRATEGIES: dict[TrafficStrategy, TrafficResetStrategy | None] = {
+    TrafficStrategy.NO_RESET: None,
+    TrafficStrategy.DAY: TrafficResetStrategy.DAY,
+    TrafficStrategy.WEEK: TrafficResetStrategy.WEEK,
+    TrafficStrategy.MONTH: TrafficResetStrategy.MONTH,
+    TrafficStrategy.MONTH_ROLLING: TrafficResetStrategy.MONTH_FROM_CREATION,
+}
+
+
+class Source(StrEnum):
+    """Каким путём магазин узнал об изменении (4.9)."""
+
+    WEBHOOK = "webhook"
+    SYNC = "sync"
+
+
+class ReconcileArgs(BaseModel):
+    subscription_id: int
+    source: Source
+    # Событие панели, из-за которого сверка поставлена (для журнала)
+    event: str | None = None
+
+
+def _iso(moment: datetime | None) -> str | None:
+    return moment.isoformat() if moment else None
+
+
+async def _term_end(session: AsyncSession, subscription: Subscription) -> datetime | None:
+    """Где магазин считает конец срока: конец последнего отрезка, без отрезков — данные панели."""
+    end = await session.scalar(
+        select(func.max(TermSegment.ends_at)).where(TermSegment.subscription_id == subscription.id)
+    )
+    return end or subscription.expires_at
+
+
+async def _extend_term(
+    session: AsyncSession, subscription: Subscription, start: datetime, end: datetime
+) -> None:
+    """Дата окончания увеличена в панели — отрезок нулевой стоимости (4.3)."""
+    session.add(
+        TermSegment(
+            subscription_id=subscription.id,
+            kind=SegmentKind.PANEL,
+            starts_at=start,
+            ends_at=end,
+        )
+    )
+    await session.flush()
+
+
+async def _cut_term(session: AsyncSession, subscription: Subscription, end: datetime) -> None:
+    """Дата окончания уменьшена в панели — отрезки срезаются с конца (4.4)."""
+    of_subscription = TermSegment.subscription_id == subscription.id
+    await session.execute(delete(TermSegment).where(of_subscription, TermSegment.starts_at >= end))
+    await session.execute(
+        update(TermSegment).where(of_subscription, TermSegment.ends_at > end).values(ends_at=end)
+    )
+
+
+async def _apply_term(
+    session: AsyncSession, subscription: Subscription, user: User
+) -> dict[str, JsonValue]:
+    known_end = await _term_end(session, subscription)
+    panel_end = user.expire_at
+    if known_end == panel_end:
+        return {}
+    if known_end is None or panel_end > known_end:
+        start = known_end or subscription.created_at
+        if start < panel_end:
+            await _extend_term(session, subscription, start, panel_end)
+    else:
+        await _cut_term(session, subscription, panel_end)
+    return {"expires_at": [_iso(known_end), _iso(panel_end)]}
+
+
+def _apply_access(subscription: Subscription, user: User) -> dict[str, JsonValue]:
+    """Лимиты, стратегия сброса и состояние — как факт (4.5, 4.7)."""
+    changes: dict[str, JsonValue] = {}
+    status = _STATUSES.get(user.status, subscription.panel_status)
+    if status != subscription.panel_status:
+        changes["status"] = [subscription.panel_status, status]
+        subscription.panel_status = status
+    if user.hwid_device_limit != subscription.device_limit:
+        changes["device_limit"] = [subscription.device_limit, user.hwid_device_limit]
+        subscription.device_limit = user.hwid_device_limit
+    if user.traffic_limit_bytes != subscription.traffic_limit_bytes:
+        changes["traffic_limit_bytes"] = [
+            subscription.traffic_limit_bytes,
+            user.traffic_limit_bytes,
+        ]
+        subscription.traffic_limit_bytes = user.traffic_limit_bytes
+    if user.traffic_limit_strategy in STRATEGIES:
+        strategy = STRATEGIES[user.traffic_limit_strategy]
+        if strategy != subscription.traffic_reset_strategy:
+            changes["traffic_reset_strategy"] = [subscription.traffic_reset_strategy, strategy]
+            subscription.traffic_reset_strategy = strategy
+    return changes
+
+
+async def _apply_link(
+    session: AsyncSession, subscription: Subscription, user: User
+) -> dict[str, JsonValue]:
+    """Ссылку отозвали в панели — новая ссылка и сообщение клиенту (4.29).
+
+    Отзыв меняет короткий идентификатор пользователя. Если поменялся только адрес
+    ссылки (оператор сменил домен подписок в панели), ссылка обновляется без
+    сообщения: старая при этом не перестала работать по вине клиента.
+    """
+    revoked = user.short_uuid != subscription.panel_short_uuid
+    if not revoked and user.subscription_url == subscription.subscription_url:
+        return {}
+    changes: dict[str, JsonValue] = {
+        "subscription_url": [subscription.subscription_url, user.subscription_url]
+    }
+    subscription.panel_short_uuid = user.short_uuid
+    subscription.subscription_url = user.subscription_url
+    if revoked:
+        changes["link_revoked"] = True
+        await send_to_client(
+            session,
+            subscription.client_id,
+            "event.link_revoked",
+            variables={
+                "subscription_name": subscription.name,
+                "subscription_link": user.subscription_url,
+            },
+            buttons=[
+                ButtonArgs(text_key="btn.copy_link", copy_text=user.subscription_url),
+                guide_button(subscription.id),
+                MAIN_MENU_BUTTON,
+            ],
+        )
+    return changes
+
+
+async def _journal(
+    session: AsyncSession,
+    subscription: Subscription,
+    action: str,
+    args: ReconcileArgs,
+    changes: dict[str, JsonValue] | None = None,
+) -> None:
+    details: dict[str, JsonValue] = {"source": args.source.value, "event": args.event}
+    if changes is not None:
+        details["changes"] = changes
+    await record(
+        session,
+        actor=Actor.PANEL,
+        action=action,
+        outcome=Outcome.SUCCESS,
+        subject=Subject(SUBSCRIPTION_SUBJECT, subscription.id),
+        details=details,
+    )
+
+
+async def accept_user(
+    session: AsyncSession, subscription: Subscription, user: User
+) -> dict[str, JsonValue]:
+    """Принимает пользователя панели как факт: срок (отрезки), лимиты, состояние, ссылка.
+
+    Возвращает изменения для журнала. Общий шаг сверки и применения платежа: магазин
+    сначала узнаёт, что сейчас в панели, и только потом меняет её сам."""
+    changes = await _apply_term(session, subscription, user)
+    changes |= _apply_access(subscription, user)
+    changes |= await _apply_link(session, subscription, user)
+    subscription.expires_at = user.expire_at
+    subscription.traffic_used_bytes = user.user_traffic.used_traffic_bytes
+    subscription.panel_synced_at = datetime.now(UTC)
+    return changes
+
+
+def accept_access(subscription: Subscription, user: User) -> None:
+    """Лимиты, состояние, ссылка и срок из ответа панели на изменение, которое сделал
+    сам магазин: отрезки он пишет сам (4.34), сообщений об этом клиенту не нужно."""
+    _apply_access(subscription, user)
+    subscription.panel_short_uuid = user.short_uuid
+    subscription.subscription_url = user.subscription_url
+    subscription.expires_at = user.expire_at
+    subscription.traffic_used_bytes = user.user_traffic.used_traffic_bytes
+    subscription.panel_synced_at = datetime.now(UTC)
+
+
+async def term_end(session: AsyncSession, subscription: Subscription) -> datetime | None:
+    """Конец срока по данным магазина: конец последнего отрезка или данные панели."""
+    return await _term_end(session, subscription)
+
+
+async def reconcile(
+    session: AsyncSession,
+    subscription: Subscription,
+    args: ReconcileArgs,
+    *,
+    panel: PanelClient | None = None,
+) -> None:
+    """Приводит знание магазина о подписке к состоянию панели и пишет изменения в журнал.
+
+    `panel` — клиент панели вне воркера (команда синхронизирует подписку из админки,
+    10.5); в задаче очереди — клиент окружения воркера."""
+    if subscription.deleted_at is not None:
+        return
+    panel = panel or runtime.current().panel
+    user = await panel.get_user(subscription.panel_user_id)
+    if user is None:
+        # Пользователя удалили в панели: клиент подписку не видит, история сохраняется (4.6)
+        subscription.deleted_at = datetime.now(UTC)
+        await _journal(session, subscription, "subscription.deleted_in_panel", args)
+        return
+    was_limited = subscription.panel_status == PanelUserStatus.LIMITED
+    changes = await accept_user(session, subscription, user)
+    if changes:
+        await _journal(session, subscription, "subscription.changed_in_panel", args, changes)
+    if subscription.is_trial:
+        await _register_trial_devices(session, panel, subscription, args)
+        if not was_limited and subscription.panel_status == PanelUserStatus.LIMITED:
+            await _tell_trial_traffic_exhausted(session, subscription)
+
+
+async def _register_trial_devices(
+    session: AsyncSession, panel: PanelClient, subscription: Subscription, args: ReconcileArgs
+) -> None:
+    """5.8: событие о подключении к триальной подписке могло не дойти — сверка
+    запрашивает устройства пользователя и дописывает реестр."""
+    try:
+        devices = await panel.list_devices(subscription.panel_user_id)
+    except PanelRequestError:
+        # Панель отказала в списке (например, у токена нет права): сверка подписки
+        # важнее; устройство попадёт в реестр по событию или следующей сверкой
+        logger.warning("Устройства подписки %s не получены при сверке", subscription.id)
+        return
+    for device in devices.devices:
+        await record_device(
+            session, subscription, device.hwid, device.created_at, source=args.source
+        )
+
+
+async def _tell_trial_traffic_exhausted(session: AsyncSession, subscription: Subscription) -> None:
+    """5.10, С16: трафик триала исчерпан — «Трафик пробного периода закончился» и
+    «Купить подписку». Пока магазин временно закрыт, сообщение не отправляется (1.22)."""
+    telegram_id = await client_telegram_id(session, subscription.client_id)
+    if await offers_paused_for(session, telegram_id):
+        return
+    await send_to_client(
+        session,
+        subscription.client_id,
+        "event.trial_traffic_exhausted",
+        buttons=[buy_button(), MAIN_MENU_BUTTON],
+    )
+
+
+@task("panel.reconcile_subscription", ReconcileArgs, needs_attention=False)
+async def reconcile_subscription(context: TaskContext, args: ReconcileArgs) -> None:
+    # Блокировка: применение платежа к этой подписке и сверка не идут одновременно
+    subscription = await context.session.get(
+        Subscription, args.subscription_id, with_for_update=True
+    )
+    if subscription is not None:
+        await reconcile(context.session, subscription, args)
+
+
+async def enqueue_reconcile(
+    session: AsyncSession, subscription_id: int, source: Source, event: str | None = None
+) -> int:
+    """Ставит сверку подписки после всех её операций (4.17)."""
+    return await reconcile_subscription.enqueue(
+        session,
+        ReconcileArgs(subscription_id=subscription_id, source=source, event=event),
+        key=operations_key(subscription_id),
+    )

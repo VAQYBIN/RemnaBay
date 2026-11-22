@@ -43,6 +43,10 @@ blob-report/
 # Чужие референсы дизайна: права не наши, хранятся только локально
 docs/design/reference-glass.png
 
+# Контракты панели для контрактного теста: лицензия панели — AGPL-3.0,
+# файлы достаёт scripts/fetch-panel-openapi.sh
+.cache/
+
 # Логи
 *.log
 
@@ -53,3 +57,6 @@ docs/design/reference-glass.png
 *.swp
 .DS_Store
 Thumbs.db
+
+# Результаты экспериментов: данные реальных аккаунтов
+spikes/**/results*.json

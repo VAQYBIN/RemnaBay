@@ -6,6 +6,33 @@ Remnawave — волна. Bay — бухта, куда волна спокойн
 
 > RemnaBay — неофициальный проект сообщества. Он не связан с командой Remnawave.
 
-> **Статус: проектирование.** Кода пока нет. Вся текущая работа идёт в [`docs/`](docs/README.md).
+> **Статус: реализация MVP.** Спецификация — в [`docs/`](docs/README.md), порядок работы — [план разработки](docs/plan.md).
+
+## Установка
+Магазин ставится через Docker Compose — на сервер с панелью Remnawave или на отдельный сервер. Поддерживаемые версии панели: 3.4.4 и новее в пределах 3.4.
+
+Пошаговая инструкция — в [deploy/README.md](deploy/README.md): бот в @BotFather, параметры `.env`, обратный прокси (Nginx или Caddy), вебхук панели, резервное копирование и обновление. Изменения по версиям — в [CHANGELOG.md](CHANGELOG.md).
+
+## Разработка
+Нужны [uv](https://docs.astral.sh/uv/), Docker с Compose и Node.js 24 LTS (только для админки).
+
+```bash
+cp .env.example .env                         # заполнить параметры
+docker compose -f compose.dev.yaml up --build  # PostgreSQL, миграции, веб и воркер
+curl http://localhost:8000/health            # {"status":"ok"}
+```
+
+Проверки, которые должны проходить перед слиянием (их же запускает CI):
+
+```bash
+uv sync
+uv run ruff check . && uv run ruff format --check .
+uv run pyright
+scripts/fetch-panel-openapi.sh  # OpenAPI панели для контрактного теста (один раз)
+uv run pytest           # нужна база: docker compose -f compose.dev.yaml up -d test-db
+cd admin && npm ci && npm run typecheck && npm run build
+```
+
+Команда `remnabay` запускает роли одного образа: `web`, `worker`, `migrate` и `healthcheck web|worker`.
 
 Лицензия — [MIT](LICENSE).
