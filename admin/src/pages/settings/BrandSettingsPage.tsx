@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { brandCss } from '@/lib/brand'
+import { tooLargeMessage } from '@/lib/files'
 import { TelegramApplyDialog, TelegramResult } from '@/pages/settings/TelegramApply'
 
 type Settings = Schemas['BrandSettingsOut']
@@ -80,6 +81,14 @@ function Preview({ palette }: { palette: Palette }) {
   )
 }
 
+// Как MAX_ASSET_BYTES на сервере
+const MAX_ASSET_MEGABYTES = 1
+// Знак может быть с непрозрачным фоном, горизонтальный логотип — нет (решение 0076)
+const ACCEPTED: Record<AssetKind, string> = {
+  mark: 'image/svg+xml,image/png,image/jpeg',
+  logo: 'image/svg+xml,image/png',
+}
+
 function AssetUpload({
   kind,
   settings,
@@ -96,7 +105,9 @@ function AssetUpload({
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file) return
-    setError(null)
+    const tooLarge = tooLargeMessage(file, MAX_ASSET_MEGABYTES)
+    setError(tooLarge)
+    if (tooLarge) return
     const { data, error: failure } = await fetchClient.PUT('/api/admin/settings/brand/assets/{kind}', {
       params: { path: { kind } },
       body: file as unknown as never,
@@ -124,7 +135,7 @@ function AssetUpload({
             <span className="text-xs text-muted-foreground">нет</span>
           )}
         </div>
-        <input ref={input} type="file" accept="image/svg+xml,image/png" className="hidden" onChange={(event) => void upload(event)} />
+        <input ref={input} type="file" accept={ACCEPTED[kind]} className="hidden" onChange={(event) => void upload(event)} />
         <Button variant="outline" onClick={() => input.current?.click()}>
           <Upload />
           {asset ? 'Заменить' : 'Загрузить'}
@@ -220,10 +231,10 @@ export function BrandSettingsPage() {
           <Field id="brand-name" label="Название" hint="Видно клиентам в боте и команде в админке.">
             <Input id="brand-name" value={form.name} maxLength={64} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           </Field>
-          <Field id="brand-mark" label="Квадратный знак" hint="Обязателен. SVG или PNG с прозрачным фоном, не меньше 512×512.">
+          <Field id="brand-mark" label="Квадратный знак" hint="Обязателен. SVG, PNG или JPEG до 1 МБ, квадрат не меньше 512×512. Лучше с прозрачным фоном: так знак смотрится на раме в обеих темах.">
             <AssetUpload kind="mark" settings={data} onChanged={refreshBrand} />
           </Field>
-          <Field id="brand-logo" label="Горизонтальный логотип" hint="По желанию. Без него показываются знак и название.">
+          <Field id="brand-logo" label="Горизонтальный логотип" hint="По желанию. SVG или PNG с прозрачным фоном, до 1 МБ. Без него показываются знак и название.">
             <AssetUpload kind="logo" settings={data} onChanged={refreshBrand} />
           </Field>
         </div>

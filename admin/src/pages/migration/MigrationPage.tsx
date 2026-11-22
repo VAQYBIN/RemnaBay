@@ -7,6 +7,7 @@ import { $api, errorMessage, fetchClient } from '@/api/client'
 import { Module, PageTitle } from '@/components/frame/Module'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { tooLargeMessage } from '@/lib/files'
 import { formatDateTime } from '@/lib/format'
 import { isOwner, type Member } from '@/lib/session'
 import { cn } from '@/lib/utils'
@@ -82,7 +83,10 @@ export function MigrationPage() {
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file) return
-    setError(null)
+    // Как MAX_FILE_BYTES на сервере
+    const tooLarge = tooLargeMessage(file, 50)
+    setError(tooLarge)
+    if (tooLarge) return
     setUploading(true)
     try {
       const { data: run, error: failure } = await fetchClient.POST('/api/admin/migration/import', {
@@ -142,7 +146,8 @@ export function MigrationPage() {
           <p className="text-sm text-muted-foreground">
             Файл в промежуточном формате переносит то, что знал прежний бот: реферальные коды и пригласивших, триал,
             оплаты. Пользователи панели усыновляются в том же прогоне. Для remnawave-tg-shop файл делает команда{' '}
-            <code className="rounded bg-muted px-1 py-0.5 text-xs">remnabay adapter remnawave-tg-shop</code>.
+            <code className="rounded bg-muted px-1 py-0.5 text-xs">remnabay adapter remnawave-tg-shop</code>. Файл — до
+            50 МБ.
           </p>
         </Module>
       </div>

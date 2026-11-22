@@ -1,8 +1,10 @@
 """Логотипы оператора: квадратный знак и горизонтальный логотип (1.11, решения 0038, 0051).
 
 Хранятся в базе: одна резервная копия и переезд без отдельной папки (0051).
-Проверки при загрузке: SVG или PNG не больше 1 МБ; квадратный знак — квадрат,
-PNG — не меньше 512×512; у PNG — прозрачный фон (есть альфа-канал).
+Проверки при загрузке (решение 0076): файл не больше 1 МБ. Квадратный знак — SVG,
+PNG или JPEG, квадрат, картинка не меньше 512×512; фон может быть непрозрачным.
+Горизонтальный логотип — SVG или PNG с прозрачным фоном (есть альфа-канал): он
+стоит на раме в обеих темах.
 """
 
 import hashlib
@@ -23,6 +25,7 @@ from remnabay.journal import Actor, Outcome, Subject, record
 
 PNG = "image/png"
 SVG = "image/svg+xml"
+JPEG = "image/jpeg"
 MAX_ASSET_BYTES = 1024 * 1024
 MIN_MARK_PIXELS = 512
 # Квадрат с точностью до 1 %: у векторного знака размеры бывают дробными
@@ -32,6 +35,9 @@ _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 _PNG_MIN_BYTES = 33
 # Цветовые типы PNG с альфа-каналом: оттенки серого + альфа, RGBA
 _PNG_ALPHA_TYPES = frozenset({4, 6})
+_JPEG_START = b"\xff\xd8\xff"
+# Маркеры начала кадра JPEG (SOF0–SOF15, кроме DHT, JPG и DAC): в них размер картинки
+_SOF_MARKERS = frozenset(range(0xC0, 0xD0)) - {0xC4, 0xC8, 0xCC}
 _NUMBER = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
 JOURNAL_SUBJECT = "brand_asset"
 
@@ -91,6 +97,23 @@ def _png_size(data: bytes) -> tuple[_Size, bool]:
     return _Size(width, height), transparent
 
 
+def jpeg_size(data: bytes) -> tuple[int, int] | None:
+    """Ширина и высота JPEG по маркеру начала кадра; `None` — не JPEG."""
+    if not data.startswith(_JPEG_START):
+        return None
+    position = 2
+    while position + 4 <= len(data):
+        if data[position] != 0xFF:
+            break
+        marker = data[position + 1]
+        length = struct.unpack(">H", data[position + 2 : position + 4])[0]
+        if marker in _SOF_MARKERS and position + 9 <= len(data):
+            height, width = struct.unpack(">HH", data[position + 5 : position + 9])
+            return width, height
+        position += 2 + length
+    return None
+
+
 def _svg_length(value: str | None) -> float | None:
     if value is None or value.strip().endswith("%"):
         return None
@@ -121,19 +144,32 @@ def _svg_size(data: bytes) -> _Size:
     return _Size(width, height)
 
 
+def _raster_size(kind: AssetKind, content_type: str, data: bytes) -> _Size:
+    if content_type == JPEG:
+        size = jpeg_size(data)
+        if size is None:
+            raise AssetError("Файл не похож на JPEG")
+        return _Size(*size)
+    size, transparent = _png_size(data)
+    if kind == AssetKind.LOGO and not transparent:
+        raise AssetError("Горизонтальный логотип — PNG с прозрачным фоном")
+    return size
+
+
 def validate_asset(kind: AssetKind, content_type: str, data: bytes) -> None:
     if len(data) > MAX_ASSET_BYTES:
         raise AssetError("Файл больше 1 МБ")
-    if content_type == PNG:
-        size, transparent = _png_size(data)
-        if not transparent:
-            raise AssetError("Нужен PNG с прозрачным фоном")
+    raster = (PNG, JPEG) if kind == AssetKind.MARK else (PNG,)
+    if content_type in raster:
+        size = _raster_size(kind, content_type, data)
         if kind == AssetKind.MARK and min(size.width, size.height) < MIN_MARK_PIXELS:
             raise AssetError("Квадратный знак — не меньше 512×512 пикселей")
     elif content_type == SVG:
         size = _svg_size(data)
+    elif kind == AssetKind.MARK:
+        raise AssetError("Квадратный знак — SVG, PNG или JPEG")
     else:
-        raise AssetError("Логотип — SVG или PNG")
+        raise AssetError("Горизонтальный логотип — SVG или PNG")
     if kind == AssetKind.MARK and not size.square:
         raise AssetError("Знак должен быть квадратным")
 

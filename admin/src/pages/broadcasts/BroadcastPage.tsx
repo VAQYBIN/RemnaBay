@@ -37,6 +37,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Textarea } from '@/components/ui/textarea'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { tooLargeMessage } from '@/lib/files'
 import { formatCount, formatDateTime, plural } from '@/lib/format'
 import {
   escapeMarkup,
@@ -225,7 +226,10 @@ function ImageField({
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file) return
-    setError(null)
+    // Как MAX_IMAGE_BYTES на сервере
+    const tooLarge = tooLargeMessage(file, 10)
+    setError(tooLarge)
+    if (tooLarge) return
     const { data, error: failure } = await fetchClient.PUT('/api/admin/broadcasts/{broadcast_id}/image', {
       params: { path: { broadcast_id: broadcast.id } },
       body: file as unknown as never,
