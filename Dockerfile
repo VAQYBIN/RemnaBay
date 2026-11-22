@@ -5,7 +5,7 @@
 # Сборка админки: Node нужен только здесь, в итоговом образе его нет (0025).
 # Результат — статика, одинаковая для всех архитектур: собирается на платформе
 # сборщика, без эмуляции arm64
-FROM --platform=$BUILDPLATFORM node:24.21.0-trixie-slim AS admin
+FROM --platform=$BUILDPLATFORM node:24.22.3-trixie-slim AS admin
 WORKDIR /admin
 COPY admin/package.json admin/package-lock.json ./
 RUN npm ci
