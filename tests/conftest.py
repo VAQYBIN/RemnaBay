@@ -30,7 +30,7 @@ REQUIRED_ENV = {
 }
 
 # Необязательные параметры: убираются из окружения теста, чтобы не влиял `.env` разработчика
-OPTIONAL_ENV = ("DEV_MODE",)
+OPTIONAL_ENV = ("DEV_MODE", "TELEGRAM_PROXY")
 
 
 @pytest.fixture

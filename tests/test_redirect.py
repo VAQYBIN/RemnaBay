@@ -2,7 +2,7 @@
 
 import re
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -39,7 +39,8 @@ async def _subscription(shop: Shop) -> Subscription:
     client = await make_client(shop.session, telegram_id=USER.id)
     subscription = make_subscription(client, None, panel_user_id=7)
     subscription.panel_status = PanelUserStatus.ACTIVE
-    subscription.expires_at = datetime(2026, 12, 1, tzinfo=UTC)
+    # Через месяц, а не фиксированная дата: подписка должна оставаться активной
+    subscription.expires_at = datetime.now(UTC) + timedelta(days=30)
     await add(shop.session, subscription)
     return subscription
 

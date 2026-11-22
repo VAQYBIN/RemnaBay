@@ -1,11 +1,12 @@
-"""«Настройки → Оплата»: провайдеры и время жизни счёта (3.31, 3.33, 1.14, 0049).
+"""«Настройки → Оплата»: провайдеры, время жизни счёта, опрос неоплаченных счетов,
+повтор операций (3.8, 3.29, 3.31, 3.33, 3.42, 4.14, 1.14, 0049).
 
 Ключи провайдера проверяются у провайдера до сохранения и хранятся зашифрованными
 (0046); админка ключи не показывает. Провайдер, который не принимает валюту учёта,
 можно подключить, но клиенту он недоступен — админка это показывает (3.33).
 """
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -13,15 +14,29 @@ from pydantic import BaseModel, Field
 
 from remnabay.payments import (
     INVOICE_LIFETIME,
+    POLL_AFTER_EXPIRY,
+    POLL_AFTER_EXPIRY_HOURS,
+    POLL_INTERVAL,
+    POLL_INTERVAL_MINUTES,
     ConnectionState,
     ProviderAuthError,
     ProviderError,
     ProviderKeysError,
     Providers,
     ProviderUnavailableError,
+    payable_invoices,
 )
 from remnabay.shop import SHOP_CURRENCY
-from remnabay.shop_settings import get_setting, set_setting
+from remnabay.shop_settings import (
+    RETRY_ATTEMPTS,
+    RETRY_MAX_ATTEMPTS,
+    RETRY_WINDOW,
+    RETRY_WINDOW_MINUTES,
+    ShopSetting,
+    get_setting,
+    set_setting,
+    shop_time_zone,
+)
 from remnabay.web.admin._deps import AppSettings, DbSession, Owner
 from remnabay.web.payment_webhook import payment_webhook_path
 
@@ -42,11 +57,34 @@ class PaymentSettingsOut(BaseModel):
     providers: list[ProviderOut]
     currency: str
     invoice_lifetime_minutes: int
+    # Опрос неоплаченных счетов: как часто и сколько ещё после истечения счёта (3.29)
+    poll_interval_minutes: int
+    poll_after_expiry_hours: int
+    # Повтор операций: прекращение через окно или после числа попыток — что раньше (4.14)
+    retry_window_minutes: int
+    retry_max_attempts: int
 
 
 class PaymentSettingsIn(BaseModel):
+    """«Счёт»: время жизни (3.8) и опрос неоплаченных счетов (3.29)."""
+
     # От 5 минут до суток
     invoice_lifetime_minutes: Annotated[int, Field(ge=5, le=1440)]
+    poll_interval_minutes: Annotated[
+        int, Field(ge=POLL_INTERVAL_MINUTES[0], le=POLL_INTERVAL_MINUTES[1])
+    ]
+    poll_after_expiry_hours: Annotated[
+        int, Field(ge=POLL_AFTER_EXPIRY_HOURS[0], le=POLL_AFTER_EXPIRY_HOURS[1])
+    ]
+
+
+class RetrySettingsIn(BaseModel):
+    """«Повтор операций» (4.14)."""
+
+    retry_window_minutes: Annotated[
+        int, Field(ge=RETRY_WINDOW_MINUTES[0], le=RETRY_WINDOW_MINUTES[1])
+    ]
+    retry_max_attempts: Annotated[int, Field(ge=RETRY_ATTEMPTS[0], le=RETRY_ATTEMPTS[1])]
 
 
 class ProviderKeysIn(BaseModel):
@@ -58,11 +96,25 @@ class ProviderRejectedOut(BaseModel):
     message: str
 
 
+class PayableInvoicesOut(BaseModel):
+    """У клиентов есть счета провайдера, которые ещё могут оплатить (3.42)."""
+
+    reason: Literal["payable_invoices"] = "payable_invoices"
+    message: str
+    count: int
+    # Когда закончится окно опроса последнего из счетов; показывается в часовом поясе магазина
+    window_ends_at: datetime
+    time_zone: str
+
+
 async def _payment_settings(
     session: DbSession, settings: AppSettings, providers: Providers
 ) -> PaymentSettingsOut:
     connections = await providers.connections(session)
     lifetime = await get_setting(session, INVOICE_LIFETIME)
+    poll_interval = await get_setting(session, POLL_INTERVAL)
+    poll_after = await get_setting(session, POLL_AFTER_EXPIRY)
+    retry_window = await get_setting(session, RETRY_WINDOW)
     await session.commit()
     return PaymentSettingsOut(
         providers=[
@@ -76,8 +128,22 @@ async def _payment_settings(
             for connection in connections
         ],
         currency=await get_setting(session, SHOP_CURRENCY),
-        invoice_lifetime_minutes=int(lifetime.total_seconds() // 60),
+        invoice_lifetime_minutes=_minutes(lifetime),
+        poll_interval_minutes=_minutes(poll_interval),
+        poll_after_expiry_hours=int(poll_after.total_seconds() // 3600),
+        retry_window_minutes=_minutes(retry_window),
+        retry_max_attempts=await get_setting(session, RETRY_MAX_ATTEMPTS),
     )
+
+
+def _minutes(value: timedelta) -> int:
+    return int(value.total_seconds() // 60)
+
+
+async def _save[T](session: DbSession, setting: ShopSetting[T], value: T, member_id: int) -> None:
+    """Сохраняет настройку, если она изменилась; изменение — в журнал (4.25)."""
+    if await get_setting(session, setting) != value:
+        await set_setting(session, setting, value, member_id=member_id)
 
 
 def _app_providers(request: Request) -> Providers:
@@ -101,10 +167,29 @@ async def update_payment_settings(
     settings: AppSettings,
     owner: Owner,
 ) -> PaymentSettingsOut:
-    """Время жизни счёта (3.8)."""
-    lifetime = timedelta(minutes=body.invoice_lifetime_minutes)
-    if await get_setting(session, INVOICE_LIFETIME) != lifetime:
-        await set_setting(session, INVOICE_LIFETIME, lifetime, member_id=owner.id)
+    """Время жизни счёта (3.8) и опрос неоплаченных счетов (3.29). Действуют сразу:
+    очередной опрос берёт значения из настроек."""
+    await _save(
+        session, INVOICE_LIFETIME, timedelta(minutes=body.invoice_lifetime_minutes), owner.id
+    )
+    await _save(session, POLL_INTERVAL, timedelta(minutes=body.poll_interval_minutes), owner.id)
+    await _save(session, POLL_AFTER_EXPIRY, timedelta(hours=body.poll_after_expiry_hours), owner.id)
+    await session.commit()
+    return await _payment_settings(session, settings, _app_providers(request))
+
+
+@router.put("/settings/payment/retry")
+async def update_retry_settings(
+    body: RetrySettingsIn,
+    request: Request,
+    session: DbSession,
+    settings: AppSettings,
+    owner: Owner,
+) -> PaymentSettingsOut:
+    """Повтор операций (4.14): воркер берёт окно и лимит попыток из настроек при каждом
+    решении о повторе — без перезапуска."""
+    await _save(session, RETRY_WINDOW, timedelta(minutes=body.retry_window_minutes), owner.id)
+    await _save(session, RETRY_MAX_ATTEMPTS, body.retry_max_attempts, owner.id)
     await session.commit()
     return await _payment_settings(session, settings, _app_providers(request))
 
@@ -157,20 +242,42 @@ async def connect_provider(
     return await _payment_settings(session, settings, providers)
 
 
-@router.delete("/settings/payment/providers/{code}", responses={status.HTTP_404_NOT_FOUND: {}})
+@router.delete(
+    "/settings/payment/providers/{code}",
+    responses={
+        status.HTTP_404_NOT_FOUND: {},
+        status.HTTP_409_CONFLICT: {"model": PayableInvoicesOut},
+    },
+)
 async def disconnect_provider(
     code: str,
     request: Request,
     session: DbSession,
     settings: AppSettings,
     owner: Owner,
+    confirm_payable: bool = False,
 ) -> PaymentSettingsOut:
     """Отключить провайдера: новые счета через него не создаются. Уже созданные счета
-    опрашиваются, пока ключи есть, — без ключей оплату найдёт команда."""
+    опрашиваются, пока ключи есть, — без ключей оплату найдёт команда.
+
+    Если клиенты ещё могут оплатить счета провайдера, без `confirm_payable` — отказ
+    с их числом: владелец должен увидеть предупреждение (3.42).
+    """
     providers = _app_providers(request)
     kind = providers.kind(code)
     if kind is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Такого провайдера нет")
-    await providers.disconnect(session, kind, member_id=owner.id)
+    payable = await payable_invoices(session, kind.code, now=datetime.now(UTC))
+    if payable.window_ends_at is not None and not confirm_payable:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            PayableInvoicesOut(
+                message="У клиентов есть счета, которые ещё могут быть оплачены",
+                count=payable.count,
+                window_ends_at=payable.window_ends_at,
+                time_zone=(await shop_time_zone(session)).key,
+            ).model_dump(mode="json"),
+        )
+    await providers.disconnect(session, kind, member_id=owner.id, payable_invoices=payable.count)
     await session.commit()
     return await _payment_settings(session, settings, providers)

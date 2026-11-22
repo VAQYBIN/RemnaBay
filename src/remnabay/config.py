@@ -9,6 +9,7 @@ from typing import Annotated
 
 from pydantic import (
     AfterValidator,
+    AnyUrl,
     HttpUrl,
     PositiveInt,
     PostgresDsn,
@@ -42,6 +43,21 @@ def _require_psycopg(dsn: PostgresDsn) -> PostgresDsn:
     return dsn
 
 
+# Прокси для Telegram (0074): HTTP-туннель или SOCKS5 — то, что умеют и бот (aiohttp-socks),
+# и вход в админку (httpx2 с socksio)
+_PROXY_SCHEMES = frozenset({"http", "socks5"})
+_PROXY_FORMAT = (
+    "ожидается адрес прокси http://хост:порт или socks5://хост:порт "
+    "(логин и пароль — по желанию: socks5://логин:пароль@хост:порт)"
+)
+
+
+def _require_proxy(url: AnyUrl) -> AnyUrl:
+    if url.scheme not in _PROXY_SCHEMES or not url.host or url.port is None:
+        raise PydanticCustomError("telegram_proxy", _PROXY_FORMAT)
+    return url
+
+
 def _require_encryption_key(key: SecretStr) -> SecretStr:
     if not is_valid_key(key.get_secret_value()):
         raise PydanticCustomError(
@@ -53,10 +69,11 @@ def _require_encryption_key(key: SecretStr) -> SecretStr:
 type HttpsUrl = Annotated[HttpUrl, AfterValidator(_require_https)]
 type EncryptionKey = Annotated[SecretStr, AfterValidator(_require_encryption_key)]
 type PsycopgDsn = Annotated[PostgresDsn, AfterValidator(_require_psycopg)]
+type ProxyUrl = Annotated[AnyUrl, AfterValidator(_require_proxy)]
 
 
 class Settings(BaseSettings):
-    """Параметры `.env`: все обязательные, кроме режима разработки.
+    """Параметры `.env`: все обязательные, кроме прокси для Telegram и режима разработки.
 
     Пустое значение считается незаданным.
     """
@@ -78,9 +95,17 @@ class Settings(BaseSettings):
     owner_telegram_id: PositiveInt
     public_url: HttpsUrl
     encryption_key: EncryptionKey
+    # Прокси для запросов к Telegram — бот и вход в админку — с сервера без прямого
+    # доступа к Telegram (1.28, 0074). Панель и платёжные провайдеры ходят напрямую
+    telegram_proxy: ProxyUrl | None = None
     # Режим разработки (0049, 0051): документация API, бот опросом, cookie без HTTPS.
     # Оператор его не задаёт
     dev_mode: bool = False
+
+    @property
+    def telegram_proxy_url(self) -> str | None:
+        """Адрес прокси для клиентов Telegram или `None`, если прокси не задан."""
+        return str(self.telegram_proxy) if self.telegram_proxy is not None else None
 
     @property
     def bot_id(self) -> str:
@@ -125,9 +150,21 @@ _MESSAGES_BY_ERROR_TYPE = {
 }
 
 
+# Уточнения для отдельных параметров: оператор пишет домен магазина без https:// —
+# общее «ожидается адрес» не подсказывает, что не так (находка проверки этапа 11)
+_MESSAGES_BY_FIELD_AND_TYPE = {
+    ("public_url", "url_parsing"): (
+        "адрес должен начинаться с https://, например https://shop.example.com"
+    ),
+    ("telegram_proxy", "url_parsing"): _PROXY_FORMAT,
+}
+
+
 def _describe(error: ErrorDetails) -> str:
     field = str(error["loc"][0]) if error["loc"] else "?"
-    message = _MESSAGES_BY_ERROR_TYPE.get(error["type"], error["msg"])
+    message = _MESSAGES_BY_FIELD_AND_TYPE.get(
+        (field, error["type"]), _MESSAGES_BY_ERROR_TYPE.get(error["type"], error["msg"])
+    )
     return f"{field.upper()}: {message}"
 
 

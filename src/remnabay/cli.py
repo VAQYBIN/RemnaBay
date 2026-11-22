@@ -8,11 +8,13 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from remnabay import healthcheck
-from remnabay.config import ConfigError, load_settings
+from remnabay.config import ConfigError, Settings, load_settings
 from remnabay.crypto import generate_key
 
 # Код выхода при неверных параметрах .env (1.1)
 EXIT_CONFIG_ERROR = 2
+# Код выхода процесса, который потерял работоспособность (0073): Docker поднимет его заново
+EXIT_UNHEALTHY = 1
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 # Библиотеки, которые пишут строку на каждый запрос (клиент панели — раз в минуту
 # только от проверки связи): в логе — только их предупреждения и ошибки
@@ -73,6 +75,27 @@ def _adapter(source: str, output: str) -> int:
     return 0
 
 
+def _serve_web(settings: Settings, host: str, port: int) -> int:
+    """Рабочий режим веба: сервер останавливается и сам, если потерял работоспособность."""
+    import uvicorn
+
+    from remnabay.web.app import Watchdog, create_app
+
+    server: uvicorn.Server | None = None
+    lost = False
+
+    def stop_unhealthy() -> None:
+        nonlocal lost
+        lost = True
+        if server is not None:
+            server.should_exit = True
+
+    app = create_app(settings, startup=True, watchdog=Watchdog(on_lost=stop_unhealthy))
+    server = uvicorn.Server(uvicorn.Config(app, host=host, port=port))
+    server.run()
+    return EXIT_UNHEALTHY if lost else 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     configure_logging()
     args = _parse_args(argv)
@@ -110,21 +133,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         return EXIT_CONFIG_ERROR
 
     if args.command == "web":
+        if not args.reload:
+            return _serve_web(settings, args.host, args.port)
         import uvicorn
 
+        # Разработка: сервер перезапускается при изменении кода и сам читает настройки
         uvicorn.run(
             "remnabay.web.app:create_app_from_env",
             factory=True,
             host=args.host,
             port=args.port,
-            reload=args.reload,
+            reload=True,
             # Следить только за кодом пакета, а не за всем окружением
-            reload_dirs=[str(Path(__file__).parent)] if args.reload else None,
+            reload_dirs=[str(Path(__file__).parent)],
         )
     elif args.command == "worker":
         from remnabay.worker.main import run
 
-        run(settings)
+        if not run(settings):
+            return EXIT_UNHEALTHY
     else:
         from remnabay.migrations import upgrade_to_head
 

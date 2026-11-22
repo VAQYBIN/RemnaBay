@@ -63,11 +63,25 @@ function renderNodes(nodes: MarkupNode[]): ReactNode[] {
   })
 }
 
-function PreviewButton({ children, style }: { children: ReactNode; style?: ButtonStyle | null }) {
+/** Кнопка под сообщением — как в Telegram. */
+export function PreviewButton({ children, style }: { children: ReactNode; style?: ButtonStyle | null }) {
   return (
     <span className={cn('flex min-h-9 items-center justify-center rounded-lg px-3 text-center text-sm', previewClass(style))}>
       {children}
     </span>
+  )
+}
+
+/** «Пузырь» сообщения Telegram: изображение и текст как есть, с переносами строк.
+ *  Общий для рассылки и «Тексты бота» (1.29). */
+export function MessageBubble({ imageUrl, empty = false, children }: { imageUrl?: string | null; empty?: boolean; children?: ReactNode }) {
+  return (
+    <div className="overflow-hidden rounded-2xl rounded-bl-md border bg-background shadow-sm">
+      {imageUrl && <img src={imageUrl} alt="" className="max-h-80 w-full object-cover" />}
+      {children !== undefined && (
+        <p className={cn('px-3.5 py-2.5 text-sm leading-relaxed break-words whitespace-pre-wrap', empty && 'text-muted-foreground')}>{children}</p>
+      )}
+    </div>
   )
 }
 
@@ -85,14 +99,9 @@ export function MessagePreview({
   const empty = nodes.length === 0
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="overflow-hidden rounded-2xl rounded-bl-md border bg-background shadow-sm">
-        {imageUrl && <img src={imageUrl} alt="" className="max-h-80 w-full object-cover" />}
-        {(!empty || !imageUrl) && (
-          <p className={cn('px-3.5 py-2.5 text-sm leading-relaxed break-words whitespace-pre-wrap', empty && 'text-muted-foreground')}>
-            {empty ? 'Текст сообщения' : renderNodes(nodes)}
-          </p>
-        )}
-      </div>
+      <MessageBubble imageUrl={imageUrl} empty={empty}>
+        {!empty || !imageUrl ? (empty ? 'Текст сообщения' : renderNodes(nodes)) : undefined}
+      </MessageBubble>
       {content.buy && <PreviewButton style={content.buy_style}>Купить подписку</PreviewButton>}
       {content.renew && <PreviewButton style={content.renew_style}>Продлить</PreviewButton>}
       {content.links.map((link, index) => (

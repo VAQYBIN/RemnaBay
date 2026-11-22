@@ -110,6 +110,17 @@ RETRY_WINDOW = ShopSetting("retry.window", _DURATION, timedelta(hours=1))
 # «Панель»
 PANEL_SYNC_INTERVAL = ShopSetting("panel.sync_interval", _DURATION, timedelta(minutes=15))
 PANEL_OUTAGE_ALERT_AFTER = ShopSetting("panel.outage_alert_after", _DURATION, timedelta(minutes=5))
+
+# Пределы, в которых владелец меняет эти настройки в админке. Спека их не задаёт —
+# это предложение для владельца (решение не принято): не так часто, чтобы нагружать
+# панель и очередь, и не так редко, чтобы магазин узнавал о проблеме через сутки.
+# Повтор операций: окно — от 5 минут до суток; попыток — от 3 до 100
+RETRY_WINDOW_MINUTES = (5, 1440)
+RETRY_ATTEMPTS = (3, 100)
+# Сверка с панелью — от 5 минут до суток; проверка связи идёт раз в минуту, поэтому
+# уведомление о недоступности — не раньше чем через минуту и не позже чем через сутки
+PANEL_SYNC_MINUTES = (5, 1440)
+PANEL_OUTAGE_ALERT_MINUTES = (1, 1440)
 PANEL_WEBHOOK_SECRET = SecretSetting("panel.webhook_secret")
 # Секрет вебхука Telegram: бот получает обновления только с ним (0051)
 TELEGRAM_WEBHOOK_SECRET = SecretSetting("telegram.webhook_secret")

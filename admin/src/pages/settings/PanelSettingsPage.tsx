@@ -6,6 +6,7 @@ import { $api, errorMessage } from '@/api/client'
 import { CopyField } from '@/components/CopyField'
 import { Field } from '@/components/Field'
 import { Module } from '@/components/frame/Module'
+import { PanelConnection } from '@/components/PanelConnection'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
@@ -18,10 +19,104 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { formatDateTime } from '@/lib/format'
+import { formatDateTime, whole } from '@/lib/format'
+import { panelText } from '@/pages/home/Checklist'
 
-/** «Панель»: адрес и секрет вебхука (1.9). Секрет — созданный магазином или свой,
- *  если в панели он уже задан, например для прежнего бота (решение 0052). Префикс имён
+// Пределы — как в API (src/remnabay/shop_settings.py)
+const SYNC_MINUTES = [5, 1440] as const
+const OUTAGE_ALERT_MINUTES = [1, 1440] as const
+
+/** Состояние подключения (А11): на связи ли панель, её версия, последняя сверка и
+ *  последнее событие — те же данные, что на главной. */
+function ConnectionModule({ timeZone }: { timeZone: string }) {
+  const overview = $api.useQuery('get', '/api/admin/overview', {}, { refetchInterval: 60_000 })
+  const checklist = $api.useQuery('get', '/api/admin/checklist')
+  const item = checklist.data?.items.find((candidate) => candidate.key === 'panel')
+  if (!overview.data) return null
+  const version = item ? (item.panel?.version ?? '—') : 'проверяется…'
+  return (
+    <Module title="Состояние подключения">
+      <div className="flex flex-col gap-4">
+        <PanelConnection overview={overview.data} timeZone={timeZone} version={version} />
+        {item?.panel?.error && <p className="text-sm text-warning-text">{panelText(item)}</p>}
+      </div>
+    </Module>
+  )
+}
+
+/** Интервал сверки с панелью (4.8) и уведомление о недоступности (4.13). Действуют сразу. */
+function IntervalsModule({ sync, alert }: { sync: number; alert: number }) {
+  const queryClient = useQueryClient()
+  const [form, setForm] = useState({ sync: String(sync), alert: String(alert) })
+  const [saved, setSaved] = useState(false)
+  const save = $api.useMutation('put', '/api/admin/settings/panel/intervals', {
+    onSuccess: () => {
+      setSaved(true)
+      void queryClient.invalidateQueries({ queryKey: ['get', '/api/admin/settings/panel'] })
+    },
+  })
+  const syncMinutes = whole(form.sync, ...SYNC_MINUTES)
+  const alertMinutes = whole(form.alert, ...OUTAGE_ALERT_MINUTES)
+  const change = (patch: Partial<typeof form>) => {
+    setSaved(false)
+    setForm({ ...form, ...patch })
+  }
+  const submit = () => {
+    if (syncMinutes === null || alertMinutes === null) return
+    save.mutate({ body: { sync_interval_minutes: syncMinutes, outage_alert_minutes: alertMinutes } })
+  }
+  return (
+    <Module title="Сверка и недоступность">
+      <form
+        className="flex flex-col gap-5"
+        onSubmit={(event) => {
+          event.preventDefault()
+          submit()
+        }}
+      >
+        <Field
+          id="sync-interval"
+          label="Интервал сверки с панелью, минут"
+          hint={`От ${SYNC_MINUTES[0]} до ${SYNC_MINUTES[1]}. По умолчанию — 15. Сверка находит изменения, о которых панель не сообщила вебхуком.`}
+        >
+          <Input
+            id="sync-interval"
+            inputMode="numeric"
+            className="tabular w-32"
+            value={form.sync}
+            aria-invalid={syncMinutes === null}
+            onChange={(event) => change({ sync: event.target.value })}
+          />
+        </Field>
+        <Field
+          id="outage-alert"
+          label="Уведомить о недоступности панели через, минут"
+          hint={`От ${OUTAGE_ALERT_MINUTES[0]} до ${OUTAGE_ALERT_MINUTES[1]}. По умолчанию — 5. Одно уведомление на простой и ещё одно — когда связь вернётся.`}
+        >
+          <Input
+            id="outage-alert"
+            inputMode="numeric"
+            className="tabular w-32"
+            value={form.alert}
+            aria-invalid={alertMinutes === null}
+            onChange={(event) => change({ alert: event.target.value })}
+          />
+        </Field>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button type="submit" disabled={syncMinutes === null || alertMinutes === null || save.isPending}>
+            Сохранить
+          </Button>
+          {save.error && <p className="text-sm text-danger-text">{errorMessage(save.error, 'Проверьте значения')}</p>}
+          {saved && !save.error && <p className="text-sm text-muted-foreground">Сохранено</p>}
+        </div>
+      </form>
+    </Module>
+  )
+}
+
+/** «Панель»: состояние подключения, адрес и секрет вебхука (1.9). Секрет — созданный
+ *  магазином или свой, если в панели он уже задан, например для прежнего бота (решение
+ *  0052). Интервал сверки (4.8) и уведомление о недоступности (4.13). Префикс имён
  *  пользователей в панели задаётся один раз (решение 0057). */
 export function PanelSettingsPage() {
   const queryClient = useQueryClient()
@@ -66,6 +161,8 @@ export function PanelSettingsPage() {
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
+      <ConnectionModule timeZone={timeZone} />
+      <IntervalsModule sync={data.sync_interval_minutes} alert={data.outage_alert_minutes} />
       <Module title="Вебхук панели">
         <div className="flex flex-col gap-4">
           <p className="text-sm text-muted-foreground">

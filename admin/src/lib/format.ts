@@ -34,3 +34,10 @@ export function plural(count: number, one: string, few: string, many: string): s
   const rule = new Intl.PluralRules(LOCALE).select(count)
   return rule === 'one' ? one : rule === 'few' ? few : many
 }
+
+/** Целое число из поля ввода в пределах `min`–`max`; иначе `null`. */
+export function whole(text: string, min: number, max: number): number | null {
+  if (!/^\d+$/.test(text.trim())) return null
+  const value = Number(text.trim())
+  return value >= min && value <= max ? value : null
+}

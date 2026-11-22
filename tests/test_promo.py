@@ -462,6 +462,8 @@ async def test_8_1_8_2_owner_creates_promo_via_api(shop: Shop, tariff: Tariff) -
     """8.1, 8.2: владелец создаёт промокод с ограничениями; повтор кода в другом
     регистре — отказ."""
     await _sign_in(shop, TeamRole.OWNER)
+    # Через два месяца, а не фиксированная дата: срок действия должен быть в будущем
+    until = (datetime.now(UTC) + timedelta(days=60)).date()
     body = {
         "code": "sale10",
         "kind": "percent_discount",
@@ -469,7 +471,7 @@ async def test_8_1_8_2_owner_creates_promo_via_api(shop: Shop, tariff: Tariff) -
         "max_activations": 100,
         "only_without_payments": True,
         "tariff_ids": [tariff.id],
-        "valid_until": "2026-12-31",
+        "valid_until": until.isoformat(),
     }
     response = await shop.http.post(f"{API}/promo-codes", json=body)
     assert response.status_code == 201, response.text
@@ -477,10 +479,10 @@ async def test_8_1_8_2_owner_creates_promo_via_api(shop: Shop, tariff: Tariff) -
     assert (created["code"], created["value"], created["state"]) == ("SALE10", 10, "active")
     assert created["tariff_ids"] == [tariff.id]
     # Последний день — включительно, в часовом поясе магазина (по умолчанию московском)
-    assert created["valid_until"] == "2026-12-31"
+    assert created["valid_until"] == until.isoformat()
     promo = await shop.session.get(PromoCode, created["id"])
     assert promo is not None
-    assert promo.valid_until == datetime(2026, 12, 31, 21, 0, tzinfo=UTC)
+    assert promo.valid_until == datetime(until.year, until.month, until.day, 21, tzinfo=UTC)
 
     again = await shop.http.post(f"{API}/promo-codes", json={**body, "code": "Sale10"})
     assert again.status_code == 409

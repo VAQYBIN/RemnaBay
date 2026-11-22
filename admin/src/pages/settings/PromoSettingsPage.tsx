@@ -5,16 +5,11 @@ import { Field } from '@/components/Field'
 import { Module } from '@/components/frame/Module'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { whole } from '@/lib/format'
 
 // Пределы — как в API (src/remnabay/promo/_entry.py)
 const MAX_FAILED_ATTEMPTS = 100
 const MAX_PAUSE_MINUTES = 1440
-
-function whole(text: string, min: number, max: number): number | null {
-  if (!/^\d+$/.test(text.trim())) return null
-  const value = Number(text.trim())
-  return value >= min && value <= max ? value : null
-}
 
 /** «Промокоды»: защита от перебора (8.13, 04-operator-settings). Неверной считается
  *  попытка, на которую клиент получил «нет или больше не действует». */

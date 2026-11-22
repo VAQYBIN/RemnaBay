@@ -155,8 +155,15 @@ class Providers:
         )
 
     async def disconnect(
-        self, session: AsyncSession, kind: ProviderKind, *, member_id: int
+        self,
+        session: AsyncSession,
+        kind: ProviderKind,
+        *,
+        member_id: int,
+        payable_invoices: int = 0,
     ) -> None:
+        """`payable_invoices` — сколько счетов ещё могли оплатить, когда владелец
+        отключил провайдера после предупреждения (3.42); пишется в журнал."""
         await session.execute(
             delete(ShopSettingValue).where(ShopSettingValue.key == _credentials_key(kind.code))
         )
@@ -166,6 +173,7 @@ class Providers:
             action="payments.provider_disconnected",
             outcome=Outcome.SUCCESS,
             subject=Subject(PROVIDER_SUBJECT, kind.code),
+            details={"payable_invoices": payable_invoices} if payable_invoices else None,
         )
 
     async def _journal_keys_lost(self, session: AsyncSession, kind: ProviderKind) -> None:

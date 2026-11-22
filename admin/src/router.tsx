@@ -8,6 +8,7 @@ import { ClientCardPage } from '@/pages/clients/ClientCardPage'
 import { ClientsPage } from '@/pages/clients/ClientsPage'
 import { ExpiringPage } from '@/pages/ExpiringPage'
 import { HomePage } from '@/pages/HomePage'
+import { JournalPage } from '@/pages/JournalPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { MigrationPage } from '@/pages/migration/MigrationPage'
 import { MigrationRunPage } from '@/pages/migration/MigrationRunPage'
@@ -22,6 +23,7 @@ import { PromoSettingsPage } from '@/pages/settings/PromoSettingsPage'
 import { ReminderSettingsPage } from '@/pages/settings/ReminderSettingsPage'
 import { SettingsLayout } from '@/pages/settings/SettingsLayout'
 import { ShopSettingsPage } from '@/pages/settings/ShopSettingsPage'
+import { TextsSettingsPage } from '@/pages/settings/TextsSettingsPage'
 import { TrialSettingsPage } from '@/pages/settings/TrialSettingsPage'
 import { TariffsPage } from '@/pages/TariffsPage'
 
@@ -45,12 +47,14 @@ export const router = createBrowserRouter(
         { path: 'broadcasts/:broadcastId', Component: BroadcastPage },
         { path: 'migration', Component: MigrationPage },
         { path: 'migration/:runId', Component: MigrationRunPage },
+        { path: 'journal', Component: JournalPage },
         {
           path: 'settings',
           Component: SettingsLayout,
           children: [
             { index: true, element: <Navigate to="brand" replace /> },
             { path: 'brand', Component: BrandSettingsPage },
+            { path: 'texts', Component: TextsSettingsPage },
             { path: 'payment', Component: PaymentSettingsPage },
             { path: 'trial', Component: TrialSettingsPage },
             { path: 'reminders', Component: ReminderSettingsPage },

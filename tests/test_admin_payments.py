@@ -10,7 +10,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from remnabay.domain.payments import Payment, PaymentPurpose, PaymentState
-from remnabay.domain.tariffs import TariffState
+from remnabay.domain.promo import PromoCode, PromoKind
+from remnabay.domain.tariffs import Tariff, TariffState
 from remnabay.domain.team import TeamMember, TeamRole
 from remnabay.messaging import SendArgs
 from remnabay.payments import TariffSnapshot, apply_payment
@@ -153,6 +154,36 @@ async def test_4_21_card_shows_client_conditions_attempts_and_error(shop: Shop) 
     assert attempt["error"] == "Пользователь не найден"
     assert body["last_error"] == "Пользователь не найден"
     assert body["actions"] == ["retry", "apply_as_new", "resolve"]
+
+
+@pytest.mark.usefixtures("member")
+async def test_4_21_card_shows_promo_code_and_discount(shop: Shop) -> None:
+    """4.21, А5: в карточке — промокод платежа: код, вид и скидка, вошедшая в счёт;
+    у платежа без промокода его нет."""
+    promo = PromoCode(code="SALE20", kind=PromoKind.PERCENT_DISCOUNT, discount_percent=20)
+    await add(shop.session, promo)
+    payment = await _not_applied(
+        shop,
+        promo_code_id=promo.id,
+        amount=Decimal("159.20"),
+        discount_amount=Decimal("39.80"),
+    )
+    body = (await shop.http.get(f"{API}/payments/{payment.id}")).json()
+
+    assert body["promo"] == {
+        "code": "SALE20",
+        "kind": "percent_discount",
+        "discount_percent": 20,
+        "discount_amount": "39.80",
+    }
+    tariff = await shop.session.get(Tariff, payment.tariff_id)
+    plain = make_payment(
+        await make_client(shop.session, telegram_id=778),
+        tariff,
+        tariff_snapshot=payment.tariff_snapshot,
+    )
+    await add(shop.session, plain)
+    assert (await shop.http.get(f"{API}/payments/{plain.id}")).json()["promo"] is None
 
 
 @pytest.mark.usefixtures("member")

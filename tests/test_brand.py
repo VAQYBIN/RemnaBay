@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from remnabay.brand import (
+    JPEG,
     MAX_ASSET_BYTES,
     PNG,
     SVG,
@@ -16,7 +17,7 @@ from remnabay.brand import (
 )
 from remnabay.domain.team import TeamMember, TeamRole
 from remnabay.journal import JournalEntry
-from tests.brand_support import make_png, make_svg
+from tests.brand_support import make_jpeg, make_png, make_svg
 from tests.conftest import journaled_in_test
 from tests.domain_support import add, make_team_member
 from tests.web_support import Shop, running_shop
@@ -184,6 +185,8 @@ async def test_1_11_asset_too_large(shop: Shop, owner: TeamMember) -> None:
     )
 
     assert response.status_code == 413
+    # 0076: ошибка называет предел
+    assert response.json()["detail"] == "Файл больше 1 МБ"
 
 
 async def test_1_11_asset_can_be_removed(shop: Shop, owner: TeamMember) -> None:
@@ -203,6 +206,9 @@ async def test_1_11_asset_can_be_removed(shop: Shop, owner: TeamMember) -> None:
         (AssetKind.MARK, PNG, make_png(512, 512)),
         (AssetKind.MARK, PNG, make_png(1024, 1024)),
         (AssetKind.MARK, SVG, make_svg(64, 64)),
+        # 0076: знак может быть с непрозрачным фоном — PNG без прозрачности и JPEG
+        (AssetKind.MARK, PNG, make_png(512, 512, alpha=False)),
+        (AssetKind.MARK, JPEG, make_jpeg(512, 512)),
         (AssetKind.LOGO, SVG, make_svg(300, 80)),
         (AssetKind.LOGO, PNG, make_png(600, 160)),
     ],
@@ -217,8 +223,12 @@ def test_1_11_accepted_logos(kind: AssetKind, content_type: str, data: bytes) ->
         (AssetKind.MARK, PNG, make_png(511, 511), "не меньше 512×512"),
         (AssetKind.MARK, PNG, make_png(800, 600), "квадратным"),
         (AssetKind.MARK, SVG, make_svg(300, 80), "квадратным"),
-        (AssetKind.MARK, PNG, make_png(512, 512, alpha=False), "прозрачным фоном"),
-        (AssetKind.LOGO, "image/jpeg", b"\xff\xd8\xff", "SVG или PNG"),
+        (AssetKind.MARK, JPEG, make_jpeg(511, 511), "не меньше 512×512"),
+        (AssetKind.MARK, JPEG, make_jpeg(800, 600), "квадратным"),
+        (AssetKind.MARK, JPEG, b"not a jpeg", "не похож на JPEG"),
+        (AssetKind.MARK, "image/gif", b"GIF89a", "SVG, PNG или JPEG"),
+        (AssetKind.LOGO, PNG, make_png(600, 160, alpha=False), "прозрачным фоном"),
+        (AssetKind.LOGO, JPEG, make_jpeg(600, 160), "SVG или PNG"),
         (AssetKind.LOGO, PNG, b"not a png", "не похож на PNG"),
         (AssetKind.LOGO, PNG, make_png(600, 160)[:20], "не похож на PNG"),
         (AssetKind.LOGO, SVG, b"<html></html>", "не похож на SVG"),

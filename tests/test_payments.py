@@ -45,7 +45,8 @@ from tests.panel_support import fake_runtime
 from tests.queue_support import run_workers
 
 PROVIDER = "yookassa"
-END = datetime(2026, 12, 1, 9, 0, tzinfo=UTC)
+# Через месяц, а не фиксированная дата: подписка должна оставаться активной
+END = datetime.now(UTC).replace(minute=0, second=0, microsecond=0) + timedelta(days=30)
 
 
 @dataclass
@@ -325,7 +326,7 @@ async def test_4_22_retry_then_client_learns_result(db_session: AsyncSession) ->
     )
     assert message.variables == {"subscription_name": "Основная"}
     # Дата — сущностью date_time, запасной текст — при отправке (0044)
-    assert message.dates == {"end_date": datetime(2026, 12, 1, 9, 0, tzinfo=UTC)}
+    assert message.dates == {"end_date": END}
     assert ("payment.retried", ActorType.TEAM_MEMBER) in await _actions(db_session, payment)
 
 

@@ -37,5 +37,19 @@ async def test_1_26_about_for_every_role(shop: Shop, role: TeamRole) -> None:
     }
 
 
+async def test_0076_about_shows_full_image_version(
+    shop: Shop, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """1.26, 0076: в образе предварительной версии — полный номер сборки, например 0.1.0-rc.4."""
+    monkeypatch.setenv("REMNABAY_IMAGE_VERSION", "0.1.0-rc.4")
+    member = make_team_member(telegram_id=701, role=TeamRole.ASSISTANT)
+    await add(shop.session, member)
+    await shop.sign_in(member)
+
+    response = await shop.http.get("/api/admin/about")
+
+    assert response.json()["version"] == "0.1.0-rc.4"
+
+
 async def test_1_26_about_requires_login(shop: Shop) -> None:
     assert (await shop.http.get("/api/admin/about")).status_code == 401

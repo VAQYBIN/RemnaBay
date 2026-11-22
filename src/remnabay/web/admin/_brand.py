@@ -221,16 +221,14 @@ async def update_brand_settings(
 
 
 async def _save_welcome(session: DbSession, text: str | None, member_id: int) -> None:
+    """Приветствие — тот же текст бота `welcome_text`, что и в «Тексты бота» (1.29):
+    одно значение, те же проверки. Пустое поле здесь — возврат к тексту по умолчанию."""
     language = await _welcome_language(session)
-    default = load_default_catalogs()[language].texts[WELCOME_TEXT_KEY]
-    current = await get_override(session, WELCOME_TEXT_KEY, language)
-    if text is None or not text.strip() or text.strip() == default:
+    if text is None or not text.strip():
         await reset_override(session, WELCOME_TEXT_KEY, language, member_id=member_id)
         return
-    if text.strip() == current:
-        return
     try:
-        await save_override(session, WELCOME_TEXT_KEY, language, text.strip(), member_id=member_id)
+        await save_override(session, WELCOME_TEXT_KEY, language, text, member_id=member_id)
     except TextError as error:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
 

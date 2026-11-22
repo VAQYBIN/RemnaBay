@@ -2,14 +2,16 @@
 
 Воркер не отвечает по HTTP, поэтому о том, что он жив, говорит файл-пульс:
 цикл обновляет его время изменения, проверка здоровья смотрит, свежее ли оно.
+
+Если цикл задач долго не может сделать шаг (например, база недоступна), воркер
+сам завершается с ошибкой, и Docker поднимает его заново (0073). Пульс остаётся
+на случай, когда процесс завис так, что завершиться сам не может.
 """
 
 import asyncio
 import contextlib
 import logging
 import signal
-import tempfile
-import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -24,6 +26,7 @@ from remnabay.crypto import SecretBox
 from remnabay.db import create_engine
 from remnabay.devices import delete_devices
 from remnabay.guide import REFRESH_CONFIGS, refresh_configs_task
+from remnabay.healthcheck import DEFAULT_HEARTBEAT_PATH, remove_heartbeat, write_heartbeat
 from remnabay.messaging import TelegramSender, notify_team, send_message
 from remnabay.migration import TASKS as MIGRATION_TASKS
 from remnabay.panel import PanelClient, PanelUnavailableError
@@ -44,7 +47,7 @@ from remnabay.payments import (
 )
 from remnabay.payments.yookassa import YooKassaKind, yookassa_http
 from remnabay.promo import add_promo_days
-from remnabay.queue import RetryPolicy, TaskRegistry, Worker, WorkerConfig
+from remnabay.queue import RetryPolicy, TaskRegistry, Worker, WorkerConfig, WorkerStalledError
 from remnabay.refunds import change_term
 from remnabay.reminders import REMINDERS_TICK, reminders_tick, replan_reminders, send_reminders
 from remnabay.shop_settings import (
@@ -55,10 +58,7 @@ from remnabay.shop_settings import (
 )
 from remnabay.trial import create_trial, trial_processing_notice
 
-DEFAULT_HEARTBEAT_PATH = Path(tempfile.gettempdir()) / "remnabay-worker.heartbeat"
 HEARTBEAT_INTERVAL_SECONDS = 10.0
-# Несколько пропущенных пульсов подряд — воркер считается зависшим
-HEARTBEAT_MAX_AGE_SECONDS = 60.0
 
 # Виды задач магазина — общие для воркера и действий команды над проваленными.
 # Добавляются блоками, которые их вводят; очистка очереди встроена в сам воркер
@@ -122,26 +122,6 @@ async def retry_policy(session: AsyncSession) -> RetryPolicy:
     )
 
 
-# Операции с маленьким локальным файлом не блокируют цикл заметно
-def write_heartbeat(path: Path) -> None:
-    path.touch()
-
-
-def remove_heartbeat(path: Path) -> None:
-    path.unlink(missing_ok=True)
-
-
-def is_heartbeat_fresh(
-    path: Path, max_age: float = HEARTBEAT_MAX_AGE_SECONDS, now: float | None = None
-) -> bool:
-    try:
-        modified_at = path.stat().st_mtime
-    except FileNotFoundError:
-        return False
-    current = time.time() if now is None else now
-    return current - modified_at <= max_age
-
-
 async def _beat(stop: asyncio.Event, heartbeat_path: Path, interval: float) -> None:
     while not stop.is_set():
         write_heartbeat(heartbeat_path)
@@ -170,26 +150,32 @@ async def run_worker(
         logger.info("Воркер остановлен")
 
 
-def run(settings: Settings) -> None:
-    """Запускает воркер до SIGTERM или SIGINT."""
+def run(settings: Settings, config: WorkerConfig | None = None) -> bool:
+    """Запускает воркер до SIGTERM или SIGINT.
 
-    async def main() -> None:
+    `False` — воркер остановился, потеряв работоспособность (0073).
+    """
+
+    async def main() -> bool:
         stop = asyncio.Event()
         loop = asyncio.get_running_loop()
         for signal_number in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(signal_number, stop.set)
-        config = WorkerConfig()
-        engine = create_engine(settings, pool_size=config.pool_size)
-        sender = TelegramSender(settings.bot_token.get_secret_value())
+        worker_config = config or WorkerConfig()
+        engine = create_engine(settings, pool_size=worker_config.pool_size)
+        sender = TelegramSender(
+            settings.bot_token.get_secret_value(), proxy=settings.telegram_proxy_url
+        )
         panel = PanelClient(str(settings.panel_url), settings.panel_token.get_secret_value())
         yookassa = yookassa_http()
+        stalled: BaseException | None = None
         try:
             queue = Worker(
                 engine,
                 TASKS,
                 periodic=PERIODIC,
                 policy=retry_policy,
-                config=config,
+                config=worker_config,
                 unavailable=UNAVAILABLE,
                 on_failed=notify_operation_failed,
             )
@@ -203,11 +189,18 @@ def run(settings: Settings) -> None:
                     dev_mode=settings.dev_mode,
                 )
             ):
-                await run_worker(stop, queue=queue)
+                try:
+                    await run_worker(stop, queue=queue)
+                except* WorkerStalledError as group:
+                    stalled = group.exceptions[0]
         finally:
             await panel.aclose()
             await yookassa.aclose()
             await sender.close()
             await engine.dispose()
+        if stalled is not None:
+            logger.critical("Воркер потерял работоспособность и завершается: %s", stalled)
+            return False
+        return True
 
-    asyncio.run(main())
+    return asyncio.run(main())

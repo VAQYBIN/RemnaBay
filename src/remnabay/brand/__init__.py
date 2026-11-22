@@ -1,6 +1,7 @@
 """Бренд оператора на раме RemnaBay (решение 0038): название, логотип, цвета."""
 
 from remnabay.brand._assets import (
+    JPEG,
     MAX_ASSET_BYTES,
     PNG,
     SVG,
@@ -51,6 +52,7 @@ __all__ = [
     "BRAND_NAME",
     "BRAND_PRIMARY_COLOR",
     "BRAND_SECONDARY_COLOR",
+    "JPEG",
     "MAX_ASSET_BYTES",
     "MAX_AVATAR_BYTES",
     "MAX_DESCRIPTION_LENGTH",

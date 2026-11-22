@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 /** Разделы настроек этого этапа; остальные появятся со своими блоками. */
 const SECTIONS = [
   { to: 'brand', label: 'Бренд' },
+  { to: 'texts', label: 'Тексты бота' },
   { to: 'payment', label: 'Оплата' },
   { to: 'trial', label: 'Триал' },
   { to: 'reminders', label: 'Напоминания' },

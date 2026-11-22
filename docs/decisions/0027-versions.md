@@ -41,4 +41,5 @@
 - Точные номера фиксируются lock-файлами при начале кода; это решение задаёт базу и правила.
 
 ## Уточнение
-Генератор клиента админки из OpenAPI — openapi-typescript с openapi-fetch и openapi-react-query, [решение 0050](0050-admin-api-client.md).
+- Генератор клиента админки из OpenAPI — openapi-typescript с openapi-fetch и openapi-react-query, [решение 0050](0050-admin-api-client.md).
+- **Действия GitHub Actions** в workflow закрепляются полным SHA коммита с номером версии в комментарии (`actions/checkout@<sha> # v7.0.1`), а не тегом: тег можно перенести на другой коммит, а workflow выпуска публикует образ с правом записи в GHCR. Обновляет их Dependabot (2026-10-20, этап 11).

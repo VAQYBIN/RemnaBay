@@ -12,6 +12,7 @@ import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from functools import cached_property
 from importlib.resources import files
 from zoneinfo import ZoneInfo
 
@@ -19,7 +20,16 @@ from babel import Locale
 from babel.dates import format_date, format_time
 
 _VARIABLE = re.compile(r"\{(\w+)\}")
+# Остаток фигурных скобок после переменных: «{brand name}», «{brand_name», «}»
+_STRAY_BRACE = re.compile(r"\{[^{}\n]{0,40}\}?|\}")
 DATE_FALLBACK_KEY = "date.fallback"
+# Метки мест дат в собранном тексте (messaging, `Dates`): символы из области для
+# частного использования. В тексте оператора их быть не может — иначе дата встанет
+# не туда, поэтому такие тексты не сохраняются
+DATE_MARK_START = "\ue000"
+DATE_MARK_END = "\ue001"
+# Числа, по которым показываются примеры форм множественного числа
+_PLURAL_SAMPLE_RANGE = range(201)
 # Дата в запасном тексте: число, месяц словом на языке клиента, год — «1 ноября 2026»
 _DATE_PATTERN = "d MMMM y"
 _TIME_PATTERN = "HH:mm"
@@ -31,6 +41,16 @@ class TextError(Exception):
 
 def variables_of(template: str) -> set[str]:
     return set(_VARIABLE.findall(template))
+
+
+def variable_names(template: str) -> list[str]:
+    """Переменные шаблона в порядке появления, без повторов."""
+    return list(dict.fromkeys(_VARIABLE.findall(template)))
+
+
+def plural_key(unit_key: str, form: str) -> str:
+    """Ключ формы множественного числа как отдельного текста: `unit.days.few`."""
+    return f"{unit_key}.{form}"
 
 
 def substitute(template: str, variables: Mapping[str, str]) -> str:
@@ -52,6 +72,36 @@ class Catalog:
     language: str
     texts: Mapping[str, str]
     plurals: Mapping[str, Mapping[str, str]]
+
+    def plural_form(self, unit_key: str, count: int) -> str:
+        """Форма единицы для числа по правилам языка; нет такой формы — `other`."""
+        forms = self.plurals[unit_key]
+        category = Locale.parse(self.language).plural_form(count)
+        return category if category in forms else "other"
+
+    @cached_property
+    def plural_forms(self) -> dict[str, tuple[str, str]]:
+        """Формы множественного числа как отдельные тексты: ключ формы → (единица, форма)."""
+        return {
+            plural_key(unit_key, form): (unit_key, form)
+            for unit_key, forms in self.plurals.items()
+            for form in forms
+        }
+
+    @cached_property
+    def entries(self) -> dict[str, str]:
+        """Все тексты, которые оператор может переписать: обычные и формы
+        множественного числа (`unit.days.few`), — ключ → текст по умолчанию."""
+        result = dict(self.texts)
+        for key, (unit_key, form) in self.plural_forms.items():
+            result[key] = self.plurals[unit_key][form]
+        return result
+
+    def plural_counts(self, key: str) -> list[int]:
+        """Целые числа, для которых используется форма (`unit.days.few` → 2, 3, 4, 22…).
+        Пусто — форма для целых чисел не используется (у русского `other`)."""
+        unit_key, form = self.plural_forms[key]
+        return [n for n in _PLURAL_SAMPLE_RANGE if self.plural_form(unit_key, n) == form]
 
 
 def load_default_catalogs() -> dict[str, Catalog]:
@@ -117,12 +167,14 @@ class Texts:
     def quantity(self, unit_key: str, client_language: str | None, count: int) -> str:
         """Число с единицей по правилам множественного числа языка: «3 дня», «5 дней»."""
         for language in self._languages(client_language):
-            forms = self._catalogs[language].plurals.get(unit_key)
+            catalog = self._catalogs[language]
+            forms = catalog.plurals.get(unit_key)
             if forms is None:
                 continue
-            category = Locale.parse(language).plural_form(count)
-            form = forms.get(category) or forms["other"]
-            return substitute(form, {"count": str(count)})
+            form = catalog.plural_form(unit_key, count)
+            # Форма, переписанная оператором, важнее формы по умолчанию (1.29)
+            template = self._overrides.get((plural_key(unit_key, form), language), forms[form])
+            return substitute(template, {"count": str(count)})
         raise TextError(f"Нет форм множественного числа для {unit_key}")
 
     def date_fallback(
@@ -139,17 +191,37 @@ class Texts:
         )
 
 
-def check_override(catalogs: Mapping[str, Catalog], key: str, text: str) -> None:
-    """Правка оператора: ключ существует, переменные — только из текста по умолчанию.
-
-    Переменные можно переставлять и убирать, но не придумывать новые
-    (`03-bot-texts.md`, «Соглашения»).
-    """
-    defaults = [catalog.texts[key] for catalog in catalogs.values() if key in catalog.texts]
+def allowed_variables(catalogs: Mapping[str, Catalog], key: str) -> list[str]:
+    """Переменные, которые можно использовать в тексте: те, что в тексте по умолчанию
+    (на любом языке), в порядке появления."""
+    defaults = [catalog.entries[key] for catalog in catalogs.values() if key in catalog.entries]
     if not defaults:
         raise TextError(f"Нет текста с ключом {key}")
-    allowed = {name for default in defaults for name in variables_of(default)}
+    return list(dict.fromkeys(name for default in defaults for name in variable_names(default)))
+
+
+def check_override(catalogs: Mapping[str, Catalog], key: str, text: str) -> None:
+    """Правка оператора: ключ существует, текст не пустой, переменные — только из
+    текста по умолчанию и записаны правильно (1.29).
+
+    Переменные можно переставлять и убирать, но не придумывать новые
+    (`03-bot-texts.md`, «Соглашения»). Тексты бота — обычный текст без разметки
+    (форматирование — только сущностями дат), поэтому ошибка «форматирования» — это
+    фигурные скобки не вокруг переменной и служебные символы меток дат.
+    """
+    allowed = set(allowed_variables(catalogs, key))
+    if not text.strip():
+        raise TextError("Текст пустой — Telegram такое сообщение не отправит")
+    if DATE_MARK_START in text or DATE_MARK_END in text:
+        raise TextError("В тексте есть служебные символы, которые магазин использует для дат")
     unknown = variables_of(text) - allowed
     if unknown:
         names = ", ".join(f"{{{name}}}" for name in sorted(unknown))
-        raise TextError(f"В тексте {key} нельзя использовать {names}")
+        hint = ", ".join(f"{{{name}}}" for name in sorted(allowed)) or "нет"
+        raise TextError(f"В тексте {key} нельзя использовать {names}. Можно: {hint}")
+    stray = _STRAY_BRACE.search(_VARIABLE.sub("", text))
+    if stray:
+        raise TextError(
+            f"Фигурные скобки — только вокруг имени переменной, например {{brand_name}}; "
+            f"проверьте «{stray.group(0)}»"
+        )

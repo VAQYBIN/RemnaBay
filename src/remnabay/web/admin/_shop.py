@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 
 from remnabay.access import LOGIN_TTL, SESSION_TTL
 from remnabay.attention import attention
+from remnabay.bot import WebhookProblem
 from remnabay.checklist import (
     Checklist,
     ChecklistItem,
@@ -30,6 +31,10 @@ from remnabay.panel_sync import panel_available, sync_page
 from remnabay.queue import last_periodic_start
 from remnabay.shop import MAX_TESTERS, SHOP_SUPPORT_CONTACT, SHOP_TESTERS, ShopState, shop_state
 from remnabay.shop_settings import (
+    PANEL_OUTAGE_ALERT_AFTER,
+    PANEL_OUTAGE_ALERT_MINUTES,
+    PANEL_SYNC_INTERVAL,
+    PANEL_SYNC_MINUTES,
     SHOP_TIME_ZONE,
     SettingError,
     check_webhook_secret,
@@ -58,6 +63,14 @@ class WebhookDetailsOut(BaseModel):
     secret: str | None
 
 
+class BotWebhookDetailsOut(BaseModel):
+    # Бот опрашивает Telegram при разработке: вебхук не нужен
+    polling: bool
+    problem: WebhookProblem | None
+    # Ответ Telegram при отказе
+    message: str | None
+
+
 class BrandDetailsOut(BaseModel):
     name: bool
     mark: bool
@@ -74,6 +87,7 @@ class ItemOut(BaseModel):
     required: bool
     panel: PanelDetailsOut | None = None
     webhook: WebhookDetailsOut | None = None
+    bot_webhook: BotWebhookDetailsOut | None = None
     brand: BrandDetailsOut | None = None
     trial_enabled: bool | None = None
     username_prefix: PrefixDetailsOut | None = None
@@ -95,6 +109,8 @@ def _item_out(item: ChecklistItem) -> ItemOut:
             out.panel = PanelDetailsOut.model_validate(details)
         case ItemKey.WEBHOOK:
             out.webhook = WebhookDetailsOut.model_validate(details)
+        case ItemKey.BOT_WEBHOOK:
+            out.bot_webhook = BotWebhookDetailsOut.model_validate(details)
         case ItemKey.BRAND:
             out.brand = BrandDetailsOut.model_validate(details)
         case ItemKey.TRIAL:
@@ -131,6 +147,7 @@ async def _checklist(
         panel,
         webhook_url=settings.public_link(PANEL_WEBHOOK_PATH),
         webhook_secret=secret,
+        bot_webhook=request.app.state.bot_webhook,
         dev_mode=settings.dev_mode,
         providers=request.app.state.providers,
     )
@@ -299,7 +316,8 @@ async def update_login_settings(
 
 
 class PanelSettingsOut(BaseModel):
-    """«Панель»: адрес и секрет вебхука для панели (1.9), префикс имён (решение 0057)."""
+    """«Панель»: адрес и секрет вебхука для панели (1.9), префикс имён (решение 0057),
+    интервал сверки (4.8) и время до уведомления о недоступности (4.13)."""
 
     webhook_url: str
     # Нет — секрет не расшифровывается (сменили ENCRYPTION_KEY): задайте заново
@@ -314,6 +332,17 @@ class PanelSettingsOut(BaseModel):
     guide_refreshed_at: datetime | None
     # Пускает ли панель браузер на страницу подписки (12.16, 12.17); ответа не было — пусто
     webpage_allowed: bool | None
+    # Сверка всех подписок с панелью — раз в столько минут (4.8)
+    sync_interval_minutes: int
+    # Уведомление команды, если панель недоступна дольше стольких минут (4.13)
+    outage_alert_minutes: int
+
+
+class PanelIntervalsIn(BaseModel):
+    sync_interval_minutes: Annotated[int, Field(ge=PANEL_SYNC_MINUTES[0], le=PANEL_SYNC_MINUTES[1])]
+    outage_alert_minutes: Annotated[
+        int, Field(ge=PANEL_OUTAGE_ALERT_MINUTES[0], le=PANEL_OUTAGE_ALERT_MINUTES[1])
+    ]
 
 
 class UsernamePrefixIn(BaseModel):
@@ -338,6 +367,8 @@ async def _panel_settings(
     except SecretDecryptionError:
         secret = None
     prefix, locked = await username_prefix(session, dev_mode=settings.dev_mode)
+    sync_every = await get_setting(session, PANEL_SYNC_INTERVAL)
+    alert_after = await get_setting(session, PANEL_OUTAGE_ALERT_AFTER)
     await session.commit()
     return PanelSettingsOut(
         webhook_url=settings.public_link(PANEL_WEBHOOK_PATH),
@@ -347,6 +378,8 @@ async def _panel_settings(
         username_prefix_locked=locked,
         guide_refreshed_at=await last_refreshed_at(session),
         webpage_allowed=await get_setting(session, WEBPAGE_ALLOWED),
+        sync_interval_minutes=int(sync_every.total_seconds() // 60),
+        outage_alert_minutes=int(alert_after.total_seconds() // 60),
     )
 
 
@@ -363,6 +396,26 @@ async def panel_settings(
     request: Request, session: DbSession, settings: AppSettings, owner: Owner
 ) -> PanelSettingsOut:
     del owner
+    return await _panel_settings(request, session, settings)
+
+
+@router.put("/settings/panel/intervals", tags=["settings"])
+async def update_panel_intervals(
+    body: PanelIntervalsIn,
+    request: Request,
+    session: DbSession,
+    settings: AppSettings,
+    owner: Owner,
+) -> PanelSettingsOut:
+    """Интервал сверки (4.8) и время до уведомления о недоступности (4.13). Действуют
+    без перезапуска: воркер читает их при каждом планировании сверки и проверке связи."""
+    for setting, value in (
+        (PANEL_SYNC_INTERVAL, timedelta(minutes=body.sync_interval_minutes)),
+        (PANEL_OUTAGE_ALERT_AFTER, timedelta(minutes=body.outage_alert_minutes)),
+    ):
+        if await get_setting(session, setting) != value:
+            await set_setting(session, setting, value, member_id=owner.id)
+    await session.commit()
     return await _panel_settings(request, session, settings)
 
 

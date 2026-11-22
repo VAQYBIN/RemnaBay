@@ -875,16 +875,19 @@ async def test_0047_retry_window_restarts_after_panel_outage(queue_engine: Async
     панели окно отсчитывается заново, и операция снова повторяется, а не проваливается
     с первой же ошибкой."""
     FAILING.add("o1")
+    policy = dataclasses.replace(_WINDOW_POLICY, max_age=timedelta(seconds=1))
     task_id = await enqueue(queue_engine, panel_switch, LabelArgs(label="o1"))
 
-    await _outage_after_first_error(queue_engine, task_id, _WINDOW_POLICY, outage=0.6)
+    await _outage_after_first_error(queue_engine, task_id, policy, outage=1.2)
 
     async with AsyncSession(queue_engine) as session:
         attempts = await attempts_of(session, task_id)
     last_outage = max(a.number for a in attempts if a.result == AttemptResult.UNAVAILABLE)
     after = [a for a in attempts if a.number > last_outage]
-    # Окно 0,4 с при паузе 0,05 с: после простоя — несколько повторов, а не один
-    assert len(after) >= 4
+    # Без нового окна после простоя была бы ровно одна попытка: окно круга истекло во время
+    # простоя. Точное число повторов зависит от скорости машины — на загруженном CI цикл
+    # попытки бывает в разы дольше паузы 0,05 с, поэтому проверяем только «больше одной»
+    assert len(after) >= 2
     assert all(a.result == AttemptResult.ERROR for a in after)
 
 

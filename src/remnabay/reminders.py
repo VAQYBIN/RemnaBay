@@ -16,7 +16,7 @@
 """
 
 import enum
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
@@ -53,6 +53,10 @@ MAX_OFFSET_HOURS = 720
 # Момент окончания: «Подписка истекла» или «Пробный период закончился» (7.12, 7.13)
 END_OFFSET = 0
 TICK_EVERY = timedelta(minutes=1)
+# Насколько раньше прохода планирования может отсчитываться «момент уже прошёл» (7.18):
+# от того, когда магазин узнал дату окончания, но не дальше этого предела — иначе после
+# долгого перерыва ушли бы давно прошедшие напоминания
+_LEARNED_GRACE = timedelta(minutes=5)
 # Подписок за один проход: большая работа делится на части (4.28)
 PLAN_BATCH = 5000
 DISPATCH_BATCH = 1000
@@ -190,15 +194,18 @@ async def _plan(
     plan: Schedules,
     subscriptions: Sequence[_Row],
     now: datetime,
+    learned_at: Mapping[int, datetime] | None = None,
 ) -> None:
     """Момент каждого напоминания — дата окончания минус смещение (7.4). Момент, который
-    уже прошёл, не отправляется (7.18). Уже отправленное по этой дате окончания
-    повторно не планируется (7.8); отменённое раньше — планируется заново."""
+    уже прошёл, когда магазин узнал дату (`learned_at`, иначе — `now`), не отправляется
+    (7.18). Уже отправленное по этой дате окончания повторно не планируется (7.8);
+    отменённое раньше — планируется заново."""
     rows: list[dict[str, object]] = []
     for subscription_id, is_trial, expires_at in subscriptions:
+        planned_from = (learned_at or {}).get(subscription_id, now)
         for offset in plan.offsets(is_trial):
             due_at = expires_at - timedelta(hours=offset)
-            state = ReminderState.SCHEDULED if due_at > now else ReminderState.SKIPPED
+            state = ReminderState.SCHEDULED if due_at > planned_from else ReminderState.SKIPPED
             rows.append(
                 {
                     "subscription_id": subscription_id,
@@ -237,23 +244,43 @@ def _with_end(rows: Sequence[Row[int, bool, datetime | None]]) -> list[_Row]:
 
 async def plan_new(session: AsyncSession, now: datetime) -> int:
     """Планирует подписки, чья текущая дата окончания ещё не запланирована: признак —
-    нет сообщения в момент окончания по этой дате. Возвращает число подписок."""
+    нет действующего (не отменённого) сообщения в момент окончания по этой дате.
+
+    «Момент уже прошёл» (7.18) отсчитывается от того, когда магазин узнал дату, а не от
+    прохода: дата, которую узнали за минуту до момента напоминания, — не повод его
+    пропустить (7.9). Возвращает число подписок."""
     await _lock_planning(session)
     planned_end = exists().where(
         Reminder.subscription_id == Subscription.id,
         Reminder.expires_at == Subscription.expires_at,
         Reminder.offset_hours == END_OFFSET,
+        Reminder.state != ReminderState.CANCELLED,
     )
     rows = (
         await session.execute(
-            select(Subscription.id, Subscription.is_trial, Subscription.expires_at)
+            select(
+                Subscription.id,
+                Subscription.is_trial,
+                Subscription.expires_at,
+                Subscription.panel_synced_at,
+            )
             .where(_plannable(), ~planned_end)
             .order_by(Subscription.id)
             .limit(PLAN_BATCH)
         )
     ).all()
-    subscriptions = _with_end(rows)
-    await _plan(session, await schedules(session), subscriptions, now)
+    subscriptions: list[_Row] = [
+        (subscription_id, is_trial, expires_at)
+        for subscription_id, is_trial, expires_at, _ in rows
+        if expires_at is not None
+    ]
+    earliest = now - _LEARNED_GRACE
+    learned_at = {
+        subscription_id: min(now, max(synced_at, earliest))
+        for subscription_id, _, _, synced_at in rows
+        if synced_at is not None
+    }
+    await _plan(session, await schedules(session), subscriptions, now, learned_at)
     return len(subscriptions)
 
 

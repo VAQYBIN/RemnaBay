@@ -115,6 +115,8 @@ class JournalEntry(Base):
         CheckConstraint("(subject_type IS NULL) = (subject_id IS NULL)", name="subject_complete"),
         CheckConstraint("action <> ''", name="action_not_empty"),
         Index("ix_journal_entries_subject", "subject_type", "subject_id", "id"),
+        # Экран «Журнал» (4.35): новые сверху и период — по времени записи
+        Index("ix_journal_entries_occurred_at", "occurred_at", "id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)

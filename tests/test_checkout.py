@@ -21,6 +21,8 @@ from remnabay.domain.team import TeamMember, TeamRole
 from remnabay.journal import Subject, entries_for
 from remnabay.messaging import SendArgs
 from remnabay.payments import (
+    POLL_AFTER_EXPIRY,
+    POLL_INTERVAL,
     CatalogError,
     Checkout,
     ConnectionState,
@@ -476,6 +478,36 @@ async def test_3_29_polling_stops_24_hours_after_expiry(
     assert "payment.polling_stopped" in await _actions(db_session, payment)
 
 
+async def test_3_29_poll_settings_apply_without_restart(
+    db_session: AsyncSession,
+    providers: Providers,
+    provider: FakeProvider,
+    client: Client,
+    tariff: Tariff,
+) -> None:
+    """3.29: опрос берёт настройки при каждом проходе: следующий опрос ставится через
+    новый интервал, а окно после истечения счёта — новое, без перезапуска."""
+    payment = await open_invoice(db_session, providers, _purchase(client, tariff), now=NOW)
+    payment.expires_at = datetime.now(UTC) - timedelta(hours=2)
+    await put_setting(db_session, POLL_INTERVAL, timedelta(minutes=12))
+    await _run(db_session, providers, poll_invoice, payment)
+
+    [*_, next_poll] = await db_session.scalars(
+        select(QueueTask).where(QueueTask.name == "payments.poll").order_by(QueueTask.id)
+    )
+    delay = next_poll.run_at - datetime.now(UTC)
+    assert timedelta(minutes=11) < delay <= timedelta(minutes=12)
+
+    # Окно сузили до часа — счёт истёк два часа назад, опрос прекращается
+    await put_setting(db_session, POLL_AFTER_EXPIRY, timedelta(hours=1))
+    assert payment.provider_payment_id is not None
+    provider.set(payment.provider_payment_id, ProviderStatus.SUCCEEDED)
+    await _run(db_session, providers, poll_invoice, payment)
+
+    assert payment.state == PaymentState.PENDING
+    assert "payment.polling_stopped" in await _actions(db_session, payment)
+
+
 # --- Сверка суммы (3.39) ---
 
 
@@ -620,3 +652,26 @@ async def test_3_11_paid_but_not_applied_purchase_shares_operation(
     new = await open_invoice(db_session, providers, _purchase(client, tariff, "s-2"), now=NOW)
     assert new.operation_id == old.operation_id
     assert old.state == PaymentState.PAID
+
+
+async def test_3_10_3_11_operation_completed_by_payment_is_not_inherited(
+    db_session: AsyncSession, providers: Providers, client: Client, tariff: Tariff
+) -> None:
+    """3.10, 3.11: прежний счёт заменён, новый оплачен и применён — операция завершена.
+    Следующая покупка — новая операция, хотя заменённый счёт ещё может быть оплачен:
+    иначе она продлила бы прежнюю подписку, а команда получила бы ложное «оплачены оба
+    счёта». Поздняя оплата заменённого счёта по-прежнему относится к прежней операции."""
+    replaced = await open_invoice(db_session, providers, _purchase(client, tariff, "s-1"), now=NOW)
+    paid = await open_invoice(db_session, providers, _purchase(client, tariff, "s-2"), now=NOW)
+    paid.state = PaymentState.APPLIED
+    paid.applied_at = NOW
+    await db_session.flush()
+
+    later = NOW + timedelta(hours=1)
+    next_one = await open_invoice(
+        db_session, providers, _purchase(client, tariff, "s-3"), now=later
+    )
+
+    assert replaced.state == PaymentState.CANCELLED
+    assert replaced.operation_id == paid.operation_id
+    assert next_one.operation_id != paid.operation_id

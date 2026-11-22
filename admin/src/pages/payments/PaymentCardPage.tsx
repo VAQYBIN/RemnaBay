@@ -446,6 +446,17 @@ export function PaymentCardPage() {
                   {card.snapshot.name} · {card.snapshot.duration_days ?? '—'} дн. · устройств {card.snapshot.device_limit}
                 </Row>
               )}
+              {card.promo && (
+                <Row label="Промокод">
+                  <span className="font-mono">{card.promo.code}</span>{' '}
+                  <span className="tabular text-muted-foreground">
+                    · скидка{' '}
+                    {card.promo.discount_percent !== null
+                      ? `${card.promo.discount_percent}% (${formatMoney(card.promo.discount_amount, payment.currency)})`
+                      : formatMoney(card.promo.discount_amount, payment.currency)}
+                  </span>
+                </Row>
+              )}
               <Row label="Сумма счёта">
                 <span className="tabular">{formatMoney(payment.amount, payment.currency)}</span>
               </Row>

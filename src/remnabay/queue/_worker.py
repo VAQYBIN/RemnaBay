@@ -19,6 +19,7 @@
 import asyncio
 import contextlib
 import logging
+import time
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -31,6 +32,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import aliased
 
+from remnabay.db import database_unavailable, describe_error
 from remnabay.journal import Actor, JsonValue, Outcome, record
 from remnabay.queue._core import (
     Ending,
@@ -72,6 +74,9 @@ class WorkerConfig:
     # Запрос к панели внутри задачи — порядка 10 секунд (0036); задача целиком — дольше
     task_timeout: timedelta = timedelta(seconds=30)
     idle_in_transaction_timeout: timedelta = timedelta(seconds=60)
+    # Цикл воркера так долго не сделал ни одного шага без ошибки (например, база
+    # недоступна или шаг завис) — воркер потерял работоспособность (0073)
+    stall_limit: timedelta = timedelta(minutes=3)
 
     def __post_init__(self) -> None:
         if self.task_timeout >= self.idle_in_transaction_timeout:
@@ -79,6 +84,11 @@ class WorkerConfig:
                 "Таймаут задачи должен быть меньше таймаута простоя транзакции: иначе "
                 "PostgreSQL рвёт соединение у долгой задачи, и она перезапускается без "
                 "счёта попыток"
+            )
+        if self.stall_limit <= self.task_timeout:
+            raise ValueError(
+                "Предел простоя цикла должен быть больше таймаута задачи: иначе здоровая "
+                "долгая задача выглядит как зависший цикл"
             )
 
     @property
@@ -181,6 +191,17 @@ class TaskTimeoutError(Exception):
         super().__init__(f"Превышено время выполнения задачи ({timeout.total_seconds():g} с)")
 
 
+class WorkerStalledError(Exception):
+    """Цикл воркера дольше `stall_limit` не делает шагов без ошибки (0073).
+
+    Воркер останавливается с этой ошибкой, процесс завершается, и Docker
+    поднимает его заново (`restart: unless-stopped`).
+    """
+
+    def __init__(self, stalled_for: float) -> None:
+        super().__init__(f"Цикл воркера {stalled_for:.0f} с не делает шагов без ошибки")
+
+
 class _BrokenTransactionError(Exception):
     """Транзакция воркера сломалась после ошибки задачи — повтор назначается заново.
 
@@ -240,27 +261,68 @@ class Worker:
         self._config = config or WorkerConfig()
         self._unavailable = unavailable
         self._on_failed = on_failed
+        # База не отвечает: в лог пишется одна строка, а не трассировка на каждый шаг
+        self._database_lost = False
 
     async def run(self, stop: asyncio.Event) -> None:
-        """Работает, пока не выставлен `stop`; начатые задачи доделываются."""
-        async with asyncio.TaskGroup() as group:
-            for _ in range(self._config.concurrency):
-                group.create_task(self._loop(stop, self.run_one))
-            group.create_task(self._loop(stop, self._schedule_and_report))
+        """Работает, пока не выставлен `stop`; начатые задачи доделываются.
+
+        Если какой-то цикл дольше `stall_limit` не делает шагов без ошибки, прерывает
+        остальные циклы и бросает `WorkerStalledError`.
+        """
+        loops = self._config.concurrency + 1
+        # Когда каждый цикл последний раз сделал шаг без ошибки
+        progress = [time.monotonic()] * loops
+        try:
+            async with asyncio.TaskGroup() as group:
+                for index in range(self._config.concurrency):
+                    group.create_task(self._loop(stop, self.run_one, progress, index))
+                group.create_task(self._loop(stop, self._schedule_and_report, progress, loops - 1))
+                group.create_task(self._watch(stop, progress))
+        except ExceptionGroup as group:
+            # Циклы ловят свои ошибки сами: в группе может быть только остановка
+            # по простою — её и отдаём наружу без обёртки
+            stalled, rest = group.split(WorkerStalledError)
+            if stalled is None or rest is not None:
+                raise
+            raise stalled.exceptions[0] from None
 
     async def _schedule_and_report(self) -> bool:
         await self.schedule_periodic()
         return False
 
-    async def _loop(self, stop: asyncio.Event, step: Callable[[], Awaitable[bool]]) -> None:
+    async def _loop(
+        self,
+        stop: asyncio.Event,
+        step: Callable[[], Awaitable[bool]],
+        progress: list[float],
+        index: int,
+    ) -> None:
         while not stop.is_set():
             try:
                 worked = await step()
-            except Exception:
-                logger.exception("Сбой цикла воркера")
+            except Exception as error:
+                if not database_unavailable(error):
+                    logger.exception("Сбой цикла воркера")
+                elif not self._database_lost:
+                    self._database_lost = True
+                    logger.warning("Воркер ждёт базу: она не отвечает (%s)", describe_error(error))
                 worked = False
+            else:
+                progress[index] = time.monotonic()
+                if self._database_lost:
+                    self._database_lost = False
+                    logger.info("База снова отвечает, воркер продолжает работу")
             if not worked:
                 await _wait(stop, self._config.poll_interval)
+
+    async def _watch(self, stop: asyncio.Event, progress: list[float]) -> None:
+        limit = self._config.stall_limit.total_seconds()
+        while not stop.is_set():
+            stalled_for = time.monotonic() - min(progress)
+            if stalled_for > limit:
+                raise WorkerStalledError(stalled_for)
+            await _wait(stop, self._config.stall_limit / 4)
 
     async def schedule_periodic(self) -> None:
         """Ставит периодические задачи, чей слот ещё не занят."""

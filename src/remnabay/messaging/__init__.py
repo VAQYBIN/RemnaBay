@@ -33,6 +33,7 @@ from remnabay.messaging._sender import (
     RecipientNotStartedError,
     Sender,
     TelegramSender,
+    TelegramSession,
     TextEntity,
     UndeliverableError,
 )
@@ -166,6 +167,7 @@ __all__ = [
     "SendArgs",
     "Sender",
     "TelegramSender",
+    "TelegramSession",
     "TextEntity",
     "UndeliverableError",
     "buy_button",

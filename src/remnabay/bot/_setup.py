@@ -3,12 +3,13 @@
 import asyncio
 import logging
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import timedelta
+from enum import StrEnum
 
 from aiogram import Bot, Dispatcher
-from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.session.base import BaseSession
-from aiogram.exceptions import AiogramError
+from aiogram.exceptions import AiogramError, TelegramAPIError, TelegramNetworkError
 
 from remnabay.bot import _devices, _fallback, _guide, _help, _login, _promo, _shop
 from remnabay.bot._context import (
@@ -18,6 +19,7 @@ from remnabay.bot._context import (
     SessionFactory,
     context_middleware,
 )
+from remnabay.messaging import TelegramSession
 from remnabay.panel import PanelClient
 from remnabay.payments import Providers
 
@@ -28,8 +30,11 @@ REQUEST_TIMEOUT = timedelta(seconds=10)
 logger = logging.getLogger(__name__)
 
 
-def create_bot(token: str, *, session: BaseSession | None = None) -> Bot:
-    return Bot(token, session=session or AiohttpSession(timeout=REQUEST_TIMEOUT.total_seconds()))
+def create_bot(token: str, *, proxy: str | None = None, session: BaseSession | None = None) -> Bot:
+    """Бот веба. `proxy` — прокси для запросов к Telegram (1.28, 0074)."""
+    if session is None:
+        session = TelegramSession(timeout=REQUEST_TIMEOUT, proxy=proxy)
+    return Bot(token, session=session)
 
 
 def create_dispatcher(
@@ -63,19 +68,82 @@ def create_dispatcher(
     return dispatcher
 
 
-async def register_webhook(bot: Bot, dispatcher: Dispatcher, url: str, secret: str) -> None:
-    """Регистрирует вебхук бота. Ошибка не мешает запуску магазина: прежний вебхук,
-    если он был, продолжает работать, а причина видна в логе."""
-    try:
-        await bot.set_webhook(
-            url=url,
-            secret_token=secret,
-            allowed_updates=dispatcher.resolve_used_update_types(),
-        )
-    except AiogramError:
-        logger.exception("Не удалось зарегистрировать вебхук бота %s", url)
-    else:
-        logger.info("Вебхук бота зарегистрирован: %s", url)
+class WebhookProblem(StrEnum):
+    # Запрос не дошёл до Telegram: нет связи с сервера магазина или не работает прокси
+    NETWORK = "network"
+    # Telegram ответил отказом (например, адрес магазина не HTTPS)
+    REJECTED = "rejected"
+
+
+@dataclass
+class BotWebhookStatus:
+    """Вебхук бота в этом процессе веба — для чек-листа.
+
+    `polling` — при разработке бот опрашивает Telegram, вебхук не нужен (0051).
+    `message` — ответ Telegram при отказе.
+    """
+
+    registered: bool = False
+    polling: bool = False
+    problem: WebhookProblem | None = None
+    message: str | None = None
+
+
+@dataclass(frozen=True)
+class WebhookRetry:
+    """Паузы между попытками регистрации: от `first`, вдвое дольше, не больше `longest`."""
+
+    first: timedelta = timedelta(seconds=10)
+    longest: timedelta = timedelta(minutes=5)
+
+
+def _problem(error: AiogramError) -> tuple[WebhookProblem, str | None]:
+    if isinstance(error, TelegramNetworkError):
+        return WebhookProblem.NETWORK, None
+    if isinstance(error, TelegramAPIError):
+        return WebhookProblem.REJECTED, error.message
+    return WebhookProblem.REJECTED, str(error)
+
+
+async def register_webhook(
+    bot: Bot,
+    dispatcher: Dispatcher,
+    url: str,
+    secret: str,
+    status: BotWebhookStatus,
+    retry: WebhookRetry = WebhookRetry(),  # noqa: B008 — неизменяемое значение по умолчанию
+) -> None:
+    """Регистрирует вебхук бота; при ошибке повторяет, пока не получится.
+
+    Запускается фоновой задачей: магазин не ждёт Telegram при запуске. Прежний
+    вебхук, если он был, тем временем продолжает работать. Если связи с Telegram не
+    было (например, прокси заработал позже), вебхук регистрируется без перезапуска
+    магазина, а пока — пункт «Вебхук бота» в чек-листе называет причину.
+    """
+    delay = retry.first
+    while True:
+        try:
+            await bot.set_webhook(
+                url=url,
+                secret_token=secret,
+                allowed_updates=dispatcher.resolve_used_update_types(),
+            )
+        except AiogramError as error:
+            status.problem, status.message = _problem(error)
+            # Одна строка без трассировки: при долгом отсутствии связи попытки повторяются
+            logger.warning(
+                "Не удалось зарегистрировать вебхук бота %s (%s: %s), повтор через %.0f с",
+                url,
+                type(error).__name__,
+                error,
+                delay.total_seconds(),
+            )
+        else:
+            status.registered, status.problem, status.message = True, None, None
+            logger.info("Вебхук бота зарегистрирован: %s", url)
+            return
+        await asyncio.sleep(delay.total_seconds())
+        delay = min(delay * 2, retry.longest)
 
 
 class Polling:

@@ -6,7 +6,8 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from aiogram import Bot
-from fastapi import APIRouter, Request, Response, status
+from aiogram.exceptions import AiogramError
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
@@ -17,6 +18,7 @@ from remnabay.access import (
     LoginClosed,
     OidcAttempt,
     OidcError,
+    OidcNetworkError,
     PollStatus,
     TelegramOidc,
     create_session,
@@ -44,6 +46,12 @@ OIDC_COOKIE_PATH = "/api/admin/auth/telegram"
 OIDC_CALLBACK_URL = OIDC_COOKIE_PATH + "/callback"
 
 logger = logging.getLogger(__name__)
+# Подсказка в логе: на сервере без прямого доступа к Telegram нужен прокси (0074)
+_NO_TELEGRAM = (
+    "Нет связи с Telegram с сервера магазина. Если у сервера нет прямого доступа "
+    "к Telegram, задайте прокси в TELEGRAM_PROXY в .env"
+)
+
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
@@ -74,9 +82,16 @@ async def create_login_request(
     request: Request, response: Response, session: DbSession, settings: AppSettings
 ) -> LoginRequestOut:
     bot: Bot = request.app.state.bot
+    # Имя бота — до запроса входа: без связи с Telegram запрос не создаётся (1.28)
+    try:
+        me = await bot.me()
+    except AiogramError as error:
+        logger.warning("%s: %s", _NO_TELEGRAM, error)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, {"reason": "telegram_unreachable"}
+        ) from error
     new = await start_bot_login(session, now=datetime.now(UTC))
     await session.commit()
-    me = await bot.me()
     _set_cookie(response, settings, LOGIN_COOKIE, new.poll_key, new.expires_at)
     return LoginRequestOut(
         bot_link=f"https://t.me/{me.username}?start={new.start_parameter}",
@@ -169,6 +184,11 @@ async def telegram_callback(
         telegram_id = await oidc.telegram_id(
             code, attempt, settings.public_link(OIDC_CALLBACK_URL), now=now
         )
+    except OidcNetworkError as error:
+        logger.warning("%s: %s", _NO_TELEGRAM, error)
+        response = _login_error("network")
+        response.delete_cookie(OIDC_COOKIE, path=OIDC_COOKIE_PATH)
+        return response
     except OidcError as error:
         logger.warning("Вход через Telegram не подтверждён: %s", error)
         response = _login_error("failed")

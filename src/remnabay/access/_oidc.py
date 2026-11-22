@@ -23,6 +23,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 import httpx2
+import socksio
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
@@ -50,6 +51,15 @@ logger = logging.getLogger(__name__)
 
 class OidcError(Exception):
     """Telegram не подтвердил вход: код не обменялся или токен не прошёл проверку."""
+
+
+class OidcNetworkError(OidcError):
+    """Нет связи с Telegram с сервера магазина: таймаут, соединение не установлено или
+    прокси не соединил (1.28, 0074). Это не отказ Telegram."""
+
+
+# Сетевые ошибки, в том числе прокси: socksio — ответ SOCKS-прокси не по протоколу
+_NETWORK_ERRORS = (httpx2.TransportError, socksio.ProtocolError)
 
 
 def _b64url(data: bytes) -> str:
@@ -127,12 +137,14 @@ class TelegramOidc:
         client_id: str,
         client_secret: str,
         *,
+        proxy: str | None = None,
         transport: httpx2.AsyncBaseTransport | None = None,
     ) -> None:
         self.client_id = client_id
         self._secret = client_secret
+        # `proxy` — прокси для запросов к Telegram (1.28, 0074)
         self._http = httpx2.AsyncClient(
-            timeout=REQUEST_TIMEOUT.total_seconds(), transport=transport
+            timeout=REQUEST_TIMEOUT.total_seconds(), proxy=proxy, transport=transport
         )
         self._keys: dict[str, dict[str, Any]] = {}
         self._keys_at: datetime | None = None
@@ -174,6 +186,8 @@ class TelegramOidc:
                 },
             )
             body = _TokenResponse.model_validate_json(response.content)
+        except _NETWORK_ERRORS as error:
+            raise OidcNetworkError(f"нет связи с Telegram: {type(error).__name__}") from error
         except (httpx2.HTTPError, ValidationError) as error:
             raise OidcError(f"обмен кода не удался: {type(error).__name__}") from error
         # Ошибку Telegram отдаёт и с кодом 200 — в теле ответа
@@ -188,6 +202,8 @@ class TelegramOidc:
             try:
                 response = await self._http.get(JWKS_URL)
                 keys = response.json()["keys"]
+            except _NETWORK_ERRORS as error:
+                raise OidcNetworkError(f"нет связи с Telegram: {type(error).__name__}") from error
             except (httpx2.HTTPError, ValueError, KeyError) as error:
                 raise OidcError("ключи Telegram недоступны") from error
             self._keys = {key["kid"]: key for key in keys if "kid" in key}

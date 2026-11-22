@@ -1,14 +1,23 @@
 """Приём обновлений бота: учёт клиента, ответ на непонятное, вебхук Telegram (0051)."""
 
+import asyncio
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
+from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError
+from aiogram.methods import SetWebhook
 from aiogram.types import Chat, Message, Update
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from remnabay.bot import TELEGRAM_WEBHOOK_PATH
+from remnabay.bot import (
+    TELEGRAM_WEBHOOK_PATH,
+    BotWebhookStatus,
+    WebhookProblem,
+    WebhookRetry,
+    register_webhook,
+)
 from remnabay.crypto import SecretBox
 from remnabay.domain.clients import Client, TelegramAccount
 from remnabay.shop import SHOP_STATE, ShopState
@@ -155,3 +164,44 @@ async def test_0051_webhook_without_secret_is_rejected(shop: Shop, header: str |
 
     assert response.status_code == 401
     assert telegram.requests == []
+
+
+NO_PAUSE = WebhookRetry(first=timedelta(0), longest=timedelta(0))
+WEBHOOK_URL = "https://shop.example.com/webhooks/telegram"
+WEBHOOK_SECRET = "webhook-secret"  # noqa: S105 — значение для теста
+
+
+async def test_0076_webhook_registration_retried_until_telegram_answers(shop: Shop) -> None:
+    """1.7, 0076: нет связи с Telegram при запуске — регистрация повторяется без перезапуска."""
+    setting = SetWebhook(url=WEBHOOK_URL)
+    shop.telegram.failures[SetWebhook] = TelegramNetworkError(setting, "Request timeout error")
+    status = BotWebhookStatus()
+
+    await register_webhook(shop.bot, shop.dispatcher, WEBHOOK_URL, WEBHOOK_SECRET, status, NO_PAUSE)
+
+    attempts = [r for r in shop.telegram.requests if isinstance(r, SetWebhook)]
+    assert len(attempts) == 2
+    assert attempts[-1].url == WEBHOOK_URL
+    assert attempts[-1].secret_token == WEBHOOK_SECRET
+    assert status == BotWebhookStatus(registered=True)
+
+
+async def test_0076_webhook_problem_kept_until_success(shop: Shop) -> None:
+    """0076: пока Telegram отказывает, причина видна; задача остаётся ждать следующей попытки."""
+    setting = SetWebhook(url=WEBHOOK_URL)
+    shop.telegram.failures[SetWebhook] = TelegramBadRequest(
+        setting, "Bad Request: bad webhook: HTTPS url must be provided for webhook"
+    )
+    status = BotWebhookStatus()
+    retry = WebhookRetry(first=timedelta(hours=1))
+
+    task = asyncio.create_task(
+        register_webhook(shop.bot, shop.dispatcher, WEBHOOK_URL, WEBHOOK_SECRET, status, retry)
+    )
+    for _ in range(10):
+        await asyncio.sleep(0)
+    task.cancel()
+
+    assert not status.registered
+    assert status.problem == WebhookProblem.REJECTED
+    assert status.message == "Bad Request: bad webhook: HTTPS url must be provided for webhook"

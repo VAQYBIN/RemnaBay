@@ -14,9 +14,10 @@ from typing import Annotated
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, TypeAdapter
-from sqlalchemy import select
+from sqlalchemy import exists, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from remnabay import runtime
 from remnabay.domain.clients import Client
@@ -49,6 +50,10 @@ INVOICE_LIFETIME = ShopSetting("payments.invoice_lifetime", _DURATION, timedelta
 # ещё 24 часа после (3.29)
 POLL_INTERVAL = ShopSetting("payments.poll_interval", _DURATION, timedelta(minutes=5))
 POLL_AFTER_EXPIRY = ShopSetting("payments.poll_after_expiry", _DURATION, timedelta(hours=24))
+# Пределы для админки. Спека их не задаёт — предложение для владельца (решение не
+# принято): опрос — от раза в минуту до раза в час; после истечения — от часа до недели
+POLL_INTERVAL_MINUTES = (1, 60)
+POLL_AFTER_EXPIRY_HOURS = (1, 168)
 
 # Состояния, в которых счёт ещё может быть оплачен с точки зрения магазина
 _OPEN_INVOICE = (
@@ -126,8 +131,13 @@ async def _operation_of(
     """Номер операции нового счёта. Счёт той же операции, который ещё может быть
     оплачен или ждёт применения (в том числе истёкший, отменённый или оплаченный, но
     не применённый), передаёт ему свой номер: если оплатят оба, вторая оплата продлит
-    подписку, созданную первой, а не создаст вторую (3.11)."""
+    подписку, созданную первой, а не создаст вторую (3.11). Операция, которую уже
+    завершила применённая оплата, номер не передаёт: новый счёт — новая операция."""
     window = now - lifetime - await get_setting(session, POLL_AFTER_EXPIRY)
+    applied = aliased(Payment)
+    completed = exists().where(
+        applied.operation_id == Payment.operation_id, applied.applied_at.is_not(None)
+    )
     query = select(Payment.operation_id).where(
         Payment.client_id == checkout.client.id,
         Payment.purpose == checkout.purpose,
@@ -135,6 +145,7 @@ async def _operation_of(
         Payment.operation_id.is_not(None),
         Payment.state.in_((*_OPEN_INVOICE, PaymentState.PAID, PaymentState.PAID_NOT_APPLIED)),
         Payment.created_at >= window,
+        ~completed,
     )
     if checkout.subscription is None:
         query = query.where(Payment.subscription_id.is_(None))
@@ -377,6 +388,38 @@ async def provider_reported(
         payment.state = PaymentState.EXPIRED
         await journal_payment(session, payment, actor, "payment.expired")
     return payment
+
+
+@dataclass(frozen=True)
+class PayableInvoices:
+    """Счета провайдера, которые клиенты ещё могут оплатить: магазин опрашивает их до
+    истечения и ещё 24 часа после (3.29). `window_ends_at` — когда окно закончится
+    у последнего из них."""
+
+    count: int
+    window_ends_at: datetime | None
+
+
+async def payable_invoices(
+    session: AsyncSession, provider: str, *, now: datetime
+) -> PayableInvoices:
+    """Если отключить провайдера раньше конца окна, поздняя оплата не применится сама,
+    пока ключи не введут снова (3.42)."""
+    after = await get_setting(session, POLL_AFTER_EXPIRY)
+    count, latest = (
+        await session.execute(
+            select(func.count(), func.max(Payment.expires_at)).where(
+                Payment.provider == provider,
+                Payment.provider_payment_id.is_not(None),
+                # Отказ ставится только по сообщению провайдера — такой счёт у него
+                # закрыт. Истёкший и отменённый у провайдера могут быть ещё открыты
+                Payment.state.in_(set(_OPEN_INVOICE) - {PaymentState.DECLINED}),
+                # Окно опроса — то же, что у poll_invoice
+                Payment.expires_at >= now - after,
+            )
+        )
+    ).one()
+    return PayableInvoices(count=count, window_ends_at=latest + after if latest else None)
 
 
 @task("payments.poll", InvoiceArgs, needs_attention=False)

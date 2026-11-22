@@ -1,6 +1,5 @@
 """«Применить в Telegram»: имя, описания и аватар бота из бренда (1.27, решения 0058, 0059)."""
 
-import struct
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -18,18 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from remnabay.brand import AssetKind, TelegramApplyError, check_avatar, save_asset
 from remnabay.domain.team import TeamMember, TeamRole
 from remnabay.journal import Subject, entries_for
-from tests.brand_support import make_svg
+from tests.brand_support import make_jpeg, make_svg
 from tests.domain_support import add
 from tests.web_support import Shop, running_shop
 
 URL = "/api/admin/settings/brand/telegram"
-
-
-def make_jpeg(width: int = 640, height: int = 640) -> bytes:
-    """Заголовок JPEG с кадром нужного размера — для проверки формата и размера."""
-    app0 = b"\xff\xe0" + struct.pack(">H", 16) + b"JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
-    sof = b"\xff\xc0" + struct.pack(">HBHHB", 17, 8, height, width, 3) + b"\x01\x22\x00" * 3
-    return b"\xff\xd8" + app0 + sof + b"\xff\xd9"
 
 
 @pytest.fixture

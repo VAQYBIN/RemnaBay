@@ -2,8 +2,10 @@
 # Один образ, две роли: «веб» и «воркер»; роль задаётся командой запуска (0026).
 # Версии базовых образов закреплены точными тегами (0027).
 
-# Сборка админки: Node нужен только здесь, в итоговом образе его нет (0025)
-FROM node:24.21.0-trixie-slim AS admin
+# Сборка админки: Node нужен только здесь, в итоговом образе его нет (0025).
+# Результат — статика, одинаковая для всех архитектур: собирается на платформе
+# сборщика, без эмуляции arm64
+FROM --platform=$BUILDPLATFORM node:24.21.0-trixie-slim AS admin
 WORKDIR /admin
 COPY admin/package.json admin/package-lock.json ./
 RUN npm ci
@@ -36,6 +38,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked
 
 COPY --from=admin /admin/dist ./admin/dist
+
+# Полный номер сборки для «О программе», например 0.1.0-rc.4 (решение 0076).
+# Задаётся при выпуске по тегу; в конце файла, чтобы не сбрасывать кэш слоёв выше
+ARG REMNABAY_IMAGE_VERSION=""
+ENV REMNABAY_IMAGE_VERSION=$REMNABAY_IMAGE_VERSION
 
 ENV PATH="/app/.venv/bin:$PATH"
 USER remnabay

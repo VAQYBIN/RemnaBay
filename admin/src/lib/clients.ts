@@ -17,7 +17,7 @@ export const REQUEST_STATES: Record<Schemas['RefundRequestState'], string> = {
 }
 
 /** Записи журнала по клиенту — понятными словами (10.2, 10.7). */
-const JOURNAL: Record<string, string> = {
+export const JOURNAL: Record<string, string> = {
   'subscription.created': 'Подписка создана',
   'subscription.purchased': 'Подписка куплена поверх триала',
   'subscription.renewed': 'Подписка продлена',

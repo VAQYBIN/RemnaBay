@@ -16,6 +16,7 @@ from sqlalchemy import Select, select
 from remnabay.attention import attention
 from remnabay.domain.clients import Client, TelegramAccount
 from remnabay.domain.payments import Payment, PaymentPurpose, PaymentState, Refund
+from remnabay.domain.promo import PromoCode, PromoKind
 from remnabay.domain.subscriptions import Subscription
 from remnabay.domain.tariffs import Tariff, TariffState
 from remnabay.domain.team import TeamMember, TeamRole
@@ -164,6 +165,17 @@ class SnapshotOut(BaseModel):
     device_limit: int
 
 
+class PaymentPromoOut(BaseModel):
+    """Промокод платежа (А5, 4.21): код, вид и скидка, зафиксированная в платеже."""
+
+    code: str
+    kind: PromoKind
+    # Процент скидки — у промокода вида «скидка в процентах»
+    discount_percent: int | None
+    # Скидка в валюте учёта, как она вошла в сумму счёта
+    discount_amount: Decimal
+
+
 type _Action = Literal["retry", "apply_as_new", "resolve", "bind", "refund"]
 
 
@@ -179,6 +191,8 @@ class PaymentCardOut(BaseModel):
     payment: PaymentRow
     subscription: SubscriptionRef | None
     snapshot: SnapshotOut | None
+    # Промокода не было — пусто
+    promo: PaymentPromoOut | None
     paid_amount: Decimal | None
     paid_currency: str | None
     provider: str | None
@@ -365,6 +379,20 @@ async def _refund(session: DbSession, payment_id: int) -> RefundOut | None:
     )
 
 
+async def _promo(session: DbSession, payment: Payment) -> PaymentPromoOut | None:
+    if payment.promo_code_id is None:
+        return None
+    promo = await session.get(PromoCode, payment.promo_code_id)
+    if promo is None:
+        return None
+    return PaymentPromoOut(
+        code=promo.code,
+        kind=promo.kind,
+        discount_percent=promo.discount_percent,
+        discount_amount=payment.discount_amount,
+    )
+
+
 async def _card(session: DbSession, payment_id: int, member: TeamMember) -> PaymentCardOut:
     try:
         card = await payment_card(session, payment_id)
@@ -395,6 +423,7 @@ async def _card(session: DbSession, payment_id: int, member: TeamMember) -> Paym
         if subscription is not None
         else None,
         snapshot=snapshot,
+        promo=await _promo(session, payment),
         paid_amount=payment.paid_amount,
         paid_currency=payment.paid_currency,
         provider=payment.provider,

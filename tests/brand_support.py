@@ -1,4 +1,4 @@
-"""Файлы логотипов для тестов: настоящие PNG и SVG нужного размера."""
+"""Файлы логотипов для тестов: настоящие PNG и SVG нужного размера, заголовок JPEG."""
 
 import struct
 import zlib
@@ -27,3 +27,10 @@ def make_svg(width: float = 64, height: float = 64) -> bytes:
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}">'
         f'<rect width="{width}" height="{height}" fill="#1fa4a0"/></svg>'
     ).encode()
+
+
+def make_jpeg(width: int = 640, height: int = 640) -> bytes:
+    """Заголовок JPEG с кадром нужного размера — для проверки формата и размера."""
+    app0 = b"\xff\xe0" + struct.pack(">H", 16) + b"JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+    sof = b"\xff\xc0" + struct.pack(">HBHHB", 17, 8, height, width, 3) + b"\x01\x22\x00" * 3
+    return b"\xff\xd8" + app0 + sof + b"\xff\xd9"
