@@ -39,6 +39,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 COPY --from=admin /admin/dist ./admin/dist
 
+# Полный номер сборки для «О программе», например 0.1.0-rc.4 (решение 0076).
+# Задаётся при выпуске по тегу; в конце файла, чтобы не сбрасывать кэш слоёв выше
+ARG REMNABAY_IMAGE_VERSION=""
+ENV REMNABAY_IMAGE_VERSION=$REMNABAY_IMAGE_VERSION
+
 ENV PATH="/app/.venv/bin:$PATH"
 USER remnabay
 EXPOSE 8000

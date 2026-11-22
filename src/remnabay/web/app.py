@@ -26,7 +26,7 @@ from remnabay.bot import (
 )
 from remnabay.config import Settings, load_settings
 from remnabay.crypto import SecretBox
-from remnabay.db import create_engine, create_session_factory
+from remnabay.db import create_engine, create_session_factory, describe_error
 from remnabay.healthcheck import HEALTH_PATH
 from remnabay.panel import PanelClient
 from remnabay.payments import Providers
@@ -45,13 +45,10 @@ from remnabay.web.admin import LOGIN_PAGE_PATH
 
 # Меньше интервала проверки здоровья в Docker, чтобы ответ успевал прийти
 HEALTH_DB_TIMEOUT_SECONDS = 3.0
+# Пауза между попытками дождаться базы при запуске без самоконтроля (разработка)
+DATABASE_RETRY = timedelta(seconds=15)
 
 logger = logging.getLogger(__name__)
-
-
-def _describe_error(exc: BaseException) -> str:
-    message = str(exc).strip()
-    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
 
 class HealthStatus(BaseModel):
@@ -89,11 +86,41 @@ async def _watch_database(engine: AsyncEngine, watchdog: Watchdog) -> None:
             logger.critical(
                 "Веб потерял работоспособность и завершается: база не отвечает дольше %.0f с (%s)",
                 watchdog.lost_after.total_seconds(),
-                _describe_error(error),
+                describe_error(error),
             )
             watchdog.on_lost()
             return
         await asyncio.sleep(watchdog.interval.total_seconds())
+
+
+async def _wait_for_database(engine: AsyncEngine, watchdog: Watchdog | None) -> bool:
+    """Запуск веба ждёт базу: после самоперезапуска (0073) она может быть ещё недоступна.
+
+    Пока ждём — одна строка в логе на попытку, без трассировки (решение 0076). Если
+    база не ответила за `lost_after` самоконтроля, веб завершается, как при потере
+    работоспособности, и Docker поднимает его заново. `False` — база так и не ответила.
+    """
+    interval = (watchdog.interval if watchdog else DATABASE_RETRY).total_seconds()
+    started = time.monotonic()
+    while (error := await _database_available(engine)) is not None:
+        if (
+            watchdog is not None
+            and time.monotonic() - started > watchdog.lost_after.total_seconds()
+        ):
+            logger.critical(
+                "Веб не запустился и завершается: база не отвечает дольше %.0f с (%s)",
+                watchdog.lost_after.total_seconds(),
+                describe_error(error),
+            )
+            watchdog.on_lost()
+            return False
+        logger.warning(
+            "Веб ждёт базу: она не отвечает (%s), повтор через %.0f с",
+            describe_error(error),
+            interval,
+        )
+        await asyncio.sleep(interval)
+    return True
 
 
 def create_app(
@@ -136,7 +163,8 @@ def create_app(
     async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         polling: Polling | None = None
         registering: asyncio.Task[None] | None = None
-        if startup:
+        ready = not startup or await _wait_for_database(engine, watchdog)
+        if startup and ready:
             async with sessions() as session:
                 await ensure_owner(session, settings.owner_telegram_id)
                 secret = await generated_secret(session, box, TELEGRAM_WEBHOOK_SECRET)
@@ -150,7 +178,9 @@ def create_app(
                 registering = asyncio.create_task(
                     register_webhook(bot, dispatcher, url, secret, bot_webhook)
                 )
-        watching = asyncio.create_task(_watch_database(engine, watchdog)) if watchdog else None
+        watching = (
+            asyncio.create_task(_watch_database(engine, watchdog)) if watchdog and ready else None
+        )
         yield
         for task in (watching, registering):
             if task is not None:
@@ -201,7 +231,7 @@ def create_app(
         if error is not None:
             # Одна строка без трассировки: проверка идёт каждые 15 секунд,
             # и при недоступной базе трассировки заполнили бы весь лог
-            logger.warning("Проверка здоровья: база недоступна (%s)", _describe_error(error))
+            logger.warning("Проверка здоровья: база недоступна (%s)", describe_error(error))
             response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
             return HealthStatus(status="unavailable")
         return HealthStatus(status="ok")

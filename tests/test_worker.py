@@ -109,6 +109,28 @@ async def test_0073_worker_stops_when_database_unreachable(tmp_path: Path) -> No
     assert not (tmp_path / "heartbeat").exists()
 
 
+async def test_0076_unreachable_database_logged_once_without_traceback(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """0076: пока база не отвечает, воркер пишет одну строку без трассировки, а не по
+    трассировке на каждый шаг цикла."""
+    engine = create_async_engine(UNREACHABLE_DATABASE)
+    try:
+        queue = make_worker(engine, config=STALL_CONFIG)
+        with pytest.raises(ExceptionGroup):
+            await asyncio.wait_for(
+                run_worker(asyncio.Event(), tmp_path / "heartbeat", interval=0.01, queue=queue),
+                timeout=5,
+            )
+    finally:
+        await engine.dispose()
+
+    waiting = [r for r in caplog.records if r.getMessage().startswith("Воркер ждёт базу")]
+    assert len(waiting) == 1
+    assert "\n" not in waiting[0].getMessage()
+    assert not [r for r in caplog.records if r.getMessage() == "Сбой цикла воркера"]
+
+
 async def test_0073_healthy_worker_keeps_running(tmp_path: Path, queue_engine: AsyncEngine) -> None:
     """0073: при живой базе воркер работает дольше предела простоя и не останавливается."""
     stop = asyncio.Event()

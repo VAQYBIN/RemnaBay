@@ -32,6 +32,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import aliased
 
+from remnabay.db import database_unavailable, describe_error
 from remnabay.journal import Actor, JsonValue, Outcome, record
 from remnabay.queue._core import (
     Ending,
@@ -260,6 +261,8 @@ class Worker:
         self._config = config or WorkerConfig()
         self._unavailable = unavailable
         self._on_failed = on_failed
+        # База не отвечает: в лог пишется одна строка, а не трассировка на каждый шаг
+        self._database_lost = False
 
     async def run(self, stop: asyncio.Event) -> None:
         """Работает, пока не выставлен `stop`; начатые задачи доделываются.
@@ -298,11 +301,18 @@ class Worker:
         while not stop.is_set():
             try:
                 worked = await step()
-            except Exception:
-                logger.exception("Сбой цикла воркера")
+            except Exception as error:
+                if not database_unavailable(error):
+                    logger.exception("Сбой цикла воркера")
+                elif not self._database_lost:
+                    self._database_lost = True
+                    logger.warning("Воркер ждёт базу: она не отвечает (%s)", describe_error(error))
                 worked = False
             else:
                 progress[index] = time.monotonic()
+                if self._database_lost:
+                    self._database_lost = False
+                    logger.info("База снова отвечает, воркер продолжает работу")
             if not worked:
                 await _wait(stop, self._config.poll_interval)
 

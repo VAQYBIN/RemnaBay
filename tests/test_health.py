@@ -83,3 +83,27 @@ def test_0073_web_keeps_running_with_database() -> None:
         time.sleep(FAST_WATCH["lost_after"].total_seconds() * 3)
 
     assert lost == []
+
+
+@pytest.mark.usefixtures("valid_env")
+def test_0076_web_start_waits_for_database_without_traceback(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """0073, 0076: при запуске база не отвечает — веб ждёт её, по строке в логе на попытку
+    без трассировки, а за предел самоконтроля завершается, чтобы Docker поднял его заново."""
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@127.0.0.1:1/none")
+    lost: list[bool] = []
+    watchdog = Watchdog(on_lost=lambda: lost.append(True), **FAST_WATCH)
+
+    with TestClient(create_app(load_settings(env_file=None), startup=True, watchdog=watchdog)):
+        pass
+
+    assert lost == [True]
+    waiting = [r for r in caplog.records if r.getMessage().startswith("Веб ждёт базу")]
+    assert waiting
+    assert any(
+        r.levelno == logging.CRITICAL and "Веб не запустился" in r.getMessage()
+        for r in caplog.records
+    )
+    assert all(r.exc_info is None for r in caplog.records)
+    assert all("\n" not in r.getMessage() for r in waiting)
