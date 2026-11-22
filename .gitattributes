@@ -1,0 +1,6 @@
+# Статистика языков на GitHub (linguist): считать только код RemnaBay.
+# Скиллы агента — чужой код, поставленный как есть (решение 0040)
+.agents/** linguist-vendored
+# Файлы, которые генерируются из бэкенда (scripts/admin-codegen.sh)
+admin/src/api/schema.d.ts linguist-generated
+admin/src/styles/default-brand.css linguist-generated
