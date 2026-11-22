@@ -36,7 +36,9 @@ from tests.domain_support import add, make_client, make_payment, make_subscripti
 from tests.panel_support import FakePanel, FakeSender, fake_runtime
 
 TELEGRAM_ID = 777
-PAID_AT = datetime(2026, 10, 7, 12, 0, tzinfo=UTC)
+# Сутки назад, а не фиксированная дата: новая дата окончания должна быть в будущем —
+# панель, как и подставная в тестах, дату в прошлом не принимает
+PAID_AT = datetime.now(UTC).replace(minute=0, second=0, microsecond=0) - timedelta(days=1)
 SQUAD = UUID("6f0b2c3e-1d2a-4b5c-8d9e-0f1a2b3c4d5e")
 
 

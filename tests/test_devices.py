@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx2
@@ -50,7 +50,8 @@ async def _subscription(
     subscription = make_subscription(client, None, panel_user_id=user_id)
     subscription.name = name
     subscription.panel_status = PanelUserStatus.ACTIVE
-    subscription.expires_at = datetime(2026, 12, 1, tzinfo=UTC)
+    # Через месяц, а не фиксированная дата: подписка должна оставаться активной
+    subscription.expires_at = datetime.now(UTC) + timedelta(days=30)
     await add(shop.session, subscription)
     shop.panel.add_user(id=user_id, hwidDeviceLimit=3, shortUuid=subscription.panel_short_uuid)
     return subscription

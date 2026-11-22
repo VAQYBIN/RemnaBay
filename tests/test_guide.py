@@ -2,7 +2,7 @@
 3.6; /help; решения 0019, 0043, 0058)."""
 
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -71,7 +71,8 @@ async def _subscription(
     subscription = make_subscription(client, None, panel_user_id=user_id)
     subscription.name = name
     subscription.panel_status = PanelUserStatus.ACTIVE
-    subscription.expires_at = datetime(2026, 12, 1, tzinfo=UTC)
+    # Через месяц, а не фиксированная дата: подписка должна оставаться активной
+    subscription.expires_at = datetime.now(UTC) + timedelta(days=30)
     await add(shop.session, subscription)
     return subscription
 
