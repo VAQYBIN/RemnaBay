@@ -62,11 +62,17 @@ def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSessi
     return async_sessionmaker(engine, expire_on_commit=False)
 
 
+# Operator Intervention: база останавливается (admin, crash) или ещё запускается
+_SHUTDOWN_STATES = frozenset({"57P01", "57P02", "57P03"})
+
+
 def database_unavailable(error: BaseException) -> bool:
     """Ошибка значит, что база не отвечает (нет соединения), а не что запрос неверен.
 
-    У psycopg отказ соединения — `OperationalError` без кода SQLSTATE; ошибки с кодом
-    (например, взаимная блокировка) приходят от работающей базы.
+    У psycopg отказ соединения — `OperationalError` без кода SQLSTATE. С кодом база
+    сообщает о том же, когда соединение потеряно (класс 08) или она останавливается
+    либо ещё запускается (57P01–57P03). Остальные коды (например, взаимная
+    блокировка) приходят от работающей базы.
     """
     if isinstance(error, OSError | TimeoutError):
         return True
@@ -75,7 +81,10 @@ def database_unavailable(error: BaseException) -> bool:
     if error.connection_invalidated:
         return True
     original = error.orig
-    return isinstance(original, psycopg.OperationalError) and original.sqlstate is None
+    if not isinstance(original, psycopg.OperationalError):
+        return False
+    state = original.sqlstate
+    return state is None or state.startswith("08") or state in _SHUTDOWN_STATES
 
 
 def describe_error(error: BaseException) -> str:
