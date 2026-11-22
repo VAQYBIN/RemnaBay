@@ -66,22 +66,30 @@ services:
       interval: 15s
       timeout: 10s
       retries: 3
-      start_period: 15s
+      # Запуск на слабом сервере (1 vCPU) — до пары минут: проверки в это время
+      # не считаются неудачными, а первая успешная сразу делает сервис здоровым
+      start_period: 120s
 
   worker:
     <<: *app
     command: ["worker"]
     # По SIGTERM воркер доделывает начатые задачи: даём больше таймаута задачи (30 с)
     stop_grace_period: 45s
+    # Воркер запускается после веба: на слабом сервере они не делят процессор при
+    # запуске, и бот с админкой готовы раньше
     depends_on:
       migrate:
         condition: service_completed_successfully
+      web:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "remnabay", "healthcheck", "worker"]
       interval: 15s
       timeout: 10s
       retries: 3
-      start_period: 15s
+      # Запуск на слабом сервере (1 vCPU) — до пары минут: проверки в это время
+      # не считаются неудачными, а первая успешная сразу делает сервис здоровым
+      start_period: 120s
 
 volumes:
   db-data:
